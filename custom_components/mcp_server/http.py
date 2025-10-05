@@ -12,25 +12,42 @@ from mcp.server import Server
 _LOGGER = logging.getLogger(__name__)
 
 
+def _get_protected_resource_metadata(base_url: str) -> dict[str, Any]:
+    """Generate OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
+    return {
+        "resource": base_url,
+        "authorization_servers": [base_url],
+        "bearer_methods_supported": ["header"],
+        "resource_signing_alg_values_supported": ["RS256"],
+        "resource_documentation": f"{base_url}/api/mcp",
+    }
+
+
 class MCPProtectedResourceMetadataView(HomeAssistantView):
-    """OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728)."""
+    """OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728) at root."""
 
     url = "/.well-known/oauth-protected-resource"
-    name = "api:mcp:metadata"
+    name = "api:mcp:metadata:root"
     requires_auth = False
 
     async def get(self, request: web.Request) -> web.Response:
         """Return protected resource metadata."""
         base_url = str(request.url.origin())
+        metadata = _get_protected_resource_metadata(base_url)
+        return web.json_response(metadata)
 
-        metadata = {
-            "resource": base_url,
-            "authorization_servers": [base_url],
-            "bearer_methods_supported": ["header"],
-            "resource_signing_alg_values_supported": ["RS256"],
-            "resource_documentation": f"{base_url}/api/mcp",
-        }
 
+class MCPSubpathProtectedResourceMetadataView(HomeAssistantView):
+    """OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728) with /mcp suffix."""
+
+    url = "/.well-known/oauth-protected-resource/mcp"
+    name = "api:mcp:metadata:mcp"
+    requires_auth = False
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Return protected resource metadata with /mcp suffix."""
+        base_url = str(request.url.origin())
+        metadata = _get_protected_resource_metadata(base_url)
         return web.json_response(metadata)
 
 

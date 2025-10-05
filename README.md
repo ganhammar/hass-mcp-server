@@ -39,21 +39,27 @@ This plugin requires [hass-oidc-auth](https://github.com/ganhammar/hass-oidc-aut
 
 ## Usage with Claude Desktop
 
-Add to your Claude Desktop configuration:
+1. First, register an OIDC client in Home Assistant:
+   - Go to Developer Tools → Actions
+   - Call the `oidc_provider.register_client` action:
+     ```yaml
+     client_id: claude-desktop
+     client_name: Claude Desktop
+     redirect_uris:
+       - https://claude.ai/oauth/callback
+     ```
+   - Save the generated `client_secret`
 
-```json
-{
-  "mcpServers": {
-    "home-assistant": {
-      "url": "https://your-home-assistant.com/mcp",
-      "auth": {
-        "type": "oidc",
-        "discovery_url": "https://your-home-assistant.com/.well-known/openid-configuration"
-      }
-    }
-  }
-}
-```
+2. Configure Claude Desktop as a custom connector:
+   - Open Claude Desktop settings
+   - Navigate to Connectors
+   - Click "Add custom connector"
+   - Enter your MCP server URL: `https://your-home-assistant.com/api/mcp`
+   - Configure OAuth:
+     - Client ID: `claude-desktop`
+     - Client Secret: (from step 1)
+     - Authorization URL: `https://your-home-assistant.com/auth/oidc/authorize`
+     - Token URL: `https://your-home-assistant.com/auth/oidc/token`
 
 ## License
 

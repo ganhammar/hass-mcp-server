@@ -6,10 +6,33 @@ from typing import Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.oidc_provider.token_validator import validate_access_token
 from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class MCPProtectedResourceMetadataView(HomeAssistantView):
+    """OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728)."""
+
+    url = "/.well-known/oauth-protected-resource"
+    name = "api:mcp:metadata"
+    requires_auth = False
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Return protected resource metadata."""
+        base_url = str(request.url.origin())
+
+        metadata = {
+            "resource": base_url,
+            "authorization_servers": [base_url],
+            "bearer_methods_supported": ["header"],
+            "resource_signing_alg_values_supported": ["RS256"],
+            "resource_documentation": f"{base_url}/api/mcp",
+        }
+
+        return web.json_response(metadata)
 
 
 class MCPEndpointView(HomeAssistantView):
@@ -17,15 +40,33 @@ class MCPEndpointView(HomeAssistantView):
 
     url = "/api/mcp"
     name = "api:mcp"
-    requires_auth = True
+    requires_auth = False
 
     def __init__(self, hass: HomeAssistant, server: Server) -> None:
         """Initialize the MCP endpoint."""
         self.hass = hass
         self.server = server
 
+    def _validate_token(self, request: web.Request) -> dict[str, Any] | None:
+        """Validate the OAuth bearer token."""
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return None
+
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        return validate_access_token(self.hass, token)
+
     async def post(self, request: web.Request) -> web.Response:
         """Handle POST requests for MCP messages."""
+        # Validate OAuth token
+        token_payload = self._validate_token(request)
+        if not token_payload:
+            return web.json_response(
+                {"error": "invalid_token", "error_description": "Invalid or missing token"},
+                status=401,
+                headers={"WWW-Authenticate": 'Bearer realm="MCP Server"'},
+            )
+
         try:
             # Parse JSON-RPC message
             body = await request.json()

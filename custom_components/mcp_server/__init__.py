@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
 from .const import DOMAIN
-from .http import MCPEndpointView
+from .http import MCPEndpointView, MCPProtectedResourceMetadataView
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +26,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     server = Server("home-assistant-mcp-server")
     hass.data[DOMAIN]["server"] = server
 
-    # Register HTTP endpoint
+    # Register HTTP endpoints
+    hass.http.register_view(MCPProtectedResourceMetadataView())
     hass.http.register_view(MCPEndpointView(hass, server))
 
     _LOGGER.info("MCP Server initialized at /api/mcp")

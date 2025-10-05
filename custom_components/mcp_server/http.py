@@ -6,7 +6,6 @@ from typing import Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.oidc_provider.token_validator import validate_access_token
 from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
@@ -54,7 +53,17 @@ class MCPEndpointView(HomeAssistantView):
             return None
 
         token = auth_header[7:]  # Remove "Bearer " prefix
-        return validate_access_token(self.hass, token)
+
+        # Import dynamically to avoid circular dependency
+        try:
+            from homeassistant.components.oidc_provider.token_validator import (
+                validate_access_token,
+            )
+
+            return validate_access_token(self.hass, token)
+        except ImportError:
+            _LOGGER.error("OIDC provider integration not found")
+            return None
 
     async def post(self, request: web.Request) -> web.Response:
         """Handle POST requests for MCP messages."""

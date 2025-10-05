@@ -1,0 +1,13 @@
+{
+  "domain": "mcp_server",
+  "name": "MCP Server",
+  "codeowners": ["@ganhammar"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/ganhammar/hass-mcp-server",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/ganhammar/hass-mcp-server/issues",
+  "requirements": ["mcp>=1.0.0"],
+  "version": "0.1.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "MCP Server for Home Assistant",
+  "render_readme": true,
+  "filename": "mcp_server"
+}

@@ -56,13 +56,13 @@ class MCPEndpointView(HomeAssistantView):
 
         # Import dynamically to avoid circular dependency
         try:
-            from homeassistant.components.oidc_provider.token_validator import (
+            from custom_components.oidc_provider.token_validator import (
                 validate_access_token,
             )
 
             return validate_access_token(self.hass, token)
-        except ImportError:
-            _LOGGER.error("OIDC provider integration not found")
+        except ImportError as e:
+            _LOGGER.error("OIDC provider integration not found: %s", e)
             return None
 
     async def post(self, request: web.Request) -> web.Response:

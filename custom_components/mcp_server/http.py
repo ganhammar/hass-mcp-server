@@ -87,10 +87,15 @@ class MCPEndpointView(HomeAssistantView):
         # Validate OAuth token
         token_payload = self._validate_token(request)
         if not token_payload:
+            base_url = str(request.url.origin())
+            resource_metadata_url = f"{base_url}/.well-known/oauth-protected-resource"
+            www_authenticate = (
+                f'Bearer realm="MCP Server", resource_metadata="{resource_metadata_url}"'
+            )
             return web.json_response(
                 {"error": "invalid_token", "error_description": "Invalid or missing token"},
                 status=401,
-                headers={"WWW-Authenticate": 'Bearer realm="MCP Server"'},
+                headers={"WWW-Authenticate": www_authenticate},
             )
 
         try:

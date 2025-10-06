@@ -54,7 +54,7 @@ class MCPProtectedResourceMetadataView(HomeAssistantView):
 class MCPSubpathProtectedResourceMetadataView(HomeAssistantView):
     """OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728) with /mcp suffix."""
 
-    url = "/.well-known/oauth-protected-resource/mcp"
+    url = "/.well-known/oauth-protected-resource/api/mcp"
     name = "api:mcp:metadata:mcp"
     requires_auth = False
 

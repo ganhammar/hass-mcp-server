@@ -1,6 +1,6 @@
 {
   "domain": "mcp_server",
-  "name": "MCP Server",
+  "name": "MCP Server (HTTP Transport)",
   "codeowners": ["@ganhammar"],
   "config_flow": true,
   "dependencies": [],

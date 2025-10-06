@@ -1,10 +1,12 @@
-# MCP Server for Home Assistant
+# MCP Server for Home Assistant (HTTP Transport)
 
-A Home Assistant Custom Component that provides an MCP (Model Context Protocol) server, allowing AI assistants like Claude to interact with your Home Assistant instance.
+A Home Assistant Custom Component that provides an MCP (Model Context Protocol) server using **HTTP transport**, allowing AI assistants like Claude to interact with your Home Assistant instance.
+
+**Note:** Unlike other Home Assistant MCP servers that use SSE (Server-Sent Events), this implementation uses HTTP transport with OAuth 2.0 authentication, making it suitable for remote access and integration with services like Claude Desktop.
 
 ## Features
 
-- 🔐 Secure OIDC authentication
+- 🌐 **HTTP transport** (not SSE) - works remotely, not just locally
 - 🏠 Full Home Assistant API access
 - 🔧 Easy HACS installation
 - 📊 Access to entities, states, and services

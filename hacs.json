@@ -1,5 +1,5 @@
 {
-  "name": "MCP Server",
+  "name": "MCP Server (HTTP Transport)",
   "render_readme": true,
   "filename": "mcp_server"
 }

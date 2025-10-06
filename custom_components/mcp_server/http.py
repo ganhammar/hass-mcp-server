@@ -16,7 +16,7 @@ def _get_protected_resource_metadata(base_url: str) -> dict[str, Any]:
     """Generate OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
     return {
         "resource": base_url,
-        "authorization_servers": [base_url],
+        "authorization_servers": [f"{base_url}/oidc"],
         "bearer_methods_supported": ["header"],
         "resource_signing_alg_values_supported": ["RS256"],
         "resource_documentation": f"{base_url}/api/mcp",
@@ -88,7 +88,8 @@ class MCPEndpointView(HomeAssistantView):
         token_payload = self._validate_token(request)
         if not token_payload:
             base_url = str(request.url.origin())
-            resource_metadata_url = f"{base_url}/.well-known/oauth-protected-resource"
+            # Point to /oidc authorization server metadata directly
+            resource_metadata_url = f"{base_url}/oidc/.well-known/oauth-authorization-server"
             www_authenticate = (
                 f'Bearer realm="MCP Server", resource_metadata="{resource_metadata_url}"'
             )

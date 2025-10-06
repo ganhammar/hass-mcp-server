@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "MCP Server (HTTP Transport)",
+        "description": "Set up the MCP Server integration for Home Assistant."
+      }
+    },
+    "abort": {
+      "oidc_provider_required": "The OIDC Provider integration is required but not installed. Please install hass-oidc-provider from https://github.com/ganhammar/hass-oidc-provider first."
+    }
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "domain": "mcp_server",
+  "domain": "mcp_server_http_transport",
   "name": "MCP Server (HTTP Transport)",
   "codeowners": ["@ganhammar"],
   "config_flow": true,

@@ -1,6 +1,6 @@
 """Constants for the MCP Server integration."""
 
-DOMAIN = "mcp_server"
+DOMAIN = "mcp_server_http_transport"
 
 # MCP Server configuration
 DEFAULT_PORT = 8080

@@ -16,9 +16,8 @@ class TestMCPServerConfigFlow:
     async def test_user_flow_creates_entry(self):
         """Test user flow creates config entry when OIDC provider exists."""
         mock_hass = Mock()
-        mock_hass.config = Mock()
-        mock_hass.config.entries = Mock()
-        mock_hass.config.entries.async_domains = Mock(return_value=["oidc_provider"])
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
 
         flow = MCPServerConfigFlow()
         flow.hass = mock_hass
@@ -32,9 +31,8 @@ class TestMCPServerConfigFlow:
     async def test_user_flow_shows_form_when_no_input(self):
         """Test user flow shows form when no input provided."""
         mock_hass = Mock()
-        mock_hass.config = Mock()
-        mock_hass.config.entries = Mock()
-        mock_hass.config.entries.async_domains = Mock(return_value=["oidc_provider"])
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
 
         flow = MCPServerConfigFlow()
         flow.hass = mock_hass
@@ -48,9 +46,8 @@ class TestMCPServerConfigFlow:
     async def test_user_flow_aborts_when_oidc_provider_missing(self):
         """Test user flow aborts when OIDC provider is not installed."""
         mock_hass = Mock()
-        mock_hass.config = Mock()
-        mock_hass.config.entries = Mock()
-        mock_hass.config.entries.async_domains = Mock(return_value=[])
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=[])
 
         flow = MCPServerConfigFlow()
         flow.hass = mock_hass
@@ -76,9 +73,8 @@ class TestMCPServerConfigFlow:
     async def test_user_flow_form_has_empty_schema(self):
         """Test user flow form has empty data schema."""
         mock_hass = Mock()
-        mock_hass.config = Mock()
-        mock_hass.config.entries = Mock()
-        mock_hass.config.entries.async_domains = Mock(return_value=["oidc_provider"])
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
 
         flow = MCPServerConfigFlow()
         flow.hass = mock_hass

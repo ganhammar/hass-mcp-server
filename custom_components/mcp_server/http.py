@@ -88,10 +88,14 @@ class MCPEndpointView(HomeAssistantView):
         # Import dynamically to avoid circular dependency
         try:
             from custom_components.oidc_provider.token_validator import (
+                get_issuer_from_request,
                 validate_access_token,
             )
 
-            return validate_access_token(self.hass, token)
+            # Get the expected issuer from the request
+            expected_issuer = get_issuer_from_request(request)
+
+            return validate_access_token(self.hass, token, expected_issuer)
         except ImportError as e:
             _LOGGER.error("OIDC provider integration not found: %s", e)
             return None

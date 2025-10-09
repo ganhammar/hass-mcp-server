@@ -5,18 +5,18 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from custom_components.oidc_provider.token_validator import get_issuer_from_request
 
 from custom_components.mcp_server.http import (
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
     MCPSubpathProtectedResourceMetadataView,
-    _get_base_url,
     _get_protected_resource_metadata,
 )
 
 
 def test_get_base_url_with_forwarded_headers():
-    """Test _get_base_url with X-Forwarded headers (proxy setup)."""
+    """Test get_issuer_from_request with X-Forwarded headers (proxy setup)."""
     request = Mock()
     request.headers = {
         "X-Forwarded-Proto": "https",
@@ -24,33 +24,33 @@ def test_get_base_url_with_forwarded_headers():
     }
     request.url.origin.return_value = "http://localhost:8123"
 
-    result = _get_base_url(request)
+    result = get_issuer_from_request(request)
 
     assert result == "https://example.com"
     request.url.origin.assert_not_called()
 
 
 def test_get_base_url_without_forwarded_headers():
-    """Test _get_base_url without X-Forwarded headers (direct connection)."""
+    """Test get_issuer_from_request without X-Forwarded headers (direct connection)."""
     request = Mock()
     request.headers = {}
     request.url.origin.return_value = "http://192.168.1.100:8123"
 
-    result = _get_base_url(request)
+    result = get_issuer_from_request(request)
 
     assert result == "http://192.168.1.100:8123"
     request.url.origin.assert_called_once()
 
 
 def test_get_base_url_with_partial_forwarded_headers():
-    """Test _get_base_url with only one X-Forwarded header (should use fallback)."""
+    """Test get_issuer_from_request with only one X-Forwarded header (should use fallback)."""
     request = Mock()
     request.headers = {
         "X-Forwarded-Proto": "https",
     }
     request.url.origin.return_value = "http://localhost:8123"
 
-    result = _get_base_url(request)
+    result = get_issuer_from_request(request)
 
     assert result == "http://localhost:8123"
     request.url.origin.assert_called_once()

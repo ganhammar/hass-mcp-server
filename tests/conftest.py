@@ -11,6 +11,25 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
+# Mock the oidc_provider module before any imports
+def mock_get_issuer_from_request(request):
+    """Mock implementation of get_issuer_from_request."""
+    forwarded_proto = request.headers.get("X-Forwarded-Proto")
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+
+    if forwarded_proto and forwarded_host:
+        return f"{forwarded_proto}://{forwarded_host}"
+    else:
+        return str(request.url.origin())
+
+
+mock_token_validator = Mock()
+mock_token_validator.get_issuer_from_request = mock_get_issuer_from_request
+mock_token_validator.validate_access_token = Mock(return_value=None)
+sys.modules["custom_components.oidc_provider"] = Mock()
+sys.modules["custom_components.oidc_provider.token_validator"] = mock_token_validator
+
+
 @pytest.fixture
 def mock_hass():
     """Create a mock Home Assistant instance."""

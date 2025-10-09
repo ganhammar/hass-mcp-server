@@ -9,21 +9,9 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
+from custom_components.oidc_provider.token_validator import get_issuer_from_request
+
 _LOGGER = logging.getLogger(__name__)
-
-
-def _get_base_url(request: web.Request) -> str:
-    """Get base URL from request, respecting X-Forwarded headers if present."""
-    # Check for X-Forwarded headers (proxy setup)
-    forwarded_proto = request.headers.get("X-Forwarded-Proto")
-    forwarded_host = request.headers.get("X-Forwarded-Host")
-
-    if forwarded_proto and forwarded_host:
-        # Use forwarded headers from proxy
-        return f"{forwarded_proto}://{forwarded_host}"
-    else:
-        # Direct connection, use request URL
-        return str(request.url.origin())
 
 
 def _get_protected_resource_metadata(base_url: str) -> dict[str, Any]:
@@ -46,7 +34,7 @@ class MCPProtectedResourceMetadataView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         """Return protected resource metadata."""
-        base_url = _get_base_url(request)
+        base_url = get_issuer_from_request(request)
         metadata = _get_protected_resource_metadata(base_url)
         return web.json_response(metadata)
 
@@ -60,7 +48,7 @@ class MCPSubpathProtectedResourceMetadataView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         """Return protected resource metadata with /mcp suffix."""
-        base_url = _get_base_url(request)
+        base_url = get_issuer_from_request(request)
         metadata = _get_protected_resource_metadata(base_url)
         return web.json_response(metadata)
 
@@ -105,7 +93,7 @@ class MCPEndpointView(HomeAssistantView):
         # Validate OAuth token
         token_payload = self._validate_token(request)
         if not token_payload:
-            base_url = _get_base_url(request)
+            base_url = get_issuer_from_request(request)
             # Point to /oidc authorization server metadata directly
             resource_metadata_url = f"{base_url}/oidc/.well-known/oauth-authorization-server"
             www_authenticate = (

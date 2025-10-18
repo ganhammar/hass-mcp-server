@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 from homeassistant import data_entry_flow
 
-from custom_components.mcp_server.config_flow import (
+from custom_components.mcp_server_http_transport.config_flow import (
     MCPServerConfigFlow,
     MCPServerOptionsFlowHandler,
 )

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from custom_components.mcp_server.server import HomeAssistantMCPServer
+from custom_components.mcp_server_http_transport.server import HomeAssistantMCPServer
 
 
 class TestHomeAssistantMCPServer:

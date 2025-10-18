@@ -3,7 +3,7 @@
 
 def test_constants():
     """Test constants are defined correctly."""
-    from custom_components.mcp_server.const import (
+    from custom_components.mcp_server_http_transport.const import (
         DEFAULT_HOST,
         DEFAULT_PORT,
         DOMAIN,

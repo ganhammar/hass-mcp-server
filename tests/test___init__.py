@@ -2,7 +2,7 @@
 
 from unittest.mock import Mock, patch
 
-from custom_components.mcp_server import (
+from custom_components.mcp_server_http_transport import (
     DOMAIN,
     async_setup,
     async_setup_entry,
@@ -25,10 +25,10 @@ class TestAsyncSetup:
 class TestAsyncSetupEntry:
     """Test async_setup_entry function."""
 
-    @patch("custom_components.mcp_server.Server")
-    @patch("custom_components.mcp_server.MCPEndpointView")
-    @patch("custom_components.mcp_server.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.Server")
+    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
+    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
     async def test_async_setup_entry_initializes_server(
         self,
         mock_subpath_view,
@@ -50,10 +50,10 @@ class TestAsyncSetupEntry:
         assert mock_hass.data[DOMAIN]["server"] == mock_server
         mock_server_class.assert_called_once_with("home-assistant-mcp-server")
 
-    @patch("custom_components.mcp_server.Server")
-    @patch("custom_components.mcp_server.MCPEndpointView")
-    @patch("custom_components.mcp_server.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.Server")
+    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
+    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
     async def test_async_setup_entry_registers_views(
         self,
         mock_subpath_view,
@@ -69,10 +69,10 @@ class TestAsyncSetupEntry:
         assert result is True
         assert mock_hass.http.register_view.call_count == 3
 
-    @patch("custom_components.mcp_server.Server")
-    @patch("custom_components.mcp_server.MCPEndpointView")
-    @patch("custom_components.mcp_server.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.Server")
+    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
+    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
     async def test_async_setup_entry_registers_protected_resource_views(
         self,
         mock_subpath_view_class,
@@ -94,10 +94,10 @@ class TestAsyncSetupEntry:
         mock_metadata_view_class.assert_called_once()
         mock_subpath_view_class.assert_called_once()
 
-    @patch("custom_components.mcp_server.Server")
-    @patch("custom_components.mcp_server.MCPEndpointView")
-    @patch("custom_components.mcp_server.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.Server")
+    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
+    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
     async def test_async_setup_entry_registers_endpoint_view(
         self,
         mock_subpath_view,

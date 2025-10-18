@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from custom_components.oidc_provider.token_validator import get_issuer_from_request
 
-from custom_components.mcp_server.http import (
+from custom_components.mcp_server_http_transport.http import (
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
     MCPSubpathProtectedResourceMetadataView,

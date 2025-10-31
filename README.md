@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/ganhammar-hass-mcp-server-badge.png)](https://mseep.ai/app/ganhammar-hass-mcp-server)
+
 # MCP Server for Home Assistant (HTTP Transport)
 
 A Home Assistant Custom Component that provides an MCP (Model Context Protocol) server using **HTTP transport**, allowing AI assistants like Claude to interact with your Home Assistant instance.

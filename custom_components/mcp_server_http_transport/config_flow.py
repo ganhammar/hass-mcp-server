@@ -23,7 +23,12 @@ class MCPServerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         # Check if OIDC Provider is installed
         if "oidc_provider" not in self.hass.config_entries.async_domains():
-            return self.async_abort(reason="oidc_provider_required")
+            return self.async_abort(
+                reason="oidc_provider_required",
+                description_placeholders={
+                    "oidc_provider_url": "https://github.com/ganhammar/hass-oidc-provider"
+                },
+            )
 
         if user_input is not None:
             return self.async_create_entry(title="MCP Server", data=user_input)

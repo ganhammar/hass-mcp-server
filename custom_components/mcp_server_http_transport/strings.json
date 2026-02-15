@@ -7,7 +7,7 @@
       }
     },
     "abort": {
-      "oidc_provider_required": "The OIDC Provider integration is required but not installed. Please install hass-oidc-provider from https://github.com/ganhammar/hass-oidc-provider first."
+      "oidc_provider_required": "The OIDC Provider integration is required but not installed. Please install hass-oidc-provider from {oidc_provider_url} first."
     }
   }
 }

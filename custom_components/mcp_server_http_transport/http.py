@@ -241,6 +241,14 @@ class MCPEndpointView(HomeAssistantView):
                     },
                 },
             },
+            {
+                "name": "list_automations",
+                "description": "List all automations in Home Assistant",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
         ]
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -251,6 +259,8 @@ class MCPEndpointView(HomeAssistantView):
             return await self._call_service(arguments)
         elif name == "list_entities":
             return await self._list_entities(arguments)
+        elif name == "list_automations":
+            return await self._list_automations(arguments)
         else:
             raise ValueError(f"Unknown tool: {name}")
 
@@ -314,3 +324,18 @@ class MCPEndpointView(HomeAssistantView):
             )
 
         return {"content": [{"type": "text", "text": json.dumps(entities, indent=2)}]}
+
+    async def _list_automations(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """List automations."""
+        automations = []
+        for state in self.hass.states.async_all():
+            if state.entity_id.startswith("automation."):
+                automations.append(
+                    {
+                        "entity_id": state.entity_id,
+                        "state": state.state,
+                        "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+                    }
+                )
+
+        return {"content": [{"type": "text", "text": json.dumps(automations, indent=2)}]}

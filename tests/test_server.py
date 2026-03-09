@@ -151,3 +151,61 @@ class TestHomeAssistantMCPServer:
 
         assert len(result) == 1
         assert "sensor.temperature" in result[0].text
+
+    async def test_list_automations_returns_automations(self, server, mock_hass):
+        """Test _list_automations returns all automations."""
+        mock_automation1 = Mock()
+        mock_automation1.entity_id = "automation.morning_routine"
+        mock_automation1.state = "on"
+        mock_automation1.attributes = {"friendly_name": "Morning Routine"}
+
+        mock_automation2 = Mock()
+        mock_automation2.entity_id = "automation.evening_routine"
+        mock_automation2.state = "off"
+        mock_automation2.attributes = {"friendly_name": "Evening Routine"}
+
+        mock_light = Mock()
+        mock_light.entity_id = "light.living_room"
+        mock_light.state = "on"
+        mock_light.attributes = {"friendly_name": "Living Room Light"}
+
+        mock_hass.states.async_all.return_value = [
+            mock_automation1,
+            mock_automation2,
+            mock_light,
+        ]
+
+        result = await server._list_automations({})
+
+        assert len(result) == 1
+        assert "automation.morning_routine" in result[0].text
+        assert "automation.evening_routine" in result[0].text
+        assert "light.living_room" not in result[0].text
+
+    async def test_list_automations_empty(self, server, mock_hass):
+        """Test _list_automations with no automations."""
+        mock_light = Mock()
+        mock_light.entity_id = "light.living_room"
+        mock_light.state = "on"
+        mock_light.attributes = {"friendly_name": "Living Room Light"}
+
+        mock_hass.states.async_all.return_value = [mock_light]
+
+        result = await server._list_automations({})
+
+        assert len(result) == 1
+        assert "[]" in result[0].text
+
+    async def test_list_automations_without_friendly_name(self, server, mock_hass):
+        """Test _list_automations handles automations without friendly_name."""
+        mock_automation = Mock()
+        mock_automation.entity_id = "automation.test"
+        mock_automation.state = "on"
+        mock_automation.attributes = {}
+
+        mock_hass.states.async_all.return_value = [mock_automation]
+
+        result = await server._list_automations({})
+
+        assert len(result) == 1
+        assert "automation.test" in result[0].text

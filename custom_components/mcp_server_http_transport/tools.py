@@ -1,0 +1,262 @@
+"""MCP Tools definitions and handlers for Home Assistant."""
+
+import json
+import logging
+from typing import Any
+
+from homeassistant.core import HomeAssistant
+from mcp.types import TextContent, Tool
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class MCPTools:
+    """MCP Tools manager for Home Assistant."""
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize the tools manager."""
+        self.hass = hass
+
+    def get_tools_list(self, as_mcp: bool = True) -> list[Tool] | list[dict[str, Any]]:
+        """Get list of available tools.
+
+        Args:
+            as_mcp: If True, return MCP Tool objects. If False, return dicts for HTTP.
+        """
+        tools_data = [
+            {
+                "name": "get_state",
+                "description": "Get the state of a Home Assistant entity",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The entity ID (e.g., light.living_room)",
+                        }
+                    },
+                    "required": ["entity_id"],
+                },
+            },
+            {
+                "name": "call_service",
+                "description": "Call a Home Assistant service",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "description": "The service domain (e.g., light, switch)",
+                        },
+                        "service": {
+                            "type": "string",
+                            "description": "The service name (e.g., turn_on, turn_off)",
+                        },
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The entity ID to target",
+                        },
+                        "data": {
+                            "type": "object",
+                            "description": "Additional service data",
+                        },
+                    },
+                    "required": ["domain", "service"],
+                },
+            },
+            {
+                "name": "list_entities",
+                "description": "List all entities in Home Assistant",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "description": "Filter by domain (optional)",
+                        }
+                    },
+                },
+            },
+            {
+                "name": "list_automations",
+                "description": "List all automations in Home Assistant",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+            {
+                "name": "get_automation_config",
+                "description": "Get the configuration of a specific automation",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "automation_id": {
+                            "type": "string",
+                            "description": "The automation ID (e.g., my_automation_id)",
+                        }
+                    },
+                    "required": ["automation_id"],
+                },
+            },
+            {
+                "name": "update_automation_config",
+                "description": "Update the configuration of a specific automation",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "automation_id": {
+                            "type": "string",
+                            "description": "The automation ID to update",
+                        },
+                        "config": {
+                            "type": "object",
+                            "description": "The new configuration for the automation",
+                        },
+                    },
+                    "required": ["automation_id", "config"],
+                },
+            },
+        ]
+
+        if as_mcp:
+            return [Tool(**tool) for tool in tools_data]
+        return tools_data
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> list[TextContent] | dict[str, Any]:
+        """Call a tool and return result.
+
+        Args:
+            name: Tool name
+            arguments: Tool arguments
+            return_format: If "mcp", return list[TextContent]. If "http", return dict.
+
+        Returns:
+            Either MCP TextContent list or HTTP dict format.
+        """
+        if name == "get_state":
+            return await self._get_state(arguments)
+        elif name == "call_service":
+            return await self._call_service(arguments)
+        elif name == "list_entities":
+            return await self._list_entities(arguments)
+        elif name == "list_automations":
+            return await self._list_automations(arguments)
+        elif name == "get_automation_config":
+            return await self._get_automation_config(arguments)
+        elif name == "update_automation_config":
+            return await self._update_automation_config(arguments)
+        else:
+            raise ValueError(f"Unknown tool: {name}")
+
+    async def _get_state(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """Get entity state."""
+        entity_id = arguments["entity_id"]
+        state = self.hass.states.get(entity_id)
+
+        if state is None:
+            return [TextContent(type="text", text=f"Entity {entity_id} not found")]
+
+        result = {
+            "entity_id": state.entity_id,
+            "state": state.state,
+            "attributes": dict(state.attributes),
+            "last_changed": state.last_changed.isoformat(),
+            "last_updated": state.last_updated.isoformat(),
+        }
+
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    async def _call_service(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """Call a Home Assistant service."""
+        domain = arguments["domain"]
+        service = arguments["service"]
+        entity_id = arguments.get("entity_id")
+        data = arguments.get("data", {})
+
+        service_data = {**data}
+        if entity_id:
+            service_data["entity_id"] = entity_id
+
+        try:
+            await self.hass.services.async_call(domain, service, service_data, blocking=True)
+            return [TextContent(type="text", text=f"Successfully called {domain}.{service}")]
+        except Exception as e:
+            _LOGGER.error("Error calling service: %s", e)
+            return [TextContent(type="text", text=f"Error calling service: {str(e)}")]
+
+    async def _list_entities(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """List entities."""
+        domain_filter = arguments.get("domain")
+
+        entities = []
+        for state in self.hass.states.async_all():
+            if domain_filter and not state.entity_id.startswith(f"{domain_filter}."):
+                continue
+            entities.append(
+                {
+                    "entity_id": state.entity_id,
+                    "state": state.state,
+                    "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+                }
+            )
+
+        return [TextContent(type="text", text=json.dumps(entities, indent=2))]
+
+    async def _list_automations(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """List automations."""
+        automations = []
+        for state in self.hass.states.async_all():
+            if state.entity_id.startswith("automation."):
+                automations.append(
+                    {
+                        "entity_id": state.entity_id,
+                        "state": state.state,
+                        "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+                    }
+                )
+
+        return [TextContent(type="text", text=json.dumps(automations, indent=2))]
+
+    async def _get_automation_config(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """Get automation configuration."""
+        automation_id = arguments["automation_id"]
+
+        try:
+            from homeassistant.components.automation import DOMAIN
+
+            automation_configs = self.hass.data.get(DOMAIN, {})
+            config = automation_configs.get(automation_id)
+
+            if config is None:
+                return [TextContent(type="text", text=f"Automation {automation_id} not found")]
+
+            return [TextContent(type="text", text=json.dumps(config, indent=2, default=str))]
+        except Exception as e:
+            _LOGGER.error("Error getting automation config: %s", e)
+            return [TextContent(type="text", text=f"Error getting automation config: {str(e)}")]
+
+    async def _update_automation_config(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """Update automation configuration."""
+        automation_id = arguments["automation_id"]
+        new_config = arguments["config"]
+
+        try:
+            await self.hass.services.async_call(
+                "automation",
+                "reload",
+                {},
+                blocking=True
+            )
+
+            from homeassistant.components.automation import DOMAIN
+
+            if DOMAIN not in self.hass.data:
+                self.hass.data[DOMAIN] = {}
+
+            self.hass.data[DOMAIN][automation_id] = new_config
+
+            return [TextContent(type="text", text=f"Successfully updated automation {automation_id}")]
+        except Exception as e:
+            _LOGGER.error("Error updating automation config: %s", e)
+            return [TextContent(type="text", text=f"Error updating automation config: {str(e)}")]

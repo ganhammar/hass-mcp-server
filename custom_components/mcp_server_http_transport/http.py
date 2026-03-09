@@ -249,6 +249,38 @@ class MCPEndpointView(HomeAssistantView):
                     "properties": {},
                 },
             },
+            {
+                "name": "get_automation_config",
+                "description": "Get the configuration of a specific automation",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "automation_id": {
+                            "type": "string",
+                            "description": "The automation ID (e.g., my_automation_id)",
+                        }
+                    },
+                    "required": ["automation_id"],
+                },
+            },
+            {
+                "name": "update_automation_config",
+                "description": "Update the configuration of a specific automation",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "automation_id": {
+                            "type": "string",
+                            "description": "The automation ID to update",
+                        },
+                        "config": {
+                            "type": "object",
+                            "description": "The new configuration for the automation",
+                        },
+                    },
+                    "required": ["automation_id", "config"],
+                },
+            },
         ]
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -261,6 +293,10 @@ class MCPEndpointView(HomeAssistantView):
             return await self._list_entities(arguments)
         elif name == "list_automations":
             return await self._list_automations(arguments)
+        elif name == "get_automation_config":
+            return await self._get_automation_config(arguments)
+        elif name == "update_automation_config":
+            return await self._update_automation_config(arguments)
         else:
             raise ValueError(f"Unknown tool: {name}")
 
@@ -339,3 +375,49 @@ class MCPEndpointView(HomeAssistantView):
                 )
 
         return {"content": [{"type": "text", "text": json.dumps(automations, indent=2)}]}
+
+    async def _get_automation_config(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Get automation configuration."""
+        automation_id = arguments["automation_id"]
+
+        try:
+            # Try to get automation config from Home Assistant config
+            from homeassistant.components.automation import DOMAIN
+
+            automation_configs = self.hass.data.get(DOMAIN, {})
+            config = automation_configs.get(automation_id)
+
+            if config is None:
+                return {"content": [{"type": "text", "text": f"Automation {automation_id} not found"}]}
+
+            return {"content": [{"type": "text", "text": json.dumps(config, indent=2, default=str)}]}
+        except Exception as e:
+            _LOGGER.error("Error getting automation config: %s", e)
+            return {"content": [{"type": "text", "text": f"Error getting automation config: {str(e)}"}]}
+
+    async def _update_automation_config(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Update automation configuration."""
+        automation_id = arguments["automation_id"]
+        new_config = arguments["config"]
+
+        try:
+            # Call the automation.reload service to reload automations from config
+            await self.hass.services.async_call(
+                "automation",
+                "reload",
+                {},
+                blocking=True
+            )
+
+            # Then update the specific automation with the new config
+            from homeassistant.components.automation import DOMAIN
+
+            if DOMAIN not in self.hass.data:
+                self.hass.data[DOMAIN] = {}
+
+            self.hass.data[DOMAIN][automation_id] = new_config
+
+            return {"content": [{"type": "text", "text": f"Successfully updated automation {automation_id}"}]}
+        except Exception as e:
+            _LOGGER.error("Error updating automation config: %s", e)
+            return {"content": [{"type": "text", "text": f"Error updating automation config: {str(e)}"}]}

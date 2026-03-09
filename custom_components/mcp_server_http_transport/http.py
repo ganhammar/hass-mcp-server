@@ -1,6 +1,5 @@
 """HTTP transport for MCP server."""
 
-import json
 import logging
 from typing import Any
 
@@ -10,6 +9,8 @@ from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
 from custom_components.oidc_provider.token_validator import get_issuer_from_request
+
+from .tools import MCPTools
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class MCPEndpointView(HomeAssistantView):
         """Initialize the MCP endpoint."""
         self.hass = hass
         self.server = server
+        self.tools = MCPTools(hass)
 
     def _validate_token(self, request: web.Request) -> dict[str, Any] | None:
         """Validate the OAuth bearer token."""
@@ -187,155 +189,12 @@ class MCPEndpointView(HomeAssistantView):
 
     async def _get_tools(self) -> list[dict[str, Any]]:
         """Get available tools."""
-        return [
-            {
-                "name": "get_state",
-                "description": "Get the state of a Home Assistant entity",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "entity_id": {
-                            "type": "string",
-                            "description": "The entity ID (e.g., light.living_room)",
-                        }
-                    },
-                    "required": ["entity_id"],
-                },
-            },
-            {
-                "name": "call_service",
-                "description": "Call a Home Assistant service",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "domain": {
-                            "type": "string",
-                            "description": "The service domain (e.g., light, switch)",
-                        },
-                        "service": {
-                            "type": "string",
-                            "description": "The service name (e.g., turn_on, turn_off)",
-                        },
-                        "entity_id": {
-                            "type": "string",
-                            "description": "The entity ID to target",
-                        },
-                        "data": {
-                            "type": "object",
-                            "description": "Additional service data",
-                        },
-                    },
-                    "required": ["domain", "service"],
-                },
-            },
-            {
-                "name": "list_entities",
-                "description": "List all entities in Home Assistant",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "domain": {
-                            "type": "string",
-                            "description": "Filter by domain (optional)",
-                        }
-                    },
-                },
-            },
-            {
-                "name": "list_automations",
-                "description": "List all automations in Home Assistant",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                },
-            },
-        ]
+        return self.tools.get_tools_list(as_mcp=False)
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call a tool."""
-        if name == "get_state":
-            return await self._get_state(arguments)
-        elif name == "call_service":
-            return await self._call_service(arguments)
-        elif name == "list_entities":
-            return await self._list_entities(arguments)
-        elif name == "list_automations":
-            return await self._list_automations(arguments)
-        else:
-            raise ValueError(f"Unknown tool: {name}")
-
-    async def _get_state(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Get entity state."""
-        entity_id = arguments["entity_id"]
-        state = self.hass.states.get(entity_id)
-
-        if state is None:
-            return {"content": [{"type": "text", "text": f"Entity {entity_id} not found"}]}
-
-        result = {
-            "entity_id": state.entity_id,
-            "state": state.state,
-            "attributes": dict(state.attributes),
-            "last_changed": state.last_changed.isoformat(),
-            "last_updated": state.last_updated.isoformat(),
-        }
-
-        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
-
-    async def _call_service(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Call a Home Assistant service."""
-        domain = arguments["domain"]
-        service = arguments["service"]
-        entity_id = arguments.get("entity_id")
-        data = arguments.get("data", {})
-
-        service_data = {**data}
-        if entity_id:
-            service_data["entity_id"] = entity_id
-
-        try:
-            await self.hass.services.async_call(domain, service, service_data, blocking=True)
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Successfully called {domain}.{service}",
-                    }
-                ]
-            }
-        except Exception as e:
-            _LOGGER.error("Error calling service: %s", e)
-            return {"content": [{"type": "text", "text": f"Error calling service: {str(e)}"}]}
-
-    async def _list_entities(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        """List entities."""
-        domain_filter = arguments.get("domain")
-
-        entities = []
-        for state in self.hass.states.async_all():
-            if domain_filter and not state.entity_id.startswith(f"{domain_filter}."):
-                continue
-            entities.append(
-                {
-                    "entity_id": state.entity_id,
-                    "state": state.state,
-                    "friendly_name": state.attributes.get("friendly_name", state.entity_id),
-                }
-            )
-
-        return {"content": [{"type": "text", "text": json.dumps(entities, indent=2)}]}
-
-    async def _list_automations(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        """List automations."""
-        automations = []
-        for state in self.hass.states.async_all():
-            if state.entity_id.startswith("automation."):
-                automations.append(
-                    {
-                        "entity_id": state.entity_id,
-                        "state": state.state,
-                        "friendly_name": state.attributes.get("friendly_name", state.entity_id),
-                    }
-                )
-
-        return {"content": [{"type": "text", "text": json.dumps(automations, indent=2)}]}
+        result = await self.tools.call_tool(name, arguments)
+        # Convert TextContent list to HTTP format
+        if isinstance(result, list) and result:
+            return {"content": [{"type": result[0].type, "text": result[0].text}]}
+        return result

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from custom_components.mcp_server_http_transport.server import HomeAssistantMCPServer
+from custom_components.mcp_server_http_transport.tools import MCPTools
 
 
 class TestHomeAssistantMCPServer:
@@ -31,6 +32,7 @@ class TestHomeAssistantMCPServer:
         assert server.hass == mock_hass
         assert server.server is not None
         assert server.server.name == "home-assistant-mcp-server"
+        assert isinstance(server.tools, MCPTools)
 
     async def test_get_state_returns_entity_info(self, server, mock_hass):
         """Test _get_state returns entity information."""
@@ -42,7 +44,7 @@ class TestHomeAssistantMCPServer:
         mock_state.last_updated = datetime(2024, 1, 1, 12, 0, 0)
         mock_hass.states.get.return_value = mock_state
 
-        result = await server._get_state({"entity_id": "light.living_room"})
+        result = await server.tools._get_state({"entity_id": "light.living_room"})
 
         assert len(result) == 1
         assert result[0].type == "text"
@@ -53,7 +55,7 @@ class TestHomeAssistantMCPServer:
         """Test _get_state when entity doesn't exist."""
         mock_hass.states.get.return_value = None
 
-        result = await server._get_state({"entity_id": "light.nonexistent"})
+        result = await server.tools._get_state({"entity_id": "light.nonexistent"})
 
         assert len(result) == 1
         assert "not found" in result[0].text
@@ -62,7 +64,7 @@ class TestHomeAssistantMCPServer:
         """Test _call_service calls Home Assistant service."""
         mock_hass.services.async_call = AsyncMock()
 
-        result = await server._call_service(
+        result = await server.tools._call_service(
             {
                 "domain": "light",
                 "service": "turn_on",
@@ -81,7 +83,7 @@ class TestHomeAssistantMCPServer:
         """Test _call_service without entity_id."""
         mock_hass.services.async_call = AsyncMock()
 
-        result = await server._call_service({"domain": "homeassistant", "service": "restart"})
+        result = await server.tools._call_service({"domain": "homeassistant", "service": "restart"})
 
         assert len(result) == 1
         assert "Successfully called" in result[0].text
@@ -93,7 +95,7 @@ class TestHomeAssistantMCPServer:
         """Test _call_service handles errors."""
         mock_hass.services.async_call = AsyncMock(side_effect=Exception("Service error"))
 
-        result = await server._call_service({"domain": "light", "service": "turn_on"})
+        result = await server.tools._call_service({"domain": "light", "service": "turn_on"})
 
         assert len(result) == 1
         assert "Error calling service" in result[0].text
@@ -112,7 +114,7 @@ class TestHomeAssistantMCPServer:
 
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
-        result = await server._list_entities({})
+        result = await server.tools._list_entities({})
 
         assert len(result) == 1
         assert "light.living_room" in result[0].text
@@ -132,7 +134,7 @@ class TestHomeAssistantMCPServer:
 
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
-        result = await server._list_entities({"domain": "light"})
+        result = await server.tools._list_entities({"domain": "light"})
 
         assert len(result) == 1
         assert "light.living_room" in result[0].text
@@ -147,7 +149,7 @@ class TestHomeAssistantMCPServer:
 
         mock_hass.states.async_all.return_value = [mock_state]
 
-        result = await server._list_entities({})
+        result = await server.tools._list_entities({})
 
         assert len(result) == 1
         assert "sensor.temperature" in result[0].text
@@ -175,7 +177,7 @@ class TestHomeAssistantMCPServer:
             mock_light,
         ]
 
-        result = await server._list_automations({})
+        result = await server.tools._list_automations({})
 
         assert len(result) == 1
         assert "automation.morning_routine" in result[0].text
@@ -191,7 +193,7 @@ class TestHomeAssistantMCPServer:
 
         mock_hass.states.async_all.return_value = [mock_light]
 
-        result = await server._list_automations({})
+        result = await server.tools._list_automations({})
 
         assert len(result) == 1
         assert "[]" in result[0].text
@@ -205,7 +207,7 @@ class TestHomeAssistantMCPServer:
 
         mock_hass.states.async_all.return_value = [mock_automation]
 
-        result = await server._list_automations({})
+        result = await server.tools._list_automations({})
 
         assert len(result) == 1
         assert "automation.test" in result[0].text

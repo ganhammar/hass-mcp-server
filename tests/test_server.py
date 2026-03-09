@@ -211,3 +211,164 @@ class TestHomeAssistantMCPServer:
 
         assert len(result) == 1
         assert "automation.test" in result[0].text
+
+    async def test_get_automation_config_returns_yaml(self, server, mock_hass):
+        """Test _get_automation_config returns YAML format."""
+        mock_entity = Mock()
+        mock_entity.raw_config = {
+            "alias": "Morning Routine",
+            "trigger": [{"platform": "time", "at": "07:00:00"}],
+            "action": [{"service": "light.turn_on"}],
+        }
+
+        mock_component = Mock()
+        mock_component.get_entity.return_value = mock_entity
+
+        from homeassistant.components.automation import DATA_COMPONENT
+
+        mock_hass.data = {DATA_COMPONENT: mock_component}
+
+        result = await server.tools._get_automation_config(
+            {"automation_id": "automation.morning_routine"}
+        )
+
+        assert len(result) == 1
+        assert "Morning Routine" in result[0].text
+        assert "alias:" in result[0].text
+        assert "{" not in result[0].text
+        mock_component.get_entity.assert_called_once_with("automation.morning_routine")
+
+    async def test_get_automation_config_not_found(self, server, mock_hass):
+        """Test _get_automation_config when automation doesn't exist."""
+        mock_component = Mock()
+        mock_component.get_entity.return_value = None
+
+        from homeassistant.components.automation import DATA_COMPONENT
+
+        mock_hass.data = {DATA_COMPONENT: mock_component}
+
+        result = await server.tools._get_automation_config(
+            {"automation_id": "automation.nonexistent"}
+        )
+
+        assert len(result) == 1
+        assert "not found" in result[0].text
+
+    async def test_get_automation_config_component_not_available(self, server, mock_hass):
+        """Test _get_automation_config when automation component is not loaded."""
+        mock_hass.data = {}
+
+        result = await server.tools._get_automation_config({"automation_id": "automation.test"})
+
+        assert len(result) == 1
+        assert "not available" in result[0].text
+
+    async def test_update_automation_config_writes_yaml_and_reloads(
+        self, server, mock_hass, tmp_path
+    ):
+        """Test _update_automation_config parses YAML, writes file, and reloads."""
+        automations_file = tmp_path / "automations.yaml"
+        automations_file.write_text(
+            "- id: morning_lights\n  alias: Old Name\n  trigger: []\n  action: []\n"
+        )
+
+        mock_hass.config.path = Mock(return_value=str(automations_file))
+        mock_hass.services.async_call = AsyncMock()
+
+        new_yaml = "id: morning_lights\nalias: New Name\ntrigger: []\naction: []\n"
+
+        result = await server.tools._update_automation_config(
+            {"automation_id": "automation.morning_lights", "config": new_yaml}
+        )
+
+        assert len(result) == 1
+        assert "Successfully updated" in result[0].text
+        written = automations_file.read_text()
+        assert "New Name" in written
+        mock_hass.services.async_call.assert_called_once_with(
+            "automation", "reload", {}, blocking=True
+        )
+
+    async def test_update_automation_config_invalid_yaml(self, server, mock_hass):
+        """Test _update_automation_config returns error on invalid YAML."""
+        result = await server.tools._update_automation_config(
+            {"automation_id": "automation.test", "config": ": invalid: yaml: ["}
+        )
+
+        assert len(result) == 1
+        assert "Invalid YAML" in result[0].text
+
+    async def test_update_automation_config_not_found(self, server, mock_hass, tmp_path):
+        """Test _update_automation_config when automation ID doesn't exist in file."""
+        automations_file = tmp_path / "automations.yaml"
+        automations_file.write_text("- id: other_automation\n  alias: Other\n")
+
+        mock_hass.config.path = Mock(return_value=str(automations_file))
+
+        result = await server.tools._update_automation_config(
+            {"automation_id": "automation.nonexistent", "config": "alias: Test\n"}
+        )
+
+        assert len(result) == 1
+        assert "not found" in result[0].text
+
+    async def test_create_automation_appends_and_reloads(self, server, mock_hass, tmp_path):
+        """Test _create_automation appends to file and reloads."""
+        automations_file = tmp_path / "automations.yaml"
+        automations_file.write_text("- id: existing\n  alias: Existing\n")
+
+        mock_hass.config.path = Mock(return_value=str(automations_file))
+        mock_hass.services.async_call = AsyncMock()
+
+        new_yaml = "alias: Night Mode\ntrigger:\n- platform: time\n  at: '23:00:00'\naction:\n- service: light.turn_off\n"
+
+        result = await server.tools._create_automation({"config": new_yaml})
+
+        assert len(result) == 1
+        assert "Successfully created" in result[0].text
+        assert "automation.night_mode" in result[0].text
+        written = automations_file.read_text()
+        assert "Night Mode" in written
+        assert "Existing" in written
+        mock_hass.services.async_call.assert_called_once_with(
+            "automation", "reload", {}, blocking=True
+        )
+
+    async def test_create_automation_generates_id_from_alias(self, server, mock_hass, tmp_path):
+        """Test _create_automation generates id from alias when not provided."""
+        automations_file = tmp_path / "automations.yaml"
+        automations_file.write_text("")
+
+        mock_hass.config.path = Mock(return_value=str(automations_file))
+        mock_hass.services.async_call = AsyncMock()
+
+        result = await server.tools._create_automation(
+            {"config": "alias: Morning Coffee\ntrigger: []\naction: []\n"}
+        )
+
+        assert "automation.morning_coffee" in result[0].text
+
+    async def test_create_automation_rejects_duplicate_id(self, server, mock_hass, tmp_path):
+        """Test _create_automation rejects automation with duplicate id."""
+        automations_file = tmp_path / "automations.yaml"
+        automations_file.write_text("- id: my_auto\n  alias: Existing\n")
+
+        mock_hass.config.path = Mock(return_value=str(automations_file))
+
+        result = await server.tools._create_automation(
+            {"config": "id: my_auto\nalias: Duplicate\ntrigger: []\naction: []\n"}
+        )
+
+        assert "already exists" in result[0].text
+
+    async def test_create_automation_requires_alias(self, server, mock_hass):
+        """Test _create_automation returns error when alias is missing."""
+        result = await server.tools._create_automation({"config": "trigger: []\naction: []\n"})
+
+        assert "alias" in result[0].text
+
+    async def test_create_automation_invalid_yaml(self, server, mock_hass):
+        """Test _create_automation returns error on invalid YAML."""
+        result = await server.tools._create_automation({"config": ": bad: [yaml"})
+
+        assert "Invalid YAML" in result[0].text

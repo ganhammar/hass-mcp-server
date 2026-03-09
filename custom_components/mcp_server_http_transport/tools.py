@@ -2,7 +2,10 @@
 
 import json
 import logging
+import re
 from typing import Any
+
+import yaml
 
 from homeassistant.core import HomeAssistant
 from mcp.types import TextContent, Tool
@@ -107,14 +110,28 @@ class MCPTools:
                     "properties": {
                         "automation_id": {
                             "type": "string",
-                            "description": "The automation ID to update",
+                            "description": "The automation ID to update (e.g., automation.morning_lights)",
                         },
                         "config": {
-                            "type": "object",
-                            "description": "The new configuration for the automation",
+                            "type": "string",
+                            "description": "The new configuration as a YAML string",
                         },
                     },
                     "required": ["automation_id", "config"],
+                },
+            },
+            {
+                "name": "create_automation",
+                "description": "Create a new automation in Home Assistant",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "config": {
+                            "type": "string",
+                            "description": "The automation configuration as a YAML string. The 'alias' field is required. An 'id' will be generated automatically if not provided.",
+                        },
+                    },
+                    "required": ["config"],
                 },
             },
         ]
@@ -148,6 +165,8 @@ class MCPTools:
             return await self._get_automation_config(arguments)
         elif name == "update_automation_config":
             return await self._update_automation_config(arguments)
+        elif name == "create_automation":
+            return await self._create_automation(arguments)
         else:
             raise ValueError(f"Unknown tool: {name}")
 
@@ -225,15 +244,23 @@ class MCPTools:
         automation_id = arguments["automation_id"]
 
         try:
-            from homeassistant.components.automation import DOMAIN
+            from homeassistant.components.automation import DATA_COMPONENT
 
-            automation_configs = self.hass.data.get(DOMAIN, {})
-            config = automation_configs.get(automation_id)
+            component = self.hass.data.get(DATA_COMPONENT)
+            if component is None:
+                return [TextContent(type="text", text="Automation component not available")]
 
-            if config is None:
+            entity = component.get_entity(automation_id)
+            if entity is None:
                 return [TextContent(type="text", text=f"Automation {automation_id} not found")]
 
-            return [TextContent(type="text", text=json.dumps(config, indent=2, default=str))]
+            plain_config = json.loads(json.dumps(entity.raw_config, default=str))
+            return [
+                TextContent(
+                    type="text",
+                    text=yaml.safe_dump(plain_config, allow_unicode=True, default_flow_style=False),
+                )
+            ]
         except Exception as e:
             _LOGGER.error("Error getting automation config: %s", e)
             return [TextContent(type="text", text=f"Error getting automation config: {str(e)}")]
@@ -241,21 +268,103 @@ class MCPTools:
     async def _update_automation_config(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Update automation configuration."""
         automation_id = arguments["automation_id"]
-        new_config = arguments["config"]
+        yaml_config: str = arguments["config"]
+
+        try:
+            new_config = yaml.safe_load(yaml_config)
+        except yaml.YAMLError as e:
+            return [TextContent(type="text", text=f"Invalid YAML: {str(e)}")]
+
+        if not isinstance(new_config, dict):
+            return [TextContent(type="text", text="Config must be a YAML mapping")]
+
+        automations_path = self.hass.config.path("automations.yaml")
+
+        try:
+            with open(automations_path) as f:
+                automations: list[dict] = yaml.safe_load(f) or []
+        except FileNotFoundError:
+            automations = []
+
+        entity_id_suffix = automation_id.removeprefix("automation.")
+        updated = False
+        for i, entry in enumerate(automations):
+            entry_entity_id = (
+                f"automation.{entry.get('alias', entry.get('id', '')).lower().replace(' ', '_')}"
+            )
+            if entry.get("id") == entity_id_suffix or entry_entity_id == automation_id:
+                automations[i] = new_config
+                updated = True
+                break
+
+        if not updated:
+            return [
+                TextContent(
+                    type="text", text=f"Automation {automation_id} not found in automations.yaml"
+                )
+            ]
+
+        try:
+            with open(automations_path, "w") as f:
+                yaml.dump(automations, f, allow_unicode=True, default_flow_style=False)
+        except OSError as e:
+            return [TextContent(type="text", text=f"Error writing automations.yaml: {str(e)}")]
 
         try:
             await self.hass.services.async_call("automation", "reload", {}, blocking=True)
-
-            from homeassistant.components.automation import DOMAIN
-
-            if DOMAIN not in self.hass.data:
-                self.hass.data[DOMAIN] = {}
-
-            self.hass.data[DOMAIN][automation_id] = new_config
-
-            return [
-                TextContent(type="text", text=f"Successfully updated automation {automation_id}")
-            ]
         except Exception as e:
-            _LOGGER.error("Error updating automation config: %s", e)
-            return [TextContent(type="text", text=f"Error updating automation config: {str(e)}")]
+            _LOGGER.warning("Could not reload automations: %s", e)
+
+        return [TextContent(type="text", text=f"Successfully updated automation {automation_id}")]
+
+    async def _create_automation(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """Create a new automation."""
+        yaml_config: str = arguments["config"]
+
+        try:
+            new_config = yaml.safe_load(yaml_config)
+        except yaml.YAMLError as e:
+            return [TextContent(type="text", text=f"Invalid YAML: {str(e)}")]
+
+        if not isinstance(new_config, dict):
+            return [TextContent(type="text", text="Config must be a YAML mapping")]
+
+        if not new_config.get("alias"):
+            return [TextContent(type="text", text="Config must include an 'alias' field")]
+
+        if not new_config.get("id"):
+            slug = re.sub(r"[^a-z0-9]+", "_", new_config["alias"].lower()).strip("_")
+            new_config["id"] = slug
+
+        automations_path = self.hass.config.path("automations.yaml")
+
+        try:
+            with open(automations_path) as f:
+                automations: list[dict] = yaml.safe_load(f) or []
+        except FileNotFoundError:
+            automations = []
+
+        existing_ids = {entry.get("id") for entry in automations}
+        if new_config["id"] in existing_ids:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Automation with id '{new_config['id']}' already exists. Use update_automation_config to modify it.",
+                )
+            ]
+
+        automations.append(new_config)
+
+        try:
+            with open(automations_path, "w") as f:
+                yaml.dump(automations, f, allow_unicode=True, default_flow_style=False)
+        except OSError as e:
+            return [TextContent(type="text", text=f"Error writing automations.yaml: {str(e)}")]
+
+        try:
+            await self.hass.services.async_call("automation", "reload", {}, blocking=True)
+        except Exception as e:
+            _LOGGER.warning("Could not reload automations: %s", e)
+
+        entity_id = f"automation.{new_config['id']}"
+        return [TextContent(type="text", text=f"Successfully created automation {entity_id}")]

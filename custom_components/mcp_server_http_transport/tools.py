@@ -123,7 +123,9 @@ class MCPTools:
             return [Tool(**tool) for tool in tools_data]
         return tools_data
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> list[TextContent] | dict[str, Any]:
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> list[TextContent] | dict[str, Any]:
         """Call a tool and return result.
 
         Args:
@@ -242,12 +244,7 @@ class MCPTools:
         new_config = arguments["config"]
 
         try:
-            await self.hass.services.async_call(
-                "automation",
-                "reload",
-                {},
-                blocking=True
-            )
+            await self.hass.services.async_call("automation", "reload", {}, blocking=True)
 
             from homeassistant.components.automation import DOMAIN
 
@@ -256,7 +253,9 @@ class MCPTools:
 
             self.hass.data[DOMAIN][automation_id] = new_config
 
-            return [TextContent(type="text", text=f"Successfully updated automation {automation_id}")]
+            return [
+                TextContent(type="text", text=f"Successfully updated automation {automation_id}")
+            ]
         except Exception as e:
             _LOGGER.error("Error updating automation config: %s", e)
             return [TextContent(type="text", text=f"Error updating automation config: {str(e)}")]

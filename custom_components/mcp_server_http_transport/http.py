@@ -197,4 +197,3 @@ class MCPEndpointView(HomeAssistantView):
         if isinstance(result, list) and result:
             return {"content": [{"type": result[0].type, "text": result[0].text}]}
         return result
-

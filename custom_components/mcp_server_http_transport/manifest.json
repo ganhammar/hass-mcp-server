@@ -1,7 +1,7 @@
 {
   "domain": "mcp_server_http_transport",
   "name": "MCP Server (HTTP Transport) - QlunkOllio",
-  "codeowners": ["@QlunkOllio"],
+  "codeowners": ["@QlunkOllio","@ganhammar"],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/QlunkOllio/hass-mcp-server",

@@ -83,6 +83,14 @@ class HomeAssistantMCPServer:
                         },
                     },
                 ),
+                Tool(
+                    name="list_automations",
+                    description="List all automations in Home Assistant",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {},
+                    },
+                ),
             ]
 
         @self.server.call_tool()
@@ -94,6 +102,8 @@ class HomeAssistantMCPServer:
                 return await self._call_service(arguments)
             elif name == "list_entities":
                 return await self._list_entities(arguments)
+            elif name == "list_automations":
+                return await self._list_automations(arguments)
             else:
                 raise ValueError(f"Unknown tool: {name}")
 
@@ -150,6 +160,21 @@ class HomeAssistantMCPServer:
             )
 
         return [TextContent(type="text", text=str(entities))]
+
+    async def _list_automations(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """List automations."""
+        automations = []
+        for state in self.hass.states.async_all():
+            if state.entity_id.startswith("automation."):
+                automations.append(
+                    {
+                        "entity_id": state.entity_id,
+                        "state": state.state,
+                        "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+                    }
+                )
+
+        return [TextContent(type="text", text=str(automations))]
 
     async def run(self, host: str, port: int) -> None:
         """Run the MCP server."""

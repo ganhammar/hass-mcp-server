@@ -1,8 +1,8 @@
-# MCP Server for Home Assistant (HTTP Transport)
+# MCP Server for Home Assistant (HTTP Transport) - QlunkOllio Fork
 
 A Home Assistant Custom Component that provides an MCP (Model Context Protocol) server using **HTTP transport**, allowing AI assistants like Claude to interact with your Home Assistant instance.
 
-**Note:** Unlike other Home Assistant MCP servers that use SSE (Server-Sent Events), this implementation uses HTTP transport with OAuth 2.0 authentication, making it suitable for remote access and integration with services like Claude in browser.
+**Note:** This is a fork of [ganhammar/hass-mcp-server](https://github.com/ganhammar/hass-mcp-server) with additional features. Unlike other Home Assistant MCP servers that use SSE (Server-Sent Events), this implementation uses HTTP transport with OAuth 2.0 authentication, making it suitable for remote access and integration with services like Claude in browser.
 
 ## Features
 
@@ -10,6 +10,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 🏠 Full Home Assistant API access
 - 🔧 Easy HACS installation
 - 📊 Access to entities, states, and services
+- 🤖 **List Automations** - View all Home Assistant automations through MCP
 
 ## Prerequisites
 
@@ -68,6 +69,7 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 - `get_state`: Get the current state of any Home Assistant entity
 - `call_service`: Call any Home Assistant service (turn on lights, etc.)
 - `list_entities`: List all entities, optionally filtered by domain
+- `list_automations`: List all Home Assistant automations
 
 ## License
 

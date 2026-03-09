@@ -1,13 +1,13 @@
 {
   "domain": "mcp_server_http_transport",
-  "name": "MCP Server (HTTP Transport)",
-  "codeowners": ["@ganhammar"],
+  "name": "MCP Server (HTTP Transport) - QlunkOllio",
+  "codeowners": ["@QlunkOllio","@ganhammar"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/ganhammar/hass-mcp-server",
+  "documentation": "https://github.com/QlunkOllio/hass-mcp-server",
   "integration_type": "service",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/ganhammar/hass-mcp-server/issues",
+  "issue_tracker": "https://github.com/QlunkOllio/hass-mcp-server/issues",
   "requirements": ["mcp>=1.0.0"],
-  "version": "1.0.2"
+  "version": "1.0.3"
 }

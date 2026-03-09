@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
 from custom_components.oidc_provider.token_validator import get_issuer_from_request
+
 from .tools import MCPTools
 
 _LOGGER = logging.getLogger(__name__)

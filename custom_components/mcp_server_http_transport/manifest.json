@@ -4,6 +4,7 @@
   "codeowners": ["@ganhammar"],
   "config_flow": true,
   "dependencies": [],
+  "after_dependencies": ["recorder"],
   "documentation": "https://github.com/ganhammar/hass-mcp-server",
   "integration_type": "service",
   "iot_class": "local_push",

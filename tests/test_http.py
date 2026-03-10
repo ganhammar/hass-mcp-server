@@ -841,6 +841,43 @@ class TestMCPEndpointView:
         history = json.loads(body["result"]["content"][0]["text"])
         assert len(history) == 0
 
+    async def test_post_tools_call_get_history_recorder_error(self, view, mock_hass):
+        """Test POST with tools/call for get_history when recorder fails."""
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(
+            side_effect=Exception("Recorder not available")
+        )
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_history",
+                    "arguments": {
+                        "entity_id": "light.living_room",
+                        "start_time": "2024-01-01T00:00:00",
+                    },
+                },
+                "id": 21,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Error getting history" in body["result"]["content"][0]["text"]
+
     # --- Phase 2: Resources ---
 
     async def test_post_initialize_advertises_capabilities(self, view):
@@ -1146,6 +1183,38 @@ class TestMCPEndpointView:
         result = body["result"]
         assert "Daily summary" in result["description"]
         assert "light.living_room" in result["messages"][0]["content"]["text"]
+
+    async def test_post_prompts_get_daily_summary_recorder_error(self, view, mock_hass):
+        """Test POST with prompts/get for daily_summary when recorder fails."""
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(
+            side_effect=Exception("Recorder not available")
+        )
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": "daily_summary", "arguments": {}},
+                "id": 32,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "Unable to retrieve history data" in text
 
     async def test_post_prompts_get_unknown(self, view, mock_hass):
         """Test POST with prompts/get for unknown prompt."""

@@ -1,10 +1,10 @@
 {
   "domain": "mcp_server_http_transport",
   "name": "MCP Server (HTTP Transport)",
+  "after_dependencies": ["recorder"],
   "codeowners": ["@ganhammar"],
   "config_flow": true,
   "dependencies": [],
-  "after_dependencies": ["recorder"],
   "documentation": "https://github.com/ganhammar/hass-mcp-server",
   "integration_type": "service",
   "iot_class": "local_push",

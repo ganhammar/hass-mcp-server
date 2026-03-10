@@ -54,8 +54,11 @@ jobs:
     - name: Lint with Ruff
       run: poetry run ruff check custom_components/ tests/
 
-    - name: Run tests
-      run: poetry run pytest tests/ -v
+    - name: Run unit tests
+      run: poetry run pytest tests/ -v --ignore=tests/test_integration.py
+
+    - name: Run integration tests
+      run: poetry run pytest tests/test_integration.py -v
 
     - name: Run tests with coverage
       run: poetry run pytest tests/ --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing

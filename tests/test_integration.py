@@ -206,7 +206,7 @@ class TestMCPClientSession:
         # Step 2: Discover tools
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 9
+        assert len(tool_names) == 18
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool
@@ -557,3 +557,162 @@ class TestMCPClientSession:
             response = await view.post(request)
 
         assert response.status == 202
+
+    async def test_automation_crud_round_trip(self, view, populated_hass):
+        """Test create, update, delete automation round-trip."""
+        populated_hass.config.path = Mock(return_value="/config/automations.yaml")
+        populated_hass.services.async_call = AsyncMock()
+
+        yaml_store = []
+
+        def mock_load_list(path):
+            return list(yaml_store)
+
+        def mock_save(path, data):
+            yaml_store.clear()
+            yaml_store.extend(data)
+
+        async def run_fn(fn):
+            return fn()
+
+        populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+                side_effect=mock_load_list,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                side_effect=mock_save,
+            ),
+        ):
+            # Create
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "create_automation",
+                    "arguments": {"config": {"alias": "Test Auto", "trigger": []}},
+                },
+                msg_id=100,
+            )
+            text = result["result"]["content"][0]["text"]
+            assert "Successfully created" in text
+            auto_id = text.split("id: ")[1]
+            assert len(yaml_store) == 1
+
+            # Update
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "update_automation",
+                    "arguments": {
+                        "automation_id": auto_id,
+                        "config": {"alias": "Updated Auto"},
+                    },
+                },
+                msg_id=101,
+            )
+            assert "Successfully updated" in result["result"]["content"][0]["text"]
+            assert yaml_store[0]["alias"] == "Updated Auto"
+
+            # Delete
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "delete_automation",
+                    "arguments": {"automation_id": auto_id},
+                },
+                msg_id=102,
+            )
+            assert "Successfully deleted" in result["result"]["content"][0]["text"]
+            assert len(yaml_store) == 0
+
+    async def test_script_crud_round_trip(self, view, populated_hass):
+        """Test create, update, delete script round-trip."""
+        populated_hass.config.path = Mock(return_value="/config/scripts.yaml")
+        populated_hass.services.async_call = AsyncMock()
+
+        yaml_store = {}
+
+        def mock_load_dict(path):
+            return dict(yaml_store)
+
+        def mock_save(path, data):
+            yaml_store.clear()
+            yaml_store.update(data)
+
+        async def run_fn(fn):
+            return fn()
+
+        populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager._load_yaml_dict",
+                side_effect=mock_load_dict,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                side_effect=mock_save,
+            ),
+        ):
+            # Create
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "create_script",
+                    "arguments": {
+                        "key": "test_script",
+                        "config": {"alias": "Test Script", "sequence": []},
+                    },
+                },
+                msg_id=110,
+            )
+            assert "Successfully created script" in result["result"]["content"][0]["text"]
+            assert "test_script" in yaml_store
+
+            # Update
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "update_script",
+                    "arguments": {
+                        "key": "test_script",
+                        "config": {"alias": "Updated Script", "sequence": []},
+                    },
+                },
+                msg_id=111,
+            )
+            assert "Successfully updated" in result["result"]["content"][0]["text"]
+            assert yaml_store["test_script"]["alias"] == "Updated Script"
+
+            # Duplicate create fails
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "create_script",
+                    "arguments": {
+                        "key": "test_script",
+                        "config": {"alias": "Dup"},
+                    },
+                },
+                msg_id=112,
+            )
+            assert "Error creating script" in result["result"]["content"][0]["text"]
+
+            # Delete
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "delete_script", "arguments": {"key": "test_script"}},
+                msg_id=113,
+            )
+            assert "Successfully deleted" in result["result"]["content"][0]["text"]
+            assert "test_script" not in yaml_store

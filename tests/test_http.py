@@ -1778,6 +1778,117 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert "Successfully deleted scene" in body["result"]["content"][0]["text"]
 
+    async def test_post_tools_call_create_scene_error(self, view, mock_hass):
+        """Test POST with tools/call for create_scene when write fails."""
+        mock_hass.config.path.return_value = "/config/scenes.yaml"
+
+        async def run_fn(fn):
+            return fn()
+
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "create_scene",
+                    "arguments": {"config": {"name": "Test"}},
+                },
+                "id": 55,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+                side_effect=Exception("Permission denied"),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Error creating scene" in body["result"]["content"][0]["text"]
+
+    async def test_post_tools_call_update_scene_not_found(self, view, mock_hass):
+        """Test POST with tools/call for update_scene with invalid id."""
+        mock_hass.config.path.return_value = "/config/scenes.yaml"
+
+        async def run_fn(fn):
+            return fn()
+
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "update_scene",
+                    "arguments": {
+                        "scene_id": "nonexistent",
+                        "config": {"name": "Updated"},
+                    },
+                },
+                "id": 56,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+                return_value=[],
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Error updating scene" in body["result"]["content"][0]["text"]
+
+    async def test_post_tools_call_delete_scene_not_found(self, view, mock_hass):
+        """Test POST with tools/call for delete_scene with invalid id."""
+        mock_hass.config.path.return_value = "/config/scenes.yaml"
+
+        async def run_fn(fn):
+            return fn()
+
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "delete_scene",
+                    "arguments": {"scene_id": "nonexistent"},
+                },
+                "id": 57,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+                return_value=[],
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Error deleting scene" in body["result"]["content"][0]["text"]
+
     async def test_post_tools_call_create_script(self, view, mock_hass):
         """Test POST with tools/call for create_script."""
         mock_hass.config.path.return_value = "/config/scripts.yaml"

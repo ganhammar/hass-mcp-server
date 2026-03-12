@@ -7,13 +7,15 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 ## Features
 
 - 🌐 **HTTP transport** (not SSE) - works remotely, not just locally
-- 🏠 Full Home Assistant API access
+- 🔐 **OAuth 2.0 authentication** with Dynamic Client Registration (via [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server))
+- 🏠 Full Home Assistant API access (entities, services, areas, devices, history)
 - 🔧 Easy HACS installation
-- 📊 Access to entities, states, and services
+- 📝 CRUD management of automations, scenes, and scripts
+- 📊 Resources, prompts, and completions for richer AI interactions
 
 ## Prerequisites
 
-This plugin requires [hass-oidc-auth](https://github.com/ganhammar/hass-oidc-auth) to be installed and configured for OIDC authentication.
+This plugin requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) to be installed and configured for OIDC authentication.
 
 ## Installation
 
@@ -27,7 +29,7 @@ This plugin requires [hass-oidc-auth](https://github.com/ganhammar/hass-oidc-aut
 
 ### Manual Installation
 
-1. Copy the `custom_components/mcp_server` folder to your Home Assistant `custom_components` directory
+1. Copy the `custom_components/mcp_server_http_transport` folder to your Home Assistant `custom_components` directory
 1. Restart Home Assistant
 1. Configure the integration (see Configuration section below)
 
@@ -63,11 +65,110 @@ The MCP server uses OAuth 2.0 Dynamic Client Registration (DCR), which allows Cl
 
 That's it! Claude will now be able to interact with your Home Assistant instance through the MCP server.
 
-### Available Tools
+## MCP Capabilities
 
-- `get_state`: Get the current state of any Home Assistant entity
-- `call_service`: Call any Home Assistant service (turn on lights, etc.)
-- `list_entities`: List all entities, optionally filtered by domain
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `get_state` | Get the current state of any entity |
+| `call_service` | Call any Home Assistant service |
+| `list_entities` | List all entities, optionally filtered by domain |
+| `get_config` | Get Home Assistant configuration (version, location, units, timezone) |
+| `list_areas` | List all areas |
+| `list_devices` | List devices, optionally filtered by area |
+| `list_services` | List available services, optionally filtered by domain |
+| `render_template` | Evaluate a Jinja2 template |
+| `get_history` | Get state history of an entity over a time range |
+| `create_automation` | Create a new automation |
+| `update_automation` | Update an existing automation |
+| `delete_automation` | Delete an automation |
+| `create_scene` | Create a new scene |
+| `update_scene` | Update an existing scene |
+| `delete_scene` | Delete a scene |
+| `create_script` | Create a new script |
+| `update_script` | Update an existing script |
+| `delete_script` | Delete a script |
+
+### Resources
+
+| URI | Description |
+|-----|-------------|
+| `hass://config` | Home Assistant configuration |
+| `hass://areas` | All areas |
+| `hass://entity/{entity_id}` | State and attributes of a specific entity |
+
+### Prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `troubleshoot_device` | Diagnose issues with a specific entity |
+| `daily_summary` | Summarize recent activity across all entities |
+
+### Completions
+
+Autocompletion is supported for `entity_id`, `domain`, `service`, and `area_id` arguments.
+
+## FAQ
+
+<details>
+<summary>How do I list all automations, scenes, or scripts?</summary>
+
+Use `list_entities` with the `domain` filter. This works for any entity type in Home Assistant.
+
+```
+list_entities(domain="automation")  // all automations
+list_entities(domain="scene")       // all scenes
+list_entities(domain="script")      // all scripts
+list_entities(domain="light")       // all lights
+```
+
+To get the full state and attributes of a specific entity, use `get_state`:
+
+```
+get_state(entity_id="automation.morning_routine")
+```
+</details>
+
+<details>
+<summary>How do I create an automation?</summary>
+
+Use `create_automation` with a standard HA automation config:
+
+```json
+create_automation(config={
+  "alias": "Turn on lights at sunset",
+  "trigger": [{"platform": "sun", "event": "sunset"}],
+  "action": [{"service": "light.turn_on", "target": {"entity_id": "light.living_room"}}]
+})
+```
+
+The same pattern applies to scenes and scripts. Scripts use a `key` parameter instead of an auto-generated ID:
+
+```json
+create_script(key="morning_routine", config={
+  "alias": "Morning Routine",
+  "sequence": [{"service": "light.turn_on", "target": {"entity_id": "light.bedroom"}}]
+})
+```
+</details>
+
+<details>
+<summary>How do I call a service like turning on a light?</summary>
+
+Use `call_service` with the domain, service, and optionally an entity and extra data:
+
+```json
+call_service(domain="light", service="turn_on", entity_id="light.living_room", data={"brightness": 200})
+```
+
+To discover what services are available:
+
+```
+list_services()                    // all services
+list_services(domain="light")      // just light services
+```
+</details>
 
 ## License
 

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from custom_components.mcp_server_http_transport.dashboard_manager import (
+    _register_panel,
     _resolve_url_path,
     create_dashboard,
     delete_dashboard,
@@ -22,6 +23,7 @@ LOVELACE_KEY = "lovelace"
 _COLLECTION_CLS = "homeassistant.components.lovelace.dashboard.DashboardsCollection"
 _STORAGE_CLS = "homeassistant.components.lovelace.dashboard.LovelaceStorage"
 _FRONTEND = "homeassistant.components.frontend"
+_REGISTER_PANEL = "custom_components.mcp_server_http_transport.dashboard_manager._register_panel"
 
 
 def _make_hass(dashboards: dict) -> Mock:
@@ -44,6 +46,62 @@ class TestResolveUrlPath:
 
     def test_empty_string_passes_through(self):
         assert _resolve_url_path("") == ""
+
+
+class TestRegisterPanel:
+    """Tests for _register_panel."""
+
+    def test_registers_panel_with_sidebar(self):
+        hass = Mock()
+        config = {
+            "title": "My Dash",
+            "icon": "mdi:flash",
+            "require_admin": False,
+            "show_in_sidebar": True,
+        }
+
+        with patch(_FRONTEND) as mock_frontend:
+            _register_panel(hass, "my-dash", config)
+
+        mock_frontend.async_register_built_in_panel.assert_called_once_with(
+            hass,
+            "lovelace",
+            frontend_url_path="my-dash",
+            require_admin=False,
+            config={"mode": "storage"},
+            update=False,
+            sidebar_title="My Dash",
+            sidebar_icon="mdi:flash",
+        )
+
+    def test_registers_panel_without_sidebar(self):
+        hass = Mock()
+        config = {"title": "Hidden", "show_in_sidebar": False}
+
+        with patch(_FRONTEND) as mock_frontend:
+            _register_panel(hass, "hidden", config)
+
+        call_kwargs = mock_frontend.async_register_built_in_panel.call_args[1]
+        assert "sidebar_title" not in call_kwargs
+        assert "sidebar_icon" not in call_kwargs
+
+    def test_registers_panel_with_update_flag(self):
+        hass = Mock()
+        config = {"title": "Updated"}
+
+        with patch(_FRONTEND) as mock_frontend:
+            _register_panel(hass, "dash", config, update=True)
+
+        call_kwargs = mock_frontend.async_register_built_in_panel.call_args[1]
+        assert call_kwargs["update"] is True
+
+    def test_swallows_registration_exception(self):
+        hass = Mock()
+        config = {"title": "Broken"}
+
+        with patch(_FRONTEND) as mock_frontend:
+            mock_frontend.async_register_built_in_panel.side_effect = Exception("boom")
+            _register_panel(hass, "broken", config)  # should not raise
 
 
 class TestListDashboards:
@@ -204,7 +262,7 @@ class TestCreateDashboard:
         with (
             patch(_COLLECTION_CLS, return_value=mock_collection),
             patch(_STORAGE_CLS, return_value=mock_storage),
-            patch(_FRONTEND) as mock_frontend,
+            patch(_REGISTER_PANEL) as mock_reg,
         ):
             result = await create_dashboard(hass, "my-dash", "My Dashboard")
 
@@ -212,7 +270,7 @@ class TestCreateDashboard:
         assert result["title"] == "My Dashboard"
         mock_collection.async_create_item.assert_called_once()
         assert hass.data[LOVELACE_KEY].dashboards["my-dash"] == mock_storage
-        mock_frontend.async_register_built_in_panel.assert_called_once()
+        mock_reg.assert_called_once_with(hass, "my-dash", created_item)
 
     async def test_rejects_default_url_path(self):
         hass = Mock()
@@ -233,7 +291,7 @@ class TestCreateDashboard:
         with (
             patch(_COLLECTION_CLS, return_value=mock_collection),
             patch(_STORAGE_CLS),
-            patch(_FRONTEND),
+            patch(_REGISTER_PANEL),
         ):
             await create_dashboard(hass, "dash", "Dash", icon="mdi:flash")
 
@@ -257,12 +315,13 @@ class TestUpdateDashboard:
 
         with (
             patch(_COLLECTION_CLS, return_value=mock_collection),
-            patch(_FRONTEND),
+            patch(_REGISTER_PANEL) as mock_reg,
         ):
             result = await update_dashboard(hass, "my-dash", title="New Title")
 
         assert result["title"] == "New Title"
         mock_collection.async_update_item.assert_called_once_with("abc123", {"title": "New Title"})
+        mock_reg.assert_called_once_with(hass, "my-dash", updated_item, update=True)
 
     async def test_rejects_default_url_path(self):
         hass = Mock()

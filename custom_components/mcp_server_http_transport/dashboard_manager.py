@@ -8,6 +8,32 @@ from homeassistant.core import HomeAssistant
 _LOGGER = logging.getLogger(__name__)
 
 
+def _register_panel(
+    hass: HomeAssistant,
+    url_path: str,
+    config: dict[str, Any],
+    update: bool = False,
+) -> None:
+    """Register a Lovelace panel, mirroring HA's internal _register_panel."""
+    from homeassistant.components import frontend
+
+    kwargs: dict[str, Any] = {
+        "frontend_url_path": url_path,
+        "require_admin": config.get("require_admin", False),
+        "config": {"mode": "storage"},
+        "update": update,
+    }
+
+    if config.get("show_in_sidebar", True):
+        kwargs["sidebar_title"] = config.get("title", "")
+        kwargs["sidebar_icon"] = config.get("icon", "mdi:view-dashboard")
+
+    try:
+        frontend.async_register_built_in_panel(hass, "lovelace", **kwargs)
+    except Exception:
+        _LOGGER.debug("Panel registration for '%s' failed", url_path)
+
+
 def _resolve_url_path(url_path: str) -> str | None:
     """Map the public url_path value to the internal key.
 
@@ -108,7 +134,6 @@ async def create_dashboard(
     manually replicates the side effects that HA's ``lovelace.async_setup``
     normally wires up (panel registration, dashboards dict update).
     """
-    from homeassistant.components import frontend
     from homeassistant.components.lovelace.const import LOVELACE_DATA
     from homeassistant.components.lovelace.dashboard import (
         DashboardsCollection,
@@ -136,18 +161,7 @@ async def create_dashboard(
     dashboard_obj = LovelaceStorage(hass, item)
     hass.data[LOVELACE_DATA].dashboards[url_path] = dashboard_obj
 
-    try:
-        frontend.async_register_built_in_panel(
-            hass,
-            "lovelace",
-            url_path=url_path,
-            require_admin=require_admin,
-            sidebar_title=title,
-            sidebar_icon=icon or "mdi:view-dashboard",
-            config={"url_path": url_path},
-        )
-    except Exception:
-        _LOGGER.debug("Panel registration for '%s' (may already exist)", url_path)
+    _register_panel(hass, url_path, item)
 
     return dict(item)
 
@@ -158,7 +172,6 @@ async def update_dashboard(
     **fields: Any,
 ) -> dict[str, Any]:
     """Update a dashboard's metadata (experimental)."""
-    from homeassistant.components import frontend
     from homeassistant.components.lovelace.const import LOVELACE_DATA
     from homeassistant.components.lovelace.dashboard import DashboardsCollection
 
@@ -184,20 +197,7 @@ async def update_dashboard(
     if url_path in hass.data[LOVELACE_DATA].dashboards:
         hass.data[LOVELACE_DATA].dashboards[url_path].config = item
 
-    # Re-register panel
-    try:
-        frontend.async_register_built_in_panel(
-            hass,
-            "lovelace",
-            url_path=url_path,
-            require_admin=item.get("require_admin", False),
-            sidebar_title=item.get("title", ""),
-            sidebar_icon=item.get("icon", "mdi:view-dashboard"),
-            config={"url_path": url_path},
-            update=True,
-        )
-    except Exception:
-        _LOGGER.debug("Panel re-registration for '%s' (may not exist)", url_path)
+    _register_panel(hass, url_path, item, update=True)
 
     return dict(item)
 

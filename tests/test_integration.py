@@ -206,7 +206,7 @@ class TestMCPClientSession:
         # Step 2: Discover tools
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 18
+        assert len(tool_names) == 25
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool
@@ -217,7 +217,7 @@ class TestMCPClientSession:
         # Step 3: Discover resources
         result = await self._call(view, "resources/list", msg_id=3)
         assert len(result["result"]["resources"]) == 2
-        assert len(result["result"]["resourceTemplates"]) == 1
+        assert len(result["result"]["resourceTemplates"]) == 2
 
         # Step 4: Discover prompts
         result = await self._call(view, "prompts/list", msg_id=4)
@@ -716,3 +716,70 @@ class TestMCPClientSession:
             )
             assert "Successfully deleted" in result["result"]["content"][0]["text"]
             assert "test_script" not in yaml_store
+
+    async def test_dashboard_config_round_trip(self, view, populated_hass):
+        """Test get/save/delete dashboard config round-trip."""
+        dashboard_store = {}
+
+        mock_dashboard = AsyncMock()
+        mock_dashboard.async_load.return_value = dict(dashboard_store)
+        mock_dashboard.config = {"mode": "storage", "title": "Energy", "icon": "mdi:flash"}
+
+        async def mock_save(config):
+            dashboard_store.clear()
+            dashboard_store.update(config)
+
+        async def mock_delete():
+            dashboard_store.clear()
+
+        mock_dashboard.async_save = AsyncMock(side_effect=mock_save)
+        mock_dashboard.async_delete = AsyncMock(side_effect=mock_delete)
+
+        lovelace_data = Mock()
+        lovelace_data.dashboards = {"energy": mock_dashboard}
+        populated_hass.data = {"lovelace": lovelace_data}
+
+        # Get (empty)
+        result = await self._call(
+            view,
+            "tools/call",
+            {"name": "get_dashboard_config", "arguments": {"url_path": "energy"}},
+            msg_id=120,
+        )
+        config = json.loads(result["result"]["content"][0]["text"])
+        assert config == {}
+
+        # Save
+        new_config = {"views": [{"title": "Energy", "cards": []}]}
+        result = await self._call(
+            view,
+            "tools/call",
+            {
+                "name": "save_dashboard_config",
+                "arguments": {"url_path": "energy", "config": new_config},
+            },
+            msg_id=121,
+        )
+        assert "Successfully saved" in result["result"]["content"][0]["text"]
+        assert dashboard_store == new_config
+
+        # Get (after save) — update mock to return saved data
+        mock_dashboard.async_load.return_value = dict(dashboard_store)
+        result = await self._call(
+            view,
+            "tools/call",
+            {"name": "get_dashboard_config", "arguments": {"url_path": "energy"}},
+            msg_id=122,
+        )
+        config = json.loads(result["result"]["content"][0]["text"])
+        assert config["views"][0]["title"] == "Energy"
+
+        # Delete config
+        result = await self._call(
+            view,
+            "tools/call",
+            {"name": "delete_dashboard_config", "arguments": {"url_path": "energy"}},
+            msg_id=123,
+        )
+        assert "Successfully deleted config" in result["result"]["content"][0]["text"]
+        assert dashboard_store == {}

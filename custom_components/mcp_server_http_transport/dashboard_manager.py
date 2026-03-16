@@ -27,19 +27,16 @@ async def list_dashboards(hass: HomeAssistant) -> list[dict[str, Any]]:
     dashboards = hass.data[LOVELACE_DATA].dashboards
     result: list[dict[str, Any]] = []
     for key, dashboard in dashboards.items():
+        config = getattr(dashboard, "config", None)
         entry: dict[str, Any] = {
             "url_path": "default" if key is None else key,
-            "mode": (
-                dashboard.config.get("mode", "storage")
-                if hasattr(dashboard, "config")
-                else "storage"
-            ),
+            "mode": config.get("mode", "storage") if isinstance(config, dict) else "storage",
         }
-        if hasattr(dashboard, "config") and isinstance(dashboard.config, dict):
-            entry["title"] = dashboard.config.get("title", "")
-            entry["icon"] = dashboard.config.get("icon", "")
-            entry["show_in_sidebar"] = dashboard.config.get("show_in_sidebar", True)
-            entry["require_admin"] = dashboard.config.get("require_admin", False)
+        if isinstance(config, dict):
+            entry["title"] = config.get("title", "")
+            entry["icon"] = config.get("icon", "")
+            entry["show_in_sidebar"] = config.get("show_in_sidebar", True)
+            entry["require_admin"] = config.get("require_admin", False)
         result.append(entry)
     return result
 

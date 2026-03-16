@@ -70,6 +70,18 @@ class TestListDashboards:
         assert "default" in url_paths
         assert "energy" in url_paths
 
+    async def test_handles_dashboard_with_none_config(self):
+        dashboard = Mock()
+        dashboard.config = None
+
+        hass = _make_hass({None: dashboard})
+        result = await list_dashboards(hass)
+
+        assert len(result) == 1
+        assert result[0]["url_path"] == "default"
+        assert result[0]["mode"] == "storage"
+        assert "title" not in result[0]
+
     async def test_returns_empty_list_when_no_dashboards(self):
         hass = _make_hass({})
         result = await list_dashboards(hass)

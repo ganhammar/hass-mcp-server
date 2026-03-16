@@ -28,6 +28,12 @@ RESOURCE_TEMPLATES = [
         "description": "Current state and attributes of a specific entity",
         "mimeType": "application/json",
     },
+    {
+        "uriTemplate": "hass://dashboard/{url_path}",
+        "name": "Dashboard Configuration",
+        "description": "Full configuration (views and cards) of a specific dashboard",
+        "mimeType": "application/json",
+    },
 ]
 
 
@@ -50,6 +56,10 @@ async def read_resource(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
     if uri.startswith("hass://entity/"):
         entity_id = uri[len("hass://entity/") :]
         return _read_entity(hass, uri, entity_id)
+
+    if uri.startswith("hass://dashboard/"):
+        url_path = uri[len("hass://dashboard/") :]
+        return await _read_dashboard(hass, uri, url_path)
 
     raise ValueError(f"Unknown resource: {uri}")
 
@@ -84,6 +94,14 @@ def _read_areas(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         for area in registry.async_list_areas()
     ]
     return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(areas, indent=2)}]
+
+
+async def _read_dashboard(hass: HomeAssistant, uri: str, url_path: str) -> list[dict[str, Any]]:
+    """Read a dashboard configuration as a resource."""
+    from .dashboard_manager import get_dashboard_config
+
+    config = await get_dashboard_config(hass, url_path)
+    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(config, indent=2)}]
 
 
 def _read_entity(hass: HomeAssistant, uri: str, entity_id: str) -> list[dict[str, Any]]:

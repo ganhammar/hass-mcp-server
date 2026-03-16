@@ -11,6 +11,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, and scripts
+- 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards)
 - 📊 Resources, prompts, and completions for richer AI interactions
 
 ## Prerequisites
@@ -89,6 +90,13 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 | `create_script` | Create a new script |
 | `update_script` | Update an existing script |
 | `delete_script` | Delete a script |
+| `list_dashboards` | List all Lovelace dashboards with metadata |
+| `get_dashboard_config` | Get full dashboard configuration (views/cards) |
+| `save_dashboard_config` | Save (replace) full dashboard configuration |
+| `delete_dashboard_config` | Reset a dashboard configuration to empty |
+| `create_dashboard` | Create a new Lovelace dashboard (experimental) |
+| `update_dashboard` | Update dashboard metadata (experimental) |
+| `delete_dashboard` | Delete a dashboard and its config (experimental) |
 
 ### Resources
 
@@ -97,6 +105,7 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 | `hass://config` | Home Assistant configuration |
 | `hass://areas` | All areas |
 | `hass://entity/{entity_id}` | State and attributes of a specific entity |
+| `hass://dashboard/{url_path}` | Full configuration of a specific dashboard |
 
 ### Prompts
 
@@ -107,7 +116,7 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 
 ### Completions
 
-Autocompletion is supported for `entity_id`, `domain`, `service`, and `area_id` arguments.
+Autocompletion is supported for `entity_id`, `domain`, `service`, `area_id`, and `url_path` arguments.
 
 ## FAQ
 
@@ -168,6 +177,25 @@ To discover what services are available:
 list_services()                    // all services
 list_services(domain="light")      // just light services
 ```
+</details>
+
+<details>
+<summary>How do I manage Lovelace dashboards?</summary>
+
+Use `list_dashboards` to see all dashboards, then `get_dashboard_config` and `save_dashboard_config` to read and modify their content. Use `url_path="default"` for the main Overview dashboard:
+
+```json
+get_dashboard_config(url_path="default")
+save_dashboard_config(url_path="default", config={"views": [{"title": "Home", "cards": [...]}]})
+```
+
+To create or delete dashboards themselves, use the experimental `create_dashboard` and `delete_dashboard` tools. These use internal HA APIs and may break with future HA updates.
+</details>
+
+<details>
+<summary>What does "experimental" mean for dashboard tools?</summary>
+
+The `create_dashboard`, `update_dashboard`, and `delete_dashboard` tools use internal Home Assistant APIs (`DashboardsCollection`) that are not publicly exposed. They replicate side effects (panel registration, dashboards dict updates) that HA normally handles internally. These may break with HA updates that change internal behavior. The config-level tools (`list_dashboards`, `get/save/delete_dashboard_config`) use stable public APIs.
 </details>
 
 ## License

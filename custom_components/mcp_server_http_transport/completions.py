@@ -27,6 +27,9 @@ async def complete(
     if arg_name == "area_id":
         return _complete_area_id(hass, arg_value)
 
+    if arg_name == "url_path":
+        return _complete_url_path(hass, arg_value)
+
     return {"values": [], "hasMore": False}
 
 
@@ -66,4 +69,22 @@ def _complete_area_id(hass: HomeAssistant, prefix: str) -> dict[str, Any]:
     registry = ar.async_get(hass)
     areas = [area.id for area in registry.async_list_areas()]
     matches = sorted(a for a in areas if a.startswith(prefix))
+    return {"values": matches, "hasMore": False}
+
+
+def _complete_url_path(hass: HomeAssistant, prefix: str) -> dict[str, Any]:
+    """Complete dashboard URL paths."""
+    from homeassistant.components.lovelace.const import LOVELACE_DATA
+
+    try:
+        dashboards = hass.data[LOVELACE_DATA].dashboards
+    except (KeyError, AttributeError):
+        return {"values": [], "hasMore": False}
+
+    paths = []
+    for key in dashboards:
+        path = "default" if key is None else key
+        paths.append(path)
+
+    matches = sorted(p for p in paths if p.startswith(prefix))
     return {"values": matches, "hasMore": False}

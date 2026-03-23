@@ -62,7 +62,7 @@ def test_get_protected_resource_metadata():
 
     metadata = _get_protected_resource_metadata(base_url)
 
-    assert metadata["resource"] == base_url
+    assert metadata["resource"] == f"{base_url}/api/mcp"
     assert metadata["authorization_servers"] == [f"{base_url}/oidc"]
     assert metadata["bearer_methods_supported"] == ["header"]
     assert metadata["resource_signing_alg_values_supported"] == ["RS256"]
@@ -85,7 +85,7 @@ class TestMCPProtectedResourceMetadataView:
         assert response.content_type == "application/json"
 
         body = json.loads(response.body)
-        assert body["resource"] == "https://homeassistant.local"
+        assert body["resource"] == "https://homeassistant.local/api/mcp"
         assert body["authorization_servers"] == ["https://homeassistant.local/oidc"]
 
     async def test_get_with_forwarded_headers(self):
@@ -100,7 +100,7 @@ class TestMCPProtectedResourceMetadataView:
         response = await view.get(request)
 
         body = json.loads(response.body)
-        assert body["resource"] == "https://example.com"
+        assert body["resource"] == "https://example.com/api/mcp"
 
 
 class TestMCPSubpathProtectedResourceMetadataView:
@@ -117,7 +117,7 @@ class TestMCPSubpathProtectedResourceMetadataView:
 
         assert response.status == 200
         body = json.loads(response.body)
-        assert body["resource"] == "https://homeassistant.local"
+        assert body["resource"] == "https://homeassistant.local/api/mcp"
 
 
 class TestMCPEndpointView:

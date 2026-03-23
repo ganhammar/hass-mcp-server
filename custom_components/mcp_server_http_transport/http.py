@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 def _get_protected_resource_metadata(base_url: str) -> dict[str, Any]:
     """Generate OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
     return {
-        "resource": base_url,
+        "resource": f"{base_url}/api/mcp",
         "authorization_servers": [f"{base_url}/oidc"],
         "bearer_methods_supported": ["header"],
         "resource_signing_alg_values_supported": ["RS256"],
@@ -98,8 +98,8 @@ class MCPEndpointView(HomeAssistantView):
         token_payload = self._validate_token(request)
         if not token_payload:
             base_url = get_issuer_from_request(request)
-            # Point to /oidc authorization server metadata directly
-            resource_metadata_url = f"{base_url}/oidc/.well-known/oauth-authorization-server"
+            # Point to protected resource metadata (RFC 9728)
+            resource_metadata_url = f"{base_url}/.well-known/oauth-protected-resource/api/mcp"
             www_authenticate = (
                 f'Bearer realm="MCP Server", resource_metadata="{resource_metadata_url}"'
             )

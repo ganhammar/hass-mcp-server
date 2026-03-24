@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
@@ -105,10 +106,15 @@ class HomeAssistantMCPServer:
         if state is None:
             return [TextContent(type="text", text=f"Entity {entity_id} not found")]
 
+        registry = er.async_get(self.hass)
+        entry = registry.async_get(entity_id)
+        aliases = sorted(entry.aliases) if entry and entry.aliases else []
+
         result = {
             "entity_id": state.entity_id,
             "state": state.state,
             "attributes": dict(state.attributes),
+            "aliases": aliases,
             "last_changed": state.last_changed.isoformat(),
             "last_updated": state.last_updated.isoformat(),
         }
@@ -136,16 +142,20 @@ class HomeAssistantMCPServer:
     async def _list_entities(self, arguments: dict[str, Any]) -> list[TextContent]:
         """List entities."""
         domain_filter = arguments.get("domain")
+        registry = er.async_get(self.hass)
 
         entities = []
         for state in self.hass.states.async_all():
             if domain_filter and not state.entity_id.startswith(f"{domain_filter}."):
                 continue
+            entry = registry.async_get(state.entity_id)
+            aliases = sorted(entry.aliases) if entry and entry.aliases else []
             entities.append(
                 {
                     "entity_id": state.entity_id,
                     "state": state.state,
                     "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+                    "aliases": aliases,
                 }
             )
 

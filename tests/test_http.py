@@ -235,6 +235,11 @@ class TestMCPEndpointView:
         mock_state.last_updated = datetime(2024, 1, 1, 12, 0, 0)
         mock_hass.states.get.return_value = mock_state
 
+        mock_entry = Mock()
+        mock_entry.aliases = {"Lounge Light"}
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
         request = Mock()
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(
@@ -246,7 +251,13 @@ class TestMCPEndpointView:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.er.async_get",
+                return_value=mock_er,
+            ),
+        ):
             response = await view.post(request)
 
         assert response.status == 200
@@ -254,6 +265,8 @@ class TestMCPEndpointView:
         assert body["jsonrpc"] == "2.0"
         assert "result" in body
         assert "content" in body["result"]
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert data["aliases"] == ["Lounge Light"]
 
     async def test_post_tools_call_get_state_not_found(self, view, mock_hass):
         """Test POST with tools/call for non-existent entity."""
@@ -356,6 +369,9 @@ class TestMCPEndpointView:
 
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
+        mock_er = Mock()
+        mock_er.async_get.return_value = None
+
         request = Mock()
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(
@@ -367,7 +383,13 @@ class TestMCPEndpointView:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.er.async_get",
+                return_value=mock_er,
+            ),
+        ):
             response = await view.post(request)
 
         assert response.status == 200
@@ -375,6 +397,7 @@ class TestMCPEndpointView:
         entities = json.loads(body["result"]["content"][0]["text"])
         assert len(entities) == 2
         assert entities[0]["entity_id"] == "light.living_room"
+        assert entities[0]["aliases"] == []
         assert entities[1]["entity_id"] == "switch.kitchen"
 
     async def test_post_tools_call_list_entities_with_domain_filter(self, view, mock_hass):
@@ -391,6 +414,9 @@ class TestMCPEndpointView:
 
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
+        mock_er = Mock()
+        mock_er.async_get.return_value = None
+
         request = Mock()
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(
@@ -402,7 +428,13 @@ class TestMCPEndpointView:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.er.async_get",
+                return_value=mock_er,
+            ),
+        ):
             response = await view.post(request)
 
         assert response.status == 200

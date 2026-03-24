@@ -135,6 +135,36 @@ def mock_area_registry():
 
 
 @pytest.fixture
+def mock_entity_registry():
+    """Create a mock entity registry."""
+    entries = {}
+
+    entry_living = Mock()
+    entry_living.aliases = {"Living Room Lamp", "Lounge Light"}
+    entries["light.living_room"] = entry_living
+
+    entry_bedroom = Mock()
+    entry_bedroom.aliases = set()
+    entries["light.bedroom"] = entry_bedroom
+
+    entry_temp = Mock()
+    entry_temp.aliases = {"Temp Sensor"}
+    entries["sensor.temperature"] = entry_temp
+
+    entry_switch = Mock()
+    entry_switch.aliases = set()
+    entries["switch.kitchen"] = entry_switch
+
+    entry_auto = Mock()
+    entry_auto.aliases = {"Wake Up Routine"}
+    entries["automation.morning_routine"] = entry_auto
+
+    registry = Mock()
+    registry.async_get = Mock(side_effect=lambda eid: entries.get(eid))
+    return registry
+
+
+@pytest.fixture
 def mock_device_registry():
     """Create a mock device registry."""
     device_hue = Mock()
@@ -226,16 +256,22 @@ class TestMCPClientSession:
             assert "name" in prompt
             assert "description" in prompt
 
-    async def test_entity_consistency_across_tools_and_resources(self, view):
+    async def test_entity_consistency_across_tools_and_resources(
+        self, view, mock_entity_registry
+    ):
         """Verify get_state tool and resources/read return consistent data."""
-        # Get state via tool
-        tool_result = await self._call(
-            view,
-            "tools/call",
-            {"name": "get_state", "arguments": {"entity_id": "light.living_room"}},
-            msg_id=1,
-        )
-        tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            # Get state via tool
+            tool_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "get_state", "arguments": {"entity_id": "light.living_room"}},
+                msg_id=1,
+            )
+            tool_data = json.loads(tool_result["result"]["content"][0]["text"])
 
         # Get state via resource
         resource_result = await self._call(
@@ -251,6 +287,7 @@ class TestMCPClientSession:
         assert tool_data["state"] == resource_data["state"]
         assert tool_data["attributes"] == resource_data["attributes"]
         assert tool_data["last_changed"] == resource_data["last_changed"]
+        assert tool_data["aliases"] == ["Living Room Lamp", "Lounge Light"]
 
     async def test_config_consistency_across_tools_and_resources(self, view):
         """Verify that get_config tool and resources/read return consistent data."""
@@ -275,46 +312,57 @@ class TestMCPClientSession:
         assert tool_data["time_zone"] == resource_data["time_zone"]
         assert tool_data["unit_system"] == resource_data["unit_system"]
 
-    async def test_list_entities_domain_filtering(self, view):
+    async def test_list_entities_domain_filtering(self, view, mock_entity_registry):
         """Test that domain filtering works correctly across entity types."""
-        # All entities
-        result = await self._call(
-            view, "tools/call", {"name": "list_entities", "arguments": {}}, msg_id=1
-        )
-        all_entities = json.loads(result["result"]["content"][0]["text"])
-        assert len(all_entities) == 5
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            # All entities
+            result = await self._call(
+                view, "tools/call", {"name": "list_entities", "arguments": {}}, msg_id=1
+            )
+            all_entities = json.loads(result["result"]["content"][0]["text"])
+            assert len(all_entities) == 5
 
-        # Light entities only
-        result = await self._call(
-            view,
-            "tools/call",
-            {"name": "list_entities", "arguments": {"domain": "light"}},
-            msg_id=2,
-        )
-        lights = json.loads(result["result"]["content"][0]["text"])
-        assert len(lights) == 2
-        assert all(e["entity_id"].startswith("light.") for e in lights)
+            # Light entities only
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {"domain": "light"}},
+                msg_id=2,
+            )
+            lights = json.loads(result["result"]["content"][0]["text"])
+            assert len(lights) == 2
+            assert all(e["entity_id"].startswith("light.") for e in lights)
 
-        # Automation entities
-        result = await self._call(
-            view,
-            "tools/call",
-            {"name": "list_entities", "arguments": {"domain": "automation"}},
-            msg_id=3,
-        )
-        automations = json.loads(result["result"]["content"][0]["text"])
-        assert len(automations) == 1
-        assert automations[0]["entity_id"] == "automation.morning_routine"
+            # Verify aliases are included
+            living_light = next(e for e in lights if e["entity_id"] == "light.living_room")
+            assert living_light["aliases"] == ["Living Room Lamp", "Lounge Light"]
+            bedroom_light = next(e for e in lights if e["entity_id"] == "light.bedroom")
+            assert bedroom_light["aliases"] == []
 
-        # Nonexistent domain
-        result = await self._call(
-            view,
-            "tools/call",
-            {"name": "list_entities", "arguments": {"domain": "climate"}},
-            msg_id=4,
-        )
-        empty = json.loads(result["result"]["content"][0]["text"])
-        assert len(empty) == 0
+            # Automation entities
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {"domain": "automation"}},
+                msg_id=3,
+            )
+            automations = json.loads(result["result"]["content"][0]["text"])
+            assert len(automations) == 1
+            assert automations[0]["entity_id"] == "automation.morning_routine"
+            assert automations[0]["aliases"] == ["Wake Up Routine"]
+
+            # Nonexistent domain
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {"domain": "climate"}},
+                msg_id=4,
+            )
+            empty = json.loads(result["result"]["content"][0]["text"])
+            assert len(empty) == 0
 
     async def test_list_devices_with_area_filtering(self, view, mock_device_registry):
         """Test device listing and area filtering."""
@@ -400,15 +448,19 @@ class TestMCPClientSession:
             blocking=True,
         )
 
-    async def test_get_state_for_nonexistent_entity(self, view):
+    async def test_get_state_for_nonexistent_entity(self, view, mock_entity_registry):
         """Test get_state gracefully handles missing entities."""
-        result = await self._call(
-            view,
-            "tools/call",
-            {"name": "get_state", "arguments": {"entity_id": "light.nonexistent"}},
-        )
-        text = result["result"]["content"][0]["text"]
-        assert "not found" in text
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "get_state", "arguments": {"entity_id": "light.nonexistent"}},
+            )
+            text = result["result"]["content"][0]["text"]
+            assert "not found" in text
 
     async def test_resource_read_entity_not_found(self, view):
         """Test resources/read for nonexistent entity returns error."""
@@ -453,7 +505,7 @@ class TestMCPClientSession:
             assert tool_areas == resource_areas
             assert len(tool_areas) == 3
 
-    async def test_completions_match_actual_entities(self, view):
+    async def test_completions_match_actual_entities(self, view, mock_entity_registry):
         """Verify completions return entity IDs that actually exist."""
         # Get completions for "light."
         comp_result = await self._call(
@@ -468,23 +520,31 @@ class TestMCPClientSession:
         assert set(completed_ids) == {"light.bedroom", "light.living_room"}
 
         # Verify each completed entity_id actually resolves via get_state
-        for entity_id in completed_ids:
-            result = await self._call(
-                view,
-                "tools/call",
-                {"name": "get_state", "arguments": {"entity_id": entity_id}},
-            )
-            data = json.loads(result["result"]["content"][0]["text"])
-            assert data["entity_id"] == entity_id
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            for entity_id in completed_ids:
+                result = await self._call(
+                    view,
+                    "tools/call",
+                    {"name": "get_state", "arguments": {"entity_id": entity_id}},
+                )
+                data = json.loads(result["result"]["content"][0]["text"])
+                assert data["entity_id"] == entity_id
 
-    async def test_completions_domains_match_actual_domains(self, view):
+    async def test_completions_domains_match_actual_domains(self, view, mock_entity_registry):
         """Verify domain completions match domains from list_entities."""
-        # Get all entities to find actual domains
-        result = await self._call(
-            view, "tools/call", {"name": "list_entities", "arguments": {}}, msg_id=1
-        )
-        all_entities = json.loads(result["result"]["content"][0]["text"])
-        actual_domains = sorted(set(e["entity_id"].split(".")[0] for e in all_entities))
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            # Get all entities to find actual domains
+            result = await self._call(
+                view, "tools/call", {"name": "list_entities", "arguments": {}}, msg_id=1
+            )
+            all_entities = json.loads(result["result"]["content"][0]["text"])
+            actual_domains = sorted(set(e["entity_id"].split(".")[0] for e in all_entities))
 
         # Get domain completions with empty prefix
         comp_result = await self._call(

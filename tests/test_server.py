@@ -1,7 +1,7 @@
 """Tests for MCP Server implementation."""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -42,7 +42,16 @@ class TestHomeAssistantMCPServer:
         mock_state.last_updated = datetime(2024, 1, 1, 12, 0, 0)
         mock_hass.states.get.return_value = mock_state
 
-        result = await server._get_state({"entity_id": "light.living_room"})
+        mock_entry = Mock()
+        mock_entry.aliases = {"Lounge Light"}
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
+        with patch(
+            "custom_components.mcp_server_http_transport.server.er.async_get",
+            return_value=mock_er,
+        ):
+            result = await server._get_state({"entity_id": "light.living_room"})
 
         assert len(result) == 1
         assert result[0].type == "text"
@@ -112,7 +121,14 @@ class TestHomeAssistantMCPServer:
 
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
-        result = await server._list_entities({})
+        mock_er = Mock()
+        mock_er.async_get.return_value = None
+
+        with patch(
+            "custom_components.mcp_server_http_transport.server.er.async_get",
+            return_value=mock_er,
+        ):
+            result = await server._list_entities({})
 
         assert len(result) == 1
         assert "light.living_room" in result[0].text
@@ -132,7 +148,14 @@ class TestHomeAssistantMCPServer:
 
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
-        result = await server._list_entities({"domain": "light"})
+        mock_er = Mock()
+        mock_er.async_get.return_value = None
+
+        with patch(
+            "custom_components.mcp_server_http_transport.server.er.async_get",
+            return_value=mock_er,
+        ):
+            result = await server._list_entities({"domain": "light"})
 
         assert len(result) == 1
         assert "light.living_room" in result[0].text
@@ -147,7 +170,14 @@ class TestHomeAssistantMCPServer:
 
         mock_hass.states.async_all.return_value = [mock_state]
 
-        result = await server._list_entities({})
+        mock_er = Mock()
+        mock_er.async_get.return_value = None
+
+        with patch(
+            "custom_components.mcp_server_http_transport.server.er.async_get",
+            return_value=mock_er,
+        ):
+            result = await server._list_entities({})
 
         assert len(result) == 1
         assert "sensor.temperature" in result[0].text

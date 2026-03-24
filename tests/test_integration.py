@@ -256,9 +256,7 @@ class TestMCPClientSession:
             assert "name" in prompt
             assert "description" in prompt
 
-    async def test_entity_consistency_across_tools_and_resources(
-        self, view, mock_entity_registry
-    ):
+    async def test_entity_consistency_across_tools_and_resources(self, view, mock_entity_registry):
         """Verify get_state tool and resources/read return consistent data."""
         with patch(
             "custom_components.mcp_server_http_transport.tools.er.async_get",

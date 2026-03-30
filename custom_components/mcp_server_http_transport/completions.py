@@ -30,6 +30,15 @@ async def complete(
     if arg_name == "url_path":
         return _complete_url_path(hass, arg_value)
 
+    if arg_name == "automation_id":
+        return await _complete_automation_id(hass, arg_value)
+
+    if arg_name == "scene_id":
+        return await _complete_scene_id(hass, arg_value)
+
+    if arg_name == "key":
+        return await _complete_script_key(hass, arg_value)
+
     return {"values": [], "hasMore": False}
 
 
@@ -88,3 +97,42 @@ def _complete_url_path(hass: HomeAssistant, prefix: str) -> dict[str, Any]:
 
     matches = sorted(p for p in paths if p.startswith(prefix))
     return {"values": matches, "hasMore": False}
+
+
+async def _complete_automation_id(hass: HomeAssistant, prefix: str) -> dict[str, Any]:
+    """Complete automation IDs."""
+    from .config_manager import read_list_entries
+
+    entries = await read_list_entries(hass, "automations.yaml")
+    ids = sorted(str(e["id"]) for e in entries if "id" in e)
+    matches = [i for i in ids if i.startswith(prefix)]
+    return {
+        "values": matches[:MAX_COMPLETIONS],
+        "hasMore": len(matches) > MAX_COMPLETIONS,
+    }
+
+
+async def _complete_scene_id(hass: HomeAssistant, prefix: str) -> dict[str, Any]:
+    """Complete scene IDs."""
+    from .config_manager import read_list_entries
+
+    entries = await read_list_entries(hass, "scenes.yaml")
+    ids = sorted(str(e["id"]) for e in entries if "id" in e)
+    matches = [i for i in ids if i.startswith(prefix)]
+    return {
+        "values": matches[:MAX_COMPLETIONS],
+        "hasMore": len(matches) > MAX_COMPLETIONS,
+    }
+
+
+async def _complete_script_key(hass: HomeAssistant, prefix: str) -> dict[str, Any]:
+    """Complete script keys."""
+    from .config_manager import read_dict_entries
+
+    entries = await read_dict_entries(hass, "scripts.yaml")
+    keys = sorted(entries.keys())
+    matches = [k for k in keys if k.startswith(prefix)]
+    return {
+        "values": matches[:MAX_COMPLETIONS],
+        "hasMore": len(matches) > MAX_COMPLETIONS,
+    }

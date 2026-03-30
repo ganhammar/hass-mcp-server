@@ -174,3 +174,51 @@ async def delete_dict_entry(
 
     await hass.async_add_executor_job(_write)
     await hass.services.async_call(reload_domain, "reload", blocking=True)
+
+
+# --- Read helpers ---
+
+
+async def read_list_entries(
+    hass: HomeAssistant,
+    config_file: str,
+) -> list[dict[str, Any]]:
+    """Read all entries from a list-based YAML config."""
+    path = hass.config.path(config_file)
+    return await hass.async_add_executor_job(_load_yaml_list, path)
+
+
+async def read_list_entry(
+    hass: HomeAssistant,
+    config_file: str,
+    entry_id: str,
+) -> dict[str, Any]:
+    """Read a single entry from a list-based YAML config by ID."""
+    path = hass.config.path(config_file)
+    entries = await hass.async_add_executor_job(_load_yaml_list, path)
+    for entry in entries:
+        if entry.get("id") == entry_id:
+            return entry
+    raise ValueError(f"Entry with id '{entry_id}' not found in {config_file}")
+
+
+async def read_dict_entries(
+    hass: HomeAssistant,
+    config_file: str,
+) -> dict[str, Any]:
+    """Read all entries from a dict-based YAML config."""
+    path = hass.config.path(config_file)
+    return await hass.async_add_executor_job(_load_yaml_dict, path)
+
+
+async def read_dict_entry(
+    hass: HomeAssistant,
+    config_file: str,
+    key: str,
+) -> dict[str, Any]:
+    """Read a single entry from a dict-based YAML config by key."""
+    path = hass.config.path(config_file)
+    entries = await hass.async_add_executor_job(_load_yaml_dict, path)
+    if key not in entries:
+        raise ValueError(f"Entry '{key}' not found in {config_file}")
+    return entries[key]

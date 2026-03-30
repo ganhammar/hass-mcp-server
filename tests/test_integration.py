@@ -236,7 +236,7 @@ class TestMCPClientSession:
         # Step 2: Discover tools
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 25
+        assert len(tool_names) == 31
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool
@@ -259,7 +259,7 @@ class TestMCPClientSession:
     async def test_entity_consistency_across_tools_and_resources(self, view, mock_entity_registry):
         """Verify get_state tool and resources/read return consistent data."""
         with patch(
-            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
             return_value=mock_entity_registry,
         ):
             # Get state via tool
@@ -313,7 +313,7 @@ class TestMCPClientSession:
     async def test_list_entities_domain_filtering(self, view, mock_entity_registry):
         """Test that domain filtering works correctly across entity types."""
         with patch(
-            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
             return_value=mock_entity_registry,
         ):
             # All entities
@@ -365,7 +365,7 @@ class TestMCPClientSession:
     async def test_list_devices_with_area_filtering(self, view, mock_device_registry):
         """Test device listing and area filtering."""
         with patch(
-            "custom_components.mcp_server_http_transport.tools.dr.async_get",
+            "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
             return_value=mock_device_registry,
         ):
             # All devices
@@ -449,7 +449,7 @@ class TestMCPClientSession:
     async def test_get_state_for_nonexistent_entity(self, view, mock_entity_registry):
         """Test get_state gracefully handles missing entities."""
         with patch(
-            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
             return_value=mock_entity_registry,
         ):
             result = await self._call(
@@ -474,7 +474,7 @@ class TestMCPClientSession:
         """Verify list_areas tool and resources/read hass://areas return consistent data."""
         with (
             patch(
-                "custom_components.mcp_server_http_transport.tools.ar.async_get",
+                "custom_components.mcp_server_http_transport.tools.entities.ar.async_get",
                 return_value=mock_area_registry,
             ),
             patch(
@@ -519,7 +519,7 @@ class TestMCPClientSession:
 
         # Verify each completed entity_id actually resolves via get_state
         with patch(
-            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
             return_value=mock_entity_registry,
         ):
             for entity_id in completed_ids:
@@ -534,7 +534,7 @@ class TestMCPClientSession:
     async def test_completions_domains_match_actual_domains(self, view, mock_entity_registry):
         """Verify domain completions match domains from list_entities."""
         with patch(
-            "custom_components.mcp_server_http_transport.tools.er.async_get",
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
             return_value=mock_entity_registry,
         ):
             # Get all entities to find actual domains
@@ -557,6 +557,94 @@ class TestMCPClientSession:
         completed_domains = comp_result["result"]["completion"]["values"]
 
         assert completed_domains == actual_domains
+
+    async def test_completions_automation_id(self, view, populated_hass):
+        """Verify completions return automation IDs from automations.yaml."""
+        populated_hass.config.path = Mock(return_value="/config/automations.yaml")
+
+        yaml_store = [
+            {"id": "abc-123", "alias": "Auto One"},
+            {"id": "abc-456", "alias": "Auto Two"},
+        ]
+
+        def mock_load_list(path):
+            return list(yaml_store)
+
+        async def run_fn(fn, *args):
+            return fn(*args) if args else fn()
+
+        populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        with patch(
+            "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+            side_effect=mock_load_list,
+        ):
+            comp_result = await self._call(
+                view,
+                "completion/complete",
+                {
+                    "ref": {"type": "ref/tool", "name": "get_automation_config"},
+                    "argument": {"name": "automation_id", "value": "abc"},
+                },
+            )
+            values = comp_result["result"]["completion"]["values"]
+            assert set(values) == {"abc-123", "abc-456"}
+
+            comp_result = await self._call(
+                view,
+                "completion/complete",
+                {
+                    "ref": {"type": "ref/tool", "name": "get_automation_config"},
+                    "argument": {"name": "automation_id", "value": "abc-1"},
+                },
+                msg_id=2,
+            )
+            values = comp_result["result"]["completion"]["values"]
+            assert values == ["abc-123"]
+
+    async def test_completions_script_key(self, view, populated_hass):
+        """Verify completions return script keys from scripts.yaml."""
+        populated_hass.config.path = Mock(return_value="/config/scripts.yaml")
+
+        yaml_store = {
+            "morning_routine": {"alias": "Morning"},
+            "movie_time": {"alias": "Movie"},
+        }
+
+        def mock_load_dict(path):
+            return dict(yaml_store)
+
+        async def run_fn(fn, *args):
+            return fn(*args) if args else fn()
+
+        populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        with patch(
+            "custom_components.mcp_server_http_transport.config_manager._load_yaml_dict",
+            side_effect=mock_load_dict,
+        ):
+            comp_result = await self._call(
+                view,
+                "completion/complete",
+                {
+                    "ref": {"type": "ref/tool", "name": "get_script_config"},
+                    "argument": {"name": "key", "value": "mo"},
+                },
+            )
+            values = comp_result["result"]["completion"]["values"]
+            assert set(values) == {"morning_routine", "movie_time"}
+
+            comp_result = await self._call(
+                view,
+                "completion/complete",
+                {
+                    "ref": {"type": "ref/tool", "name": "get_script_config"},
+                    "argument": {"name": "key", "value": "morning"},
+                },
+                msg_id=2,
+            )
+            values = comp_result["result"]["completion"]["values"]
+            assert values == ["morning_routine"]
 
     async def test_prompts_troubleshoot_with_real_entity(self, view):
         """Test troubleshoot prompt includes actual entity state data."""
@@ -630,8 +718,8 @@ class TestMCPClientSession:
             yaml_store.clear()
             yaml_store.extend(data)
 
-        async def run_fn(fn):
-            return fn()
+        async def run_fn(fn, *args):
+            return fn(*args)
 
         populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
 
@@ -660,6 +748,37 @@ class TestMCPClientSession:
             auto_id = text.split("id: ")[1]
             assert len(yaml_store) == 1
 
+            # List
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_automations", "arguments": {}},
+                msg_id=101,
+            )
+            entries = json.loads(result["result"]["content"][0]["text"])
+            assert len(entries) == 1
+            assert entries[0]["alias"] == "Test Auto"
+
+            # Get config
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "get_automation_config", "arguments": {"automation_id": auto_id}},
+                msg_id=102,
+            )
+            entry = json.loads(result["result"]["content"][0]["text"])
+            assert entry["alias"] == "Test Auto"
+            assert entry["id"] == auto_id
+
+            # Get config not found
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "get_automation_config", "arguments": {"automation_id": "nonexistent"}},
+                msg_id=103,
+            )
+            assert "Error" in result["result"]["content"][0]["text"]
+
             # Update
             result = await self._call(
                 view,
@@ -671,7 +790,7 @@ class TestMCPClientSession:
                         "config": {"alias": "Updated Auto"},
                     },
                 },
-                msg_id=101,
+                msg_id=104,
             )
             assert "Successfully updated" in result["result"]["content"][0]["text"]
             assert yaml_store[0]["alias"] == "Updated Auto"
@@ -684,10 +803,20 @@ class TestMCPClientSession:
                     "name": "delete_automation",
                     "arguments": {"automation_id": auto_id},
                 },
-                msg_id=102,
+                msg_id=105,
             )
             assert "Successfully deleted" in result["result"]["content"][0]["text"]
             assert len(yaml_store) == 0
+
+            # List empty
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_automations", "arguments": {}},
+                msg_id=106,
+            )
+            entries = json.loads(result["result"]["content"][0]["text"])
+            assert entries == []
 
     async def test_script_crud_round_trip(self, view, populated_hass):
         """Test create, update, delete script round-trip."""
@@ -703,8 +832,8 @@ class TestMCPClientSession:
             yaml_store.clear()
             yaml_store.update(data)
 
-        async def run_fn(fn):
-            return fn()
+        async def run_fn(fn, *args):
+            return fn(*args)
 
         populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
 
@@ -733,6 +862,36 @@ class TestMCPClientSession:
             )
             assert "Successfully created script" in result["result"]["content"][0]["text"]
             assert "test_script" in yaml_store
+
+            # List
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_scripts", "arguments": {}},
+                msg_id=114,
+            )
+            entries = json.loads(result["result"]["content"][0]["text"])
+            assert "test_script" in entries
+            assert entries["test_script"]["alias"] == "Test Script"
+
+            # Get config
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "get_script_config", "arguments": {"key": "test_script"}},
+                msg_id=115,
+            )
+            entry = json.loads(result["result"]["content"][0]["text"])
+            assert entry["alias"] == "Test Script"
+
+            # Get config not found
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "get_script_config", "arguments": {"key": "nonexistent"}},
+                msg_id=116,
+            )
+            assert "Error" in result["result"]["content"][0]["text"]
 
             # Update
             result = await self._call(

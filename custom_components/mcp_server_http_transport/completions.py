@@ -30,13 +30,30 @@ async def complete(
     if arg_name == "url_path":
         return _complete_url_path(hass, arg_value)
 
-    if arg_name == "automation_id":
+    tool_name = ref.get("name", "")
+
+    if arg_name == "automation_id" and tool_name in (
+        "get_automation_config",
+        "create_automation",
+        "update_automation",
+        "delete_automation",
+    ):
         return await _complete_automation_id(hass, arg_value)
 
-    if arg_name == "scene_id":
+    if arg_name == "scene_id" and tool_name in (
+        "get_scene_config",
+        "create_scene",
+        "update_scene",
+        "delete_scene",
+    ):
         return await _complete_scene_id(hass, arg_value)
 
-    if arg_name == "key":
+    if arg_name == "key" and tool_name in (
+        "get_script_config",
+        "create_script",
+        "update_script",
+        "delete_script",
+    ):
         return await _complete_script_key(hass, arg_value)
 
     return {"values": [], "hasMore": False}

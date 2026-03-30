@@ -646,6 +646,50 @@ class TestMCPClientSession:
             values = comp_result["result"]["completion"]["values"]
             assert values == ["morning_routine"]
 
+    async def test_completions_scene_id(self, view, populated_hass):
+        """Verify completions return scene IDs from scenes.yaml."""
+        populated_hass.config.path = Mock(return_value="/config/scenes.yaml")
+
+        yaml_store = [
+            {"id": "scene-001", "name": "Movie Night"},
+            {"id": "scene-002", "name": "Dinner"},
+        ]
+
+        def mock_load_list(path):
+            return list(yaml_store)
+
+        async def run_fn(fn, *args):
+            return fn(*args) if args else fn()
+
+        populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        with patch(
+            "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+            side_effect=mock_load_list,
+        ):
+            comp_result = await self._call(
+                view,
+                "completion/complete",
+                {
+                    "ref": {"type": "ref/tool", "name": "get_scene_config"},
+                    "argument": {"name": "scene_id", "value": "scene"},
+                },
+            )
+            values = comp_result["result"]["completion"]["values"]
+            assert set(values) == {"scene-001", "scene-002"}
+
+            comp_result = await self._call(
+                view,
+                "completion/complete",
+                {
+                    "ref": {"type": "ref/tool", "name": "get_scene_config"},
+                    "argument": {"name": "scene_id", "value": "scene-001"},
+                },
+                msg_id=2,
+            )
+            values = comp_result["result"]["completion"]["values"]
+            assert values == ["scene-001"]
+
     async def test_prompts_troubleshoot_with_real_entity(self, view):
         """Test troubleshoot prompt includes actual entity state data."""
         result = await self._call(
@@ -933,6 +977,122 @@ class TestMCPClientSession:
             )
             assert "Successfully deleted" in result["result"]["content"][0]["text"]
             assert "test_script" not in yaml_store
+
+    async def test_scene_crud_round_trip(self, view, populated_hass):
+        """Test create, list, get, update, delete scene round-trip."""
+        populated_hass.config.path = Mock(return_value="/config/scenes.yaml")
+        populated_hass.services.async_call = AsyncMock()
+
+        yaml_store = []
+
+        def mock_load_list(path):
+            return list(yaml_store)
+
+        def mock_save(path, data):
+            yaml_store.clear()
+            yaml_store.extend(data)
+
+        async def run_fn(fn, *args):
+            return fn(*args)
+
+        populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+                side_effect=mock_load_list,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                side_effect=mock_save,
+            ),
+        ):
+            # Create
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "create_scene",
+                    "arguments": {
+                        "config": {
+                            "name": "Movie Night",
+                            "entities": {"light.living_room": {"state": "on"}},
+                        }
+                    },
+                },
+                msg_id=120,
+            )
+            text = result["result"]["content"][0]["text"]
+            assert "Successfully created" in text
+            scene_id = text.split("id: ")[1]
+            assert len(yaml_store) == 1
+
+            # List
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_scenes", "arguments": {}},
+                msg_id=121,
+            )
+            entries = json.loads(result["result"]["content"][0]["text"])
+            assert len(entries) == 1
+            assert entries[0]["name"] == "Movie Night"
+
+            # Get config
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "get_scene_config", "arguments": {"scene_id": scene_id}},
+                msg_id=122,
+            )
+            entry = json.loads(result["result"]["content"][0]["text"])
+            assert entry["name"] == "Movie Night"
+            assert entry["id"] == scene_id
+
+            # Get config not found
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "get_scene_config", "arguments": {"scene_id": "nonexistent"}},
+                msg_id=123,
+            )
+            assert "Error" in result["result"]["content"][0]["text"]
+
+            # Update
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "update_scene",
+                    "arguments": {
+                        "scene_id": scene_id,
+                        "config": {"name": "Updated Scene"},
+                    },
+                },
+                msg_id=124,
+            )
+            assert "Successfully updated" in result["result"]["content"][0]["text"]
+            assert yaml_store[0]["name"] == "Updated Scene"
+
+            # Delete
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "delete_scene", "arguments": {"scene_id": scene_id}},
+                msg_id=125,
+            )
+            assert "Successfully deleted" in result["result"]["content"][0]["text"]
+            assert len(yaml_store) == 0
+
+            # List empty
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_scenes", "arguments": {}},
+                msg_id=126,
+            )
+            entries = json.loads(result["result"]["content"][0]["text"])
+            assert entries == []
 
     async def test_dashboard_config_round_trip(self, view, populated_hass):
         """Test get/save/delete dashboard config round-trip."""

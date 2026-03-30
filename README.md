@@ -81,12 +81,18 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 | `list_services` | List available services, optionally filtered by domain |
 | `render_template` | Evaluate a Jinja2 template |
 | `get_history` | Get state history of an entity over a time range |
+| `list_automations` | List all automations with full configuration |
+| `get_automation_config` | Get full configuration of a single automation |
 | `create_automation` | Create a new automation |
 | `update_automation` | Update an existing automation |
 | `delete_automation` | Delete an automation |
+| `list_scenes` | List all scenes with full configuration |
+| `get_scene_config` | Get full configuration of a single scene |
 | `create_scene` | Create a new scene |
 | `update_scene` | Update an existing scene |
 | `delete_scene` | Delete a scene |
+| `list_scripts` | List all scripts with full configuration |
+| `get_script_config` | Get full configuration of a single script |
 | `create_script` | Create a new script |
 | `update_script` | Update an existing script |
 | `delete_script` | Delete a script |
@@ -116,27 +122,30 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 
 ### Completions
 
-Autocompletion is supported for `entity_id`, `domain`, `service`, `area_id`, and `url_path` arguments.
+Autocompletion is supported for `entity_id`, `domain`, `service`, `area_id`, `url_path`, `automation_id`, `scene_id`, and script `key` arguments.
 
 ## FAQ
 
 <details>
 <summary>How do I list all automations, scenes, or scripts?</summary>
 
-Use `list_entities` with the `domain` filter. This works for any entity type in Home Assistant.
+Use the dedicated list tools to get full configurations:
 
 ```
-list_entities(domain="automation")  // all automations
-list_entities(domain="scene")       // all scenes
-list_entities(domain="script")      // all scripts
-list_entities(domain="light")       // all lights
+list_automations()   // all automations with triggers, conditions, actions
+list_scenes()        // all scenes with entity states
+list_scripts()       // all scripts with sequences
 ```
 
-To get the full state and attributes of a specific entity, use `get_state`:
+To get the configuration of a single item:
 
 ```
-get_state(entity_id="automation.morning_routine")
+get_automation_config(automation_id="abc-123")
+get_scene_config(scene_id="def-456")
+get_script_config(key="morning_routine")
 ```
+
+You can also use `list_entities(domain="automation")` to get entity states, but the tools above return the full YAML configuration.
 </details>
 
 <details>

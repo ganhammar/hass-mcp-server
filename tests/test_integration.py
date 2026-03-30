@@ -1097,9 +1097,7 @@ class TestMCPClientSession:
     async def test_list_tools_error_handling(self, view, populated_hass):
         """Test that list tools return errors when read helpers fail."""
         populated_hass.config.path = Mock(return_value="/config/test.yaml")
-        populated_hass.async_add_executor_job = AsyncMock(
-            side_effect=OSError("disk read error")
-        )
+        populated_hass.async_add_executor_job = AsyncMock(side_effect=OSError("disk read error"))
 
         result = await self._call(
             view,

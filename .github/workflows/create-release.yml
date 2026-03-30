@@ -33,9 +33,15 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Zip integration
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          cd custom_components/mcp_server_http_transport
+          zip -r ../../mcp_server_http_transport.zip . -x '__pycache__/*' '*/__pycache__/*'
+
       - name: Create release
         if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ steps.version.outputs.version }}
-        run: gh release create "$TAG" --title "$TAG" --generate-notes
+        run: gh release create "$TAG" --title "$TAG" --generate-notes mcp_server_http_transport.zip

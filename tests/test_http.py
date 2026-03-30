@@ -196,7 +196,7 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert body["jsonrpc"] == "2.0"
         assert "tools" in body["result"]
-        assert len(body["result"]["tools"]) == 25
+        assert len(body["result"]["tools"]) == 31
         tool_names = [t["name"] for t in body["result"]["tools"]]
         assert "get_state" in tool_names
         assert "call_service" in tool_names
@@ -254,7 +254,7 @@ class TestMCPEndpointView:
         with (
             patch.object(view, "_validate_token", return_value={"sub": "user123"}),
             patch(
-                "custom_components.mcp_server_http_transport.tools.er.async_get",
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
             ),
         ):
@@ -386,7 +386,7 @@ class TestMCPEndpointView:
         with (
             patch.object(view, "_validate_token", return_value={"sub": "user123"}),
             patch(
-                "custom_components.mcp_server_http_transport.tools.er.async_get",
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
             ),
         ):
@@ -431,7 +431,7 @@ class TestMCPEndpointView:
         with (
             patch.object(view, "_validate_token", return_value={"sub": "user123"}),
             patch(
-                "custom_components.mcp_server_http_transport.tools.er.async_get",
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
             ),
         ):
@@ -569,7 +569,7 @@ class TestMCPEndpointView:
         with (
             patch.object(view, "_validate_token", return_value={"sub": "user123"}),
             patch(
-                "custom_components.mcp_server_http_transport.tools.ar.async_get",
+                "custom_components.mcp_server_http_transport.tools.entities.ar.async_get",
                 return_value=mock_registry,
             ),
         ):
@@ -618,7 +618,7 @@ class TestMCPEndpointView:
         with (
             patch.object(view, "_validate_token", return_value={"sub": "user123"}),
             patch(
-                "custom_components.mcp_server_http_transport.tools.dr.async_get",
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
                 return_value=mock_registry,
             ),
         ):
@@ -669,7 +669,7 @@ class TestMCPEndpointView:
         with (
             patch.object(view, "_validate_token", return_value={"sub": "user123"}),
             patch(
-                "custom_components.mcp_server_http_transport.tools.dr.async_get",
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
                 return_value=mock_registry,
             ),
         ):

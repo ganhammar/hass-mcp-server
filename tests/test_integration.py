@@ -1094,6 +1094,36 @@ class TestMCPClientSession:
             entries = json.loads(result["result"]["content"][0]["text"])
             assert entries == []
 
+    async def test_list_tools_error_handling(self, view, populated_hass):
+        """Test that list tools return errors when read helpers fail."""
+        populated_hass.config.path = Mock(return_value="/config/test.yaml")
+        populated_hass.async_add_executor_job = AsyncMock(
+            side_effect=OSError("disk read error")
+        )
+
+        result = await self._call(
+            view,
+            "tools/call",
+            {"name": "list_automations", "arguments": {}},
+        )
+        assert "Error" in result["result"]["content"][0]["text"]
+
+        result = await self._call(
+            view,
+            "tools/call",
+            {"name": "list_scenes", "arguments": {}},
+            msg_id=2,
+        )
+        assert "Error" in result["result"]["content"][0]["text"]
+
+        result = await self._call(
+            view,
+            "tools/call",
+            {"name": "list_scripts", "arguments": {}},
+            msg_id=3,
+        )
+        assert "Error" in result["result"]["content"][0]["text"]
+
     async def test_dashboard_config_round_trip(self, view, populated_hass):
         """Test get/save/delete dashboard config round-trip."""
         dashboard_store = {}

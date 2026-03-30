@@ -3,10 +3,9 @@ repos:
     rev: 25.9.0
     hooks:
       - id: black
-        args: [--line-length=100, --target-version=py313]
+        args: [--check]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.13.3
     hooks:
-      - id: ruff
-        args: [--line-length=100, --target-version=py313]
+      - id: ruff-check

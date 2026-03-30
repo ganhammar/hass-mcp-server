@@ -571,7 +571,7 @@ class TestMCPClientSession:
             return list(yaml_store)
 
         async def run_fn(fn, *args):
-            return fn(*args) if args else fn()
+            return fn(*args)
 
         populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
 
@@ -615,7 +615,7 @@ class TestMCPClientSession:
             return dict(yaml_store)
 
         async def run_fn(fn, *args):
-            return fn(*args) if args else fn()
+            return fn(*args)
 
         populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
 
@@ -659,7 +659,7 @@ class TestMCPClientSession:
             return list(yaml_store)
 
         async def run_fn(fn, *args):
-            return fn(*args) if args else fn()
+            return fn(*args)
 
         populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
 

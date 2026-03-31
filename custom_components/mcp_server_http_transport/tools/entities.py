@@ -226,3 +226,109 @@ async def list_services(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         result[domain] = list(domain_services.keys())
 
     return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
+
+@register_tool(
+    name="search_entities",
+    description=(
+        "Search entities by friendly name, attribute values, or device class. "
+        "More useful than list_entities when you don't know the exact entity_id"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Search query to match against entity IDs, " "friendly names, and aliases"
+                ),
+            },
+            "device_class": {
+                "type": "string",
+                "description": "Filter by device class (e.g., temperature, motion, door)",
+            },
+            "domain": {
+                "type": "string",
+                "description": "Filter by domain (e.g., sensor, binary_sensor, light)",
+            },
+            "area_id": {
+                "type": "string",
+                "description": "Filter by area ID",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of results to return (default 100)",
+            },
+        },
+    },
+)
+async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Search entities by various criteria."""
+    query = arguments.get("query", "").lower()
+    device_class_filter = arguments.get("device_class")
+    domain_filter = arguments.get("domain")
+    area_filter = arguments.get("area_id")
+    limit = arguments.get("limit", 100)
+
+    if not any([query, device_class_filter, domain_filter, area_filter]):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Error: at least one search parameter "
+                        "(query, device_class, domain, area_id) must be provided"
+                    ),
+                }
+            ]
+        }
+
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+
+    entities = []
+    for state in hass.states.async_all():
+        if domain_filter and not state.entity_id.startswith(f"{domain_filter}."):
+            continue
+
+        if device_class_filter:
+            if state.attributes.get("device_class") != device_class_filter:
+                continue
+
+        entry = entity_registry.async_get(state.entity_id)
+        aliases = sorted(entry.aliases) if entry and entry.aliases else []
+
+        # Resolve area: entity's own area, falling back to its device's area
+        entity_area = entry.area_id if entry else None
+        if not entity_area and entry and entry.device_id:
+            device = device_registry.async_get(entry.device_id)
+            entity_area = device.area_id if device else None
+
+        if area_filter and entity_area != area_filter:
+            continue
+
+        if query:
+            friendly_name = state.attributes.get("friendly_name", "").lower()
+            searchable = [
+                state.entity_id.lower(),
+                friendly_name,
+                *(a.lower() for a in aliases),
+            ]
+            if not any(query in s for s in searchable):
+                continue
+
+        entities.append(
+            {
+                "entity_id": state.entity_id,
+                "state": state.state,
+                "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+                "device_class": state.attributes.get("device_class"),
+                "area_id": entity_area,
+                "aliases": aliases,
+            }
+        )
+
+        if len(entities) >= limit:
+            break
+
+    return {"content": [{"type": "text", "text": json.dumps(entities, indent=2)}]}

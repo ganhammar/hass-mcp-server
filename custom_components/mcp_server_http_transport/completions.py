@@ -30,17 +30,18 @@ async def complete(
     if arg_name == "url_path":
         return _complete_url_path(hass, arg_value)
 
-    tool_name = ref.get("name", "")
+    ref_name = ref.get("name", "")
 
-    if arg_name == "automation_id" and tool_name in (
+    if arg_name == "automation_id" and ref_name in (
         "get_automation_config",
         "create_automation",
         "update_automation",
         "delete_automation",
+        "automation_review",
     ):
         return await _complete_automation_id(hass, arg_value)
 
-    if arg_name == "scene_id" and tool_name in (
+    if arg_name == "scene_id" and ref_name in (
         "get_scene_config",
         "create_scene",
         "update_scene",
@@ -48,7 +49,7 @@ async def complete(
     ):
         return await _complete_scene_id(hass, arg_value)
 
-    if arg_name == "key" and tool_name in (
+    if arg_name == "key" and ref_name in (
         "get_script_config",
         "create_script",
         "update_script",

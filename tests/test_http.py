@@ -196,7 +196,7 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert body["jsonrpc"] == "2.0"
         assert "tools" in body["result"]
-        assert len(body["result"]["tools"]) == 31
+        assert len(body["result"]["tools"]) == 34
         tool_names = [t["name"] for t in body["result"]["tools"]]
         assert "get_state" in tool_names
         assert "call_service" in tool_names
@@ -223,6 +223,9 @@ class TestMCPEndpointView:
         assert "create_dashboard" in tool_names
         assert "update_dashboard" in tool_names
         assert "delete_dashboard" in tool_names
+        assert "search_entities" in tool_names
+        assert "fire_event" in tool_names
+        assert "get_logbook" in tool_names
 
     async def test_post_tools_call_get_state(self, view, mock_hass):
         """Test POST with tools/call for get_state."""
@@ -957,9 +960,13 @@ class TestMCPEndpointView:
         assert response.status == 200
         body = json.loads(response.body)
         result = body["result"]
-        assert len(result["resources"]) == 2
-        assert result["resources"][0]["uri"] == "hass://config"
-        assert result["resources"][1]["uri"] == "hass://areas"
+        assert len(result["resources"]) == 5
+        resource_uris = [r["uri"] for r in result["resources"]]
+        assert "hass://config" in resource_uris
+        assert "hass://areas" in resource_uris
+        assert "hass://devices" in resource_uris
+        assert "hass://services" in resource_uris
+        assert "hass://floors" in resource_uris
         assert len(result["resourceTemplates"]) == 2
         assert "entity_id" in result["resourceTemplates"][0]["uriTemplate"]
 
@@ -1130,10 +1137,13 @@ class TestMCPEndpointView:
         assert response.status == 200
         body = json.loads(response.body)
         prompts = body["result"]["prompts"]
-        assert len(prompts) == 2
+        assert len(prompts) == 5
         prompt_names = [p["name"] for p in prompts]
         assert "troubleshoot_device" in prompt_names
         assert "daily_summary" in prompt_names
+        assert "automation_review" in prompt_names
+        assert "energy_report" in prompt_names
+        assert "setup_guide" in prompt_names
 
     async def test_post_prompts_get_troubleshoot_device(self, view, mock_hass):
         """Test POST with prompts/get for troubleshoot_device."""
@@ -2613,3 +2623,1004 @@ class TestMCPEndpointView:
         assert response.status == 200
         body = json.loads(response.body)
         assert "Error deleting dashboard" in body["result"]["content"][0]["text"]
+
+    # ── fire_event tool ──────────────────────────────────────────────
+
+    async def test_post_tools_call_fire_event(self, view, mock_hass):
+        """Test POST with tools/call for fire_event."""
+        mock_hass.bus = Mock()
+        mock_hass.bus.async_fire = Mock()
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "fire_event",
+                    "arguments": {
+                        "event_type": "custom_event",
+                        "event_data": {"key": "value"},
+                    },
+                },
+                "id": 80,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Successfully fired event" in body["result"]["content"][0]["text"]
+        mock_hass.bus.async_fire.assert_called_once_with("custom_event", {"key": "value"})
+
+    async def test_post_tools_call_fire_event_without_data(self, view, mock_hass):
+        """Test fire_event without event_data defaults to empty dict."""
+        mock_hass.bus = Mock()
+        mock_hass.bus.async_fire = Mock()
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "fire_event",
+                    "arguments": {"event_type": "simple_event"},
+                },
+                "id": 81,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        mock_hass.bus.async_fire.assert_called_once_with("simple_event", {})
+
+    async def test_post_tools_call_fire_event_blocked_type(self, view, mock_hass):
+        """Test fire_event rejects system event types."""
+        mock_hass.bus = Mock()
+        mock_hass.bus.async_fire = Mock()
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "fire_event",
+                    "arguments": {"event_type": "homeassistant_stop"},
+                },
+                "id": 81,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "not allowed" in body["result"]["content"][0]["text"]
+        mock_hass.bus.async_fire.assert_not_called()
+
+    # ── search_entities tool ─────────────────────────────────────────
+
+    async def test_post_tools_call_search_entities_by_query(self, view, mock_hass):
+        """Test search_entities matches by friendly name."""
+        mock_state1 = Mock()
+        mock_state1.entity_id = "light.living_room"
+        mock_state1.state = "on"
+        mock_state1.attributes = {"friendly_name": "Living Room Light"}
+
+        mock_state2 = Mock()
+        mock_state2.entity_id = "sensor.temperature"
+        mock_state2.state = "22.5"
+        mock_state2.attributes = {"friendly_name": "Temperature Sensor"}
+
+        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
+
+        mock_entry = Mock()
+        mock_entry.aliases = set()
+        mock_entry.area_id = None
+        mock_entry.device_id = None
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search_entities",
+                    "arguments": {"query": "living"},
+                },
+                "id": 82,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "light.living_room"
+
+    async def test_post_tools_call_search_entities_no_params(self, view, mock_hass):
+        """Test search_entities requires at least one parameter."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "search_entities", "arguments": {}},
+                "id": 83,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Error" in body["result"]["content"][0]["text"]
+
+    async def test_post_tools_call_search_entities_by_device_class(self, view, mock_hass):
+        """Test search_entities filters by device_class."""
+        mock_state1 = Mock()
+        mock_state1.entity_id = "sensor.temp"
+        mock_state1.state = "22"
+        mock_state1.attributes = {
+            "friendly_name": "Temp",
+            "device_class": "temperature",
+        }
+
+        mock_state2 = Mock()
+        mock_state2.entity_id = "sensor.humidity"
+        mock_state2.state = "45"
+        mock_state2.attributes = {
+            "friendly_name": "Humidity",
+            "device_class": "humidity",
+        }
+
+        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
+
+        mock_entry = Mock()
+        mock_entry.aliases = set()
+        mock_entry.area_id = None
+        mock_entry.device_id = None
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search_entities",
+                    "arguments": {"device_class": "temperature"},
+                },
+                "id": 84,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "sensor.temp"
+
+    # ── get_logbook tool ─────────────────────────────────────────────
+
+    async def test_post_tools_call_get_logbook(self, view, mock_hass):
+        """Test POST with tools/call for get_logbook."""
+        mock_events = [{"when": "2024-01-01T12:00:00", "name": "Light", "entity_id": "light.test"}]
+        mock_processor = Mock()
+        mock_processor.get_events.return_value = mock_events
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(return_value=mock_events)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_logbook",
+                    "arguments": {
+                        "start_time": "2024-01-01T00:00:00",
+                        "entity_id": "light.test",
+                    },
+                },
+                "id": 85,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.logbook.processor.EventProcessor",
+                return_value=mock_processor,
+            ),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "light.test"
+
+    async def test_post_tools_call_get_logbook_without_entity_id(self, view, mock_hass):
+        """Test get_logbook without entity_id returns all entries."""
+        mock_events = [
+            {"when": "2024-01-01T12:00:00", "name": "Light", "entity_id": "light.a"},
+            {"when": "2024-01-01T13:00:00", "name": "Switch", "entity_id": "switch.b"},
+        ]
+        mock_processor = Mock()
+        mock_processor.get_events.return_value = mock_events
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(return_value=mock_events)
+
+        mock_event_processor_cls = Mock(return_value=mock_processor)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_logbook",
+                    "arguments": {"start_time": "2024-01-01T00:00:00"},
+                },
+                "id": 85,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.logbook.processor.EventProcessor",
+                mock_event_processor_cls,
+            ),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 2
+        # Verify entity_ids=None was passed when no entity_id argument
+        call_kwargs = mock_event_processor_cls.call_args
+        assert call_kwargs[1]["entity_ids"] is None
+
+    async def test_post_tools_call_get_logbook_with_end_time(self, view, mock_hass):
+        """Test get_logbook with explicit end_time."""
+        mock_events = []
+        mock_processor = Mock()
+        mock_processor.get_events.return_value = mock_events
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(return_value=mock_events)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_logbook",
+                    "arguments": {
+                        "start_time": "2024-01-01T00:00:00",
+                        "end_time": "2024-01-02T00:00:00",
+                    },
+                },
+                "id": 85,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.logbook.processor.EventProcessor",
+                return_value=mock_processor,
+            ),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert data == []
+
+    # ── Resources: devices, services, floors ─────────────────────────
+
+    async def test_post_resources_read_devices(self, view, mock_hass):
+        """Test resources/read for hass://devices."""
+        mock_device = Mock()
+        mock_device.id = "device1"
+        mock_device.name = "Test Device"
+        mock_device.manufacturer = "TestCorp"
+        mock_device.model = "Model1"
+        mock_device.area_id = "living_room"
+        mock_device.name_by_user = None
+        mock_registry = Mock()
+        mock_registry.devices = {"device1": mock_device}
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "resources/read",
+                "params": {"uri": "hass://devices"},
+                "id": 86,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.resources.dr.async_get",
+                return_value=mock_registry,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["contents"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["id"] == "device1"
+        assert data[0]["manufacturer"] == "TestCorp"
+
+    async def test_post_resources_read_services(self, view, mock_hass):
+        """Test resources/read for hass://services."""
+        mock_hass.services.async_services.return_value = {
+            "light": {"turn_on": {}, "turn_off": {}},
+            "switch": {"toggle": {}},
+        }
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "resources/read",
+                "params": {"uri": "hass://services"},
+                "id": 87,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["contents"][0]["text"])
+        assert "light" in data
+        assert "turn_on" in data["light"]
+        assert "switch" in data
+
+    async def test_post_resources_read_floors(self, view, mock_hass):
+        """Test resources/read for hass://floors."""
+        mock_floor = Mock()
+        mock_floor.floor_id = "ground"
+        mock_floor.name = "Ground Floor"
+        mock_floor.icon = "mdi:home"
+        mock_floor.level = 0
+        mock_floor.aliases = {"First Floor", "Main"}
+        mock_registry = Mock()
+        mock_registry.async_list_floors.return_value = [mock_floor]
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "resources/read",
+                "params": {"uri": "hass://floors"},
+                "id": 88,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.resources.fr.async_get",
+                return_value=mock_registry,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["contents"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["floor_id"] == "ground"
+        assert data[0]["name"] == "Ground Floor"
+        assert "First Floor" in data[0]["aliases"]
+
+    # ── Prompts: automation_review, energy_report, setup_guide ───────
+
+    async def test_post_prompts_get_automation_review(self, view, mock_hass):
+        """Test prompts/get for automation_review."""
+        mock_config = {"id": "abc-123", "alias": "Test Auto", "trigger": []}
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "automation_review",
+                    "arguments": {"automation_id": "abc-123"},
+                },
+                "id": 89,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
+                new_callable=AsyncMock,
+                return_value=mock_config,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        prompt = body["result"]
+        text = prompt["messages"][0]["content"]["text"]
+        assert "Test Auto" in text
+        assert "trigger" in text.lower()
+
+    async def test_post_prompts_get_automation_review_not_found(self, view, mock_hass):
+        """Test automation_review with nonexistent automation."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "automation_review",
+                    "arguments": {"automation_id": "nonexistent"},
+                },
+                "id": 90,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
+                new_callable=AsyncMock,
+                side_effect=ValueError("Not found"),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "not found" in text
+
+    async def test_post_prompts_get_setup_guide(self, view, mock_hass):
+        """Test prompts/get for setup_guide."""
+        mock_state = Mock()
+        mock_state.entity_id = "sensor.temp"
+        mock_state.state = "unavailable"
+        mock_state.attributes = {
+            "friendly_name": "Temperature",
+            "device_class": "temperature",
+        }
+        mock_state.last_changed = datetime(2024, 1, 1, 12, 0, 0)
+        mock_state.last_updated = datetime(2024, 1, 1, 12, 0, 0)
+        mock_hass.states.get.return_value = mock_state
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "setup_guide",
+                    "arguments": {"entity_id": "sensor.temp"},
+                },
+                "id": 91,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "sensor" in text
+        assert "temperature" in text
+
+    async def test_post_prompts_get_energy_report(self, view, mock_hass):
+        """Test prompts/get for energy_report."""
+        mock_state = Mock()
+        mock_state.entity_id = "sensor.energy"
+        mock_state.state = "100"
+        mock_state.attributes = {
+            "friendly_name": "Energy",
+            "device_class": "energy",
+            "unit_of_measurement": "kWh",
+        }
+        mock_hass.states.async_all.return_value = [mock_state]
+
+        mock_history_state = Mock()
+        mock_history_state.state = "100"
+        mock_history_state.attributes = {
+            "friendly_name": "Energy",
+            "unit_of_measurement": "kWh",
+        }
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(
+            return_value={"sensor.energy": [mock_history_state]}
+        )
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "energy_report",
+                    "arguments": {"start_time": "2024-01-01T00:00:00"},
+                },
+                "id": 92,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "energy" in text.lower()
+
+    async def test_post_prompts_get_energy_report_no_entities(self, view, mock_hass):
+        """Test energy_report when no energy entities exist."""
+        mock_state = Mock()
+        mock_state.entity_id = "light.test"
+        mock_state.state = "on"
+        mock_state.attributes = {"friendly_name": "Test Light"}
+        mock_hass.states.async_all.return_value = [mock_state]
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "energy_report",
+                    "arguments": {"start_time": "2024-01-01T00:00:00"},
+                },
+                "id": 93,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "No energy-related entities" in text
+
+    async def test_post_prompts_get_energy_report_recorder_error(self, view, mock_hass):
+        """Test energy_report when recorder fails."""
+        mock_state = Mock()
+        mock_state.entity_id = "sensor.energy"
+        mock_state.state = "100"
+        mock_state.attributes = {
+            "friendly_name": "Energy",
+            "device_class": "energy",
+            "unit_of_measurement": "kWh",
+        }
+        mock_hass.states.async_all.return_value = [mock_state]
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(
+            side_effect=Exception("Recorder unavailable")
+        )
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "energy_report",
+                    "arguments": {"start_time": "2024-01-01T00:00:00"},
+                },
+                "id": 94,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "Unable to retrieve" in text
+
+    async def test_post_prompts_get_setup_guide_entity_not_found(self, view, mock_hass):
+        """Test setup_guide when entity does not exist."""
+        mock_hass.states.get.return_value = None
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "setup_guide",
+                    "arguments": {"entity_id": "sensor.nonexistent"},
+                },
+                "id": 95,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "not found" in text
+        assert "sensor" in text
+
+    async def test_post_tools_call_fire_event_error(self, view, mock_hass):
+        """Test fire_event when bus.async_fire raises."""
+        mock_hass.bus = Mock()
+        mock_hass.bus.async_fire = Mock(side_effect=Exception("Bus error"))
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "fire_event",
+                    "arguments": {"event_type": "bad_event"},
+                },
+                "id": 96,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Error firing event" in body["result"]["content"][0]["text"]
+
+    async def test_post_tools_call_get_logbook_error(self, view, mock_hass):
+        """Test get_logbook when EventProcessor fails."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_logbook",
+                    "arguments": {"start_time": "2024-01-01T00:00:00"},
+                },
+                "id": 97,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.logbook.processor.EventProcessor",
+                side_effect=Exception("Logbook unavailable"),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Error getting logbook" in body["result"]["content"][0]["text"]
+
+    async def test_post_tools_call_search_entities_by_area(self, view, mock_hass):
+        """Test search_entities filters by area_id."""
+        mock_state1 = Mock()
+        mock_state1.entity_id = "light.living"
+        mock_state1.state = "on"
+        mock_state1.attributes = {"friendly_name": "Living Light"}
+
+        mock_state2 = Mock()
+        mock_state2.entity_id = "light.bedroom"
+        mock_state2.state = "off"
+        mock_state2.attributes = {"friendly_name": "Bedroom Light"}
+
+        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
+
+        entry1 = Mock()
+        entry1.aliases = set()
+        entry1.area_id = "living_room"
+        entry1.device_id = None
+
+        entry2 = Mock()
+        entry2.aliases = set()
+        entry2.area_id = "bedroom"
+        entry2.device_id = None
+
+        entries = {"light.living": entry1, "light.bedroom": entry2}
+        mock_er = Mock()
+        mock_er.async_get = Mock(side_effect=lambda eid: entries.get(eid))
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search_entities",
+                    "arguments": {"area_id": "living_room"},
+                },
+                "id": 98,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "light.living"
+
+    async def test_post_tools_call_search_entities_area_via_device(self, view, mock_hass):
+        """Test search_entities resolves area via device registry."""
+        mock_state = Mock()
+        mock_state.entity_id = "sensor.temp"
+        mock_state.state = "22"
+        mock_state.attributes = {"friendly_name": "Temp"}
+
+        mock_hass.states.async_all.return_value = [mock_state]
+
+        entry = Mock()
+        entry.aliases = set()
+        entry.area_id = None
+        entry.device_id = "device_1"
+        mock_er = Mock()
+        mock_er.async_get.return_value = entry
+
+        mock_device = Mock()
+        mock_device.area_id = "kitchen"
+        mock_dr = Mock()
+        mock_dr.async_get.return_value = mock_device
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search_entities",
+                    "arguments": {"area_id": "kitchen"},
+                },
+                "id": 99,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_dr,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "sensor.temp"
+        assert data[0]["area_id"] == "kitchen"
+
+    async def test_post_tools_call_search_entities_limit(self, view, mock_hass):
+        """Test search_entities respects the limit parameter."""
+        states = []
+        for i in range(10):
+            s = Mock()
+            s.entity_id = f"light.light_{i}"
+            s.state = "on"
+            s.attributes = {"friendly_name": f"Light {i}"}
+            states.append(s)
+        mock_hass.states.async_all.return_value = states
+
+        mock_entry = Mock()
+        mock_entry.aliases = set()
+        mock_entry.area_id = None
+        mock_entry.device_id = None
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search_entities",
+                    "arguments": {"domain": "light", "limit": 3},
+                },
+                "id": 101,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 3
+
+    async def test_post_tools_call_search_entities_domain_filter(self, view, mock_hass):
+        """Test search_entities with domain filter skips non-matching entities."""
+        mock_state1 = Mock()
+        mock_state1.entity_id = "light.living"
+        mock_state1.state = "on"
+        mock_state1.attributes = {"friendly_name": "Living Light"}
+
+        mock_state2 = Mock()
+        mock_state2.entity_id = "sensor.temp"
+        mock_state2.state = "22"
+        mock_state2.attributes = {"friendly_name": "Temp"}
+
+        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
+
+        mock_entry = Mock()
+        mock_entry.aliases = set()
+        mock_entry.area_id = None
+        mock_entry.device_id = None
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search_entities",
+                    "arguments": {"domain": "sensor"},
+                },
+                "id": 100,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "sensor.temp"

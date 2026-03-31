@@ -2681,6 +2681,33 @@ class TestMCPEndpointView:
         assert response.status == 200
         mock_hass.bus.async_fire.assert_called_once_with("simple_event", {})
 
+    async def test_post_tools_call_fire_event_blocked_type(self, view, mock_hass):
+        """Test fire_event rejects system event types."""
+        mock_hass.bus = Mock()
+        mock_hass.bus.async_fire = Mock()
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "fire_event",
+                    "arguments": {"event_type": "homeassistant_stop"},
+                },
+                "id": 81,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "not allowed" in body["result"]["content"][0]["text"]
+        mock_hass.bus.async_fire.assert_not_called()
+
     # ── search_entities tool ─────────────────────────────────────────
 
     async def test_post_tools_call_search_entities_by_query(self, view, mock_hass):
@@ -3399,6 +3426,56 @@ class TestMCPEndpointView:
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "sensor.temp"
+
+    async def test_post_tools_call_search_entities_limit(self, view, mock_hass):
+        """Test search_entities respects the limit parameter."""
+        states = []
+        for i in range(10):
+            s = Mock()
+            s.entity_id = f"light.light_{i}"
+            s.state = "on"
+            s.attributes = {"friendly_name": f"Light {i}"}
+            states.append(s)
+        mock_hass.states.async_all.return_value = states
+
+        mock_entry = Mock()
+        mock_entry.aliases = set()
+        mock_entry.area_id = None
+        mock_entry.device_id = None
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search_entities",
+                    "arguments": {"domain": "light", "limit": 3},
+                },
+                "id": 101,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 3
 
     async def test_post_tools_call_search_entities_domain_filter(self, view, mock_hass):
         """Test search_entities with domain filter skips non-matching entities."""

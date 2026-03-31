@@ -255,6 +255,10 @@ async def list_services(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
                 "type": "string",
                 "description": "Filter by area ID",
             },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of results to return (default 100)",
+            },
         },
     },
 )
@@ -264,6 +268,7 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
     device_class_filter = arguments.get("device_class")
     domain_filter = arguments.get("domain")
     area_filter = arguments.get("area_id")
+    limit = arguments.get("limit", 100)
 
     if not any([query, device_class_filter, domain_filter, area_filter]):
         return {
@@ -321,5 +326,8 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
                 "aliases": aliases,
             }
         )
+
+        if len(entities) >= limit:
+            break
 
     return {"content": [{"type": "text", "text": json.dumps(entities, indent=2)}]}

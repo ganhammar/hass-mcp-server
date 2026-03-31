@@ -128,9 +128,28 @@ async def get_history(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         return {"content": [{"type": "text", "text": f"Error getting history: {str(e)}"}]}
 
 
+_BLOCKED_EVENT_TYPES = frozenset(
+    {
+        "homeassistant_stop",
+        "homeassistant_close",
+        "homeassistant_final_write",
+        "core_config_updated",
+        "component_loaded",
+        "service_registered",
+        "service_removed",
+        "state_changed",
+        "call_service",
+    }
+)
+
+
 @register_tool(
     name="fire_event",
-    description="Fire a custom event on the Home Assistant event bus",
+    description=(
+        "Fire a custom event on the Home Assistant event bus. "
+        "Cannot fire system-level events (e.g., homeassistant_stop). "
+        "Use with care as events can trigger automations"
+    ),
     input_schema={
         "type": "object",
         "properties": {
@@ -150,6 +169,16 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
     """Fire an event on the Home Assistant event bus."""
     event_type = arguments["event_type"]
     event_data = arguments.get("event_data", {})
+
+    if event_type in _BLOCKED_EVENT_TYPES:
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Error: firing system event '{event_type}' is not allowed",
+                }
+            ]
+        }
 
     try:
         hass.bus.async_fire(event_type, event_data)

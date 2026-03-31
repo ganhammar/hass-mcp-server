@@ -1,11 +1,14 @@
 """Reporting and summary prompts."""
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 
 from . import register_prompt
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @register_prompt(
@@ -38,6 +41,7 @@ async def daily_summary(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             else "No significant state changes in the last 24 hours."
         )
     except Exception:
+        _LOGGER.exception("Error retrieving history for daily summary")
         summary_text = (
             "Unable to retrieve history data. " "The recorder component may not be available."
         )
@@ -122,6 +126,7 @@ async def energy_report(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
                     )
             summary_text = "\n".join(sorted(parts)) if parts else "No energy data recorded."
         except Exception:
+            _LOGGER.exception("Error retrieving energy history data")
             summary_text = "Unable to retrieve energy history data."
 
     return {

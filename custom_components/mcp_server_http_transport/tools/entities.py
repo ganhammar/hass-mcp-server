@@ -298,13 +298,14 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         entry = entity_registry.async_get(state.entity_id)
         aliases = sorted(entry.aliases) if entry and entry.aliases else []
 
-        if area_filter:
-            entity_area = entry.area_id if entry else None
-            if not entity_area and entry and entry.device_id:
-                device = device_registry.async_get(entry.device_id)
-                entity_area = device.area_id if device else None
-            if entity_area != area_filter:
-                continue
+        # Resolve area: entity's own area, falling back to its device's area
+        entity_area = entry.area_id if entry else None
+        if not entity_area and entry and entry.device_id:
+            device = device_registry.async_get(entry.device_id)
+            entity_area = device.area_id if device else None
+
+        if area_filter and entity_area != area_filter:
+            continue
 
         if query:
             friendly_name = state.attributes.get("friendly_name", "").lower()
@@ -322,7 +323,7 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
                 "state": state.state,
                 "friendly_name": state.attributes.get("friendly_name", state.entity_id),
                 "device_class": state.attributes.get("device_class"),
-                "area_id": (entry.area_id if entry else None),
+                "area_id": entity_area,
                 "aliases": aliases,
             }
         )

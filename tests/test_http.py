@@ -3519,6 +3519,7 @@ class TestMCPEndpointView:
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "sensor.temp"
+        assert data[0]["area_id"] == "kitchen"
 
     async def test_post_tools_call_search_entities_limit(self, view, mock_hass):
         """Test search_entities respects the limit parameter."""

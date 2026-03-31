@@ -612,6 +612,37 @@ class TestMCPClientSession:
             values = comp_result["result"]["completion"]["values"]
             assert values == ["abc-123"]
 
+    async def test_completions_automation_id_via_prompt_ref(self, view, populated_hass):
+        """Verify automation_id completions work with a prompt ref."""
+        populated_hass.config.path = Mock(return_value="/config/automations.yaml")
+
+        yaml_store = [
+            {"id": "rev-001", "alias": "Review Target"},
+        ]
+
+        def mock_load_list(path):
+            return list(yaml_store)
+
+        async def run_fn(fn, *args):
+            return fn(*args)
+
+        populated_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        with patch(
+            "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+            side_effect=mock_load_list,
+        ):
+            comp_result = await self._call(
+                view,
+                "completion/complete",
+                {
+                    "ref": {"type": "ref/prompt", "name": "automation_review"},
+                    "argument": {"name": "automation_id", "value": "rev"},
+                },
+            )
+            values = comp_result["result"]["completion"]["values"]
+            assert values == ["rev-001"]
+
     async def test_completions_script_key(self, view, populated_hass):
         """Verify completions return script keys from scripts.yaml."""
         populated_hass.config.path = Mock(return_value="/config/scripts.yaml")

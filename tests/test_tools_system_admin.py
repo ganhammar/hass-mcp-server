@@ -1,6 +1,7 @@
 """Tests for system admin tool endpoints."""
 
 import json
+import tempfile
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -394,3 +395,139 @@ class TestToolsSystemAdmin:
         assert data[0]["domain"] == "hue"
         assert data[0]["title"] == "Philips Hue"
         assert data[1]["domain"] == "zwave"
+
+    async def test_post_tools_call_get_error_log_read_error(self, view, mock_hass):
+        """Test get_error_log when async_add_executor_job raises."""
+        mock_hass.config.path.return_value = "/config/home-assistant.log"
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=Exception("IO error"))
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_error_log", "arguments": {}},
+                "id": 250,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "Error reading error log" in text
+
+    async def test_post_tools_call_get_error_log_actual_file_read(self, view, mock_hass):
+        """Test get_error_log reading actual file content via executor."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
+            f.write("line1\nline2\nline3\n")
+            log_path = f.name
+
+        mock_hass.config.path.return_value = log_path
+
+        async def run_fn(fn, *args):
+            return fn(*args) if args else fn()
+
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_error_log", "arguments": {"lines": 2}},
+                "id": 251,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "line2" in text
+        assert "line3" in text
+
+    async def test_post_tools_call_get_error_log_file_missing(self, view, mock_hass):
+        """Test get_error_log when log file does not exist (FileNotFoundError)."""
+        mock_hass.config.path.return_value = "/nonexistent/path/home-assistant.log"
+
+        async def run_fn(fn, *args):
+            return fn(*args) if args else fn()
+
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_error_log", "arguments": {}},
+                "id": 255,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "Log file not found" in text
+
+    async def test_post_tools_call_restart_ha_error(self, view, mock_hass):
+        """Test restart_ha when service call raises."""
+        mock_hass.services.async_call = AsyncMock(side_effect=Exception("Service error"))
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "restart_ha", "arguments": {"confirm": True}},
+                "id": 252,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "Error restarting Home Assistant" in text
+
+    async def test_post_tools_call_check_config_error(self, view, mock_hass):
+        """Test check_config when async_check_ha_config_file raises."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "check_config", "arguments": {}},
+                "id": 253,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.helpers.check_config.async_check_ha_config_file",
+                new_callable=AsyncMock,
+                side_effect=Exception("Config check failed"),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "Error checking config" in text

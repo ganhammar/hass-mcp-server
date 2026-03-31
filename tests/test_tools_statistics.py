@@ -110,3 +110,39 @@ class TestToolsStatistics:
         body = json.loads(response.body)
         text = body["result"]["content"][0]["text"]
         assert "Invalid period" in text
+
+    async def test_post_tools_call_get_statistics_error(self, view, mock_hass):
+        """Test get_statistics when recorder raises."""
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(side_effect=Exception("Recorder error"))
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_statistics",
+                    "arguments": {
+                        "entity_id": "sensor.energy",
+                        "start_time": "2024-01-01T00:00:00",
+                    },
+                },
+                "id": 254,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "Error getting statistics" in text

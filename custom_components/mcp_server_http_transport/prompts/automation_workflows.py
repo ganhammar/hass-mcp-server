@@ -191,6 +191,7 @@ async def automation_audit(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     """Generate an automation audit prompt."""
     from ..config_manager import read_list_entries
 
+    automations = None
     try:
         automations = await read_list_entries(hass, "automations.yaml")
         automations_text = json.dumps(automations, indent=2)

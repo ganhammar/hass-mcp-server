@@ -913,3 +913,276 @@ class TestPrompts:
         text = result["messages"][0]["content"]["text"]
         assert "camera.front_door" in text
         assert "lock.front_door" in text
+
+    async def test_post_prompts_get_automation_debugger_logbook_error(self, view, mock_hass):
+        """Test automation_debugger when logbook fetch fails (exception branch)."""
+        mock_config = {"id": "test-auto", "alias": "Test", "trigger": []}
+        mock_hass.states.get.return_value = None
+        mock_auto_state = Mock()
+        mock_auto_state.entity_id = "automation.test_auto"
+        mock_auto_state.state = "on"
+        mock_auto_state.attributes = {
+            "last_triggered": "2024-01-01T12:00:00",
+            "current": 0,
+            "mode": "single",
+            "id": "test-auto",
+        }
+        mock_hass.states.async_all.return_value = [mock_auto_state]
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "automation_debugger",
+                    "arguments": {"automation_id": "test-auto"},
+                },
+                "id": 260,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
+                new_callable=AsyncMock,
+                return_value=mock_config,
+            ),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                side_effect=Exception("Recorder unavailable"),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "Test" in text
+        assert "Logbook data not available" in text or "automation" in text.lower()
+
+    async def test_post_prompts_get_automation_audit_read_error(self, view, mock_hass):
+        """Test automation_audit when read_list_entries fails."""
+        mock_hass.states.async_all.return_value = []
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": "automation_audit", "arguments": {}},
+                "id": 261,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
+                new_callable=AsyncMock,
+                side_effect=Exception("Read error"),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "Unable to read" in text
+
+    async def test_post_prompts_get_schedule_optimizer_read_error(self, view, mock_hass):
+        """Test schedule_optimizer when read_list_entries fails."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": "schedule_optimizer", "arguments": {}},
+                "id": 262,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
+                new_callable=AsyncMock,
+                side_effect=Exception("Read error"),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "Unable to read" in text
+
+    async def test_post_prompts_get_schedule_optimizer_entity_not_found(self, view, mock_hass):
+        """Test schedule_optimizer with entity_id that does not exist."""
+        mock_automations = [{"id": "auto1", "alias": "Test"}]
+        mock_hass.states.get.return_value = None
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "schedule_optimizer",
+                    "arguments": {"entity_id": "light.nonexistent"},
+                },
+                "id": 263,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
+                new_callable=AsyncMock,
+                return_value=mock_automations,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "not found" in text
+
+    async def test_post_prompts_get_dashboard_builder_with_entity_ids(self, view, mock_hass):
+        """Test dashboard_builder with entity_ids parameter."""
+        mock_state = Mock()
+        mock_state.entity_id = "light.bedroom"
+        mock_state.state = "off"
+        mock_state.attributes = {"friendly_name": "Bedroom Light", "device_class": None}
+        mock_hass.states.get.return_value = mock_state
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "dashboard_builder",
+                    "arguments": {"entity_ids": "light.bedroom"},
+                },
+                "id": 264,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "light.bedroom" in text
+
+    async def test_post_prompts_get_dashboard_builder_no_entities(self, view, mock_hass):
+        """Test dashboard_builder when no entities match."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": "dashboard_builder", "arguments": {}},
+                "id": 265,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "No entities found" in text
+
+    async def test_post_prompts_get_change_validator_read_error(self, view, mock_hass):
+        """Test change_validator when config reads fail."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "change_validator",
+                    "arguments": {"config_type": "automation"},
+                },
+                "id": 266,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
+                new_callable=AsyncMock,
+                side_effect=Exception("Read error"),
+            ),
+            patch(
+                "homeassistant.helpers.check_config.async_check_ha_config_file",
+                new_callable=AsyncMock,
+                side_effect=Exception("Check error"),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "Unable to read" in text
+        assert "Unable to run check" in text
+
+    async def test_post_prompts_get_change_validator_with_errors(self, view, mock_hass):
+        """Test change_validator when config validation finds errors."""
+        mock_automations = [{"id": "auto1", "alias": "Test"}]
+
+        mock_config_result = Mock()
+        mock_error = Mock()
+        mock_error.__str__ = Mock(return_value="Invalid trigger config")
+        mock_config_result.errors = [mock_error]
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "change_validator",
+                    "arguments": {"config_type": "automation"},
+                },
+                "id": 267,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
+                new_callable=AsyncMock,
+                return_value=mock_automations,
+            ),
+            patch(
+                "homeassistant.helpers.check_config.async_check_ha_config_file",
+                new_callable=AsyncMock,
+                return_value=mock_config_result,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "Invalid trigger config" in text
+        assert "validation errors" in text.lower()

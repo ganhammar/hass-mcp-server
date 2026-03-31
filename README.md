@@ -103,6 +103,9 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 | `create_dashboard` | Create a new Lovelace dashboard (experimental) |
 | `update_dashboard` | Update dashboard metadata (experimental) |
 | `delete_dashboard` | Delete a dashboard and its config (experimental) |
+| `search_entities` | Search entities by friendly name, device class, domain, or area |
+| `fire_event` | Fire a custom event on the Home Assistant event bus |
+| `get_logbook` | Fetch logbook entries for an entity or time range |
 
 ### Resources
 
@@ -110,6 +113,9 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 |-----|-------------|
 | `hass://config` | Home Assistant configuration |
 | `hass://areas` | All areas |
+| `hass://devices` | All registered devices |
+| `hass://services` | All available services by domain |
+| `hass://floors` | All configured floors |
 | `hass://entity/{entity_id}` | State and attributes of a specific entity |
 | `hass://dashboard/{url_path}` | Full configuration of a specific dashboard |
 
@@ -119,6 +125,9 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 |--------|-------------|
 | `troubleshoot_device` | Diagnose issues with a specific entity |
 | `daily_summary` | Summarize recent activity across all entities |
+| `automation_review` | Review an automation's config for issues and improvements |
+| `energy_report` | Summarize energy consumption data over a time range |
+| `setup_guide` | Guided troubleshooting for an entity in a problem state |
 
 ### Completions
 

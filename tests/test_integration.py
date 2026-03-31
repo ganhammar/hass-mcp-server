@@ -141,22 +141,32 @@ def mock_entity_registry():
 
     entry_living = Mock()
     entry_living.aliases = {"Living Room Lamp", "Lounge Light"}
+    entry_living.area_id = "living_room"
+    entry_living.device_id = "hue_bridge"
     entries["light.living_room"] = entry_living
 
     entry_bedroom = Mock()
     entry_bedroom.aliases = set()
+    entry_bedroom.area_id = "bedroom"
+    entry_bedroom.device_id = None
     entries["light.bedroom"] = entry_bedroom
 
     entry_temp = Mock()
     entry_temp.aliases = {"Temp Sensor"}
+    entry_temp.area_id = "bedroom"
+    entry_temp.device_id = "aqara_sensor"
     entries["sensor.temperature"] = entry_temp
 
     entry_switch = Mock()
     entry_switch.aliases = set()
+    entry_switch.area_id = "kitchen"
+    entry_switch.device_id = "smart_plug"
     entries["switch.kitchen"] = entry_switch
 
     entry_auto = Mock()
     entry_auto.aliases = {"Wake Up Routine"}
+    entry_auto.area_id = None
+    entry_auto.device_id = None
     entries["automation.morning_routine"] = entry_auto
 
     registry = Mock()
@@ -236,7 +246,7 @@ class TestMCPClientSession:
         # Step 2: Discover tools
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 31
+        assert len(tool_names) == 34
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool
@@ -246,12 +256,12 @@ class TestMCPClientSession:
 
         # Step 3: Discover resources
         result = await self._call(view, "resources/list", msg_id=3)
-        assert len(result["result"]["resources"]) == 2
+        assert len(result["result"]["resources"]) == 5
         assert len(result["result"]["resourceTemplates"]) == 2
 
         # Step 4: Discover prompts
         result = await self._call(view, "prompts/list", msg_id=4)
-        assert len(result["result"]["prompts"]) == 2
+        assert len(result["result"]["prompts"]) == 5
         for prompt in result["result"]["prompts"]:
             assert "name" in prompt
             assert "description" in prompt
@@ -1188,3 +1198,225 @@ class TestMCPClientSession:
         )
         assert "Successfully deleted config" in result["result"]["content"][0]["text"]
         assert dashboard_store == {}
+
+    # ── New tools: fire_event, search_entities, get_logbook ──────────
+
+    async def test_fire_event(self, view, populated_hass):
+        """Test firing an event on the event bus."""
+        populated_hass.bus = Mock()
+        populated_hass.bus.async_fire = Mock()
+
+        result = await self._call(
+            view,
+            "tools/call",
+            {
+                "name": "fire_event",
+                "arguments": {
+                    "event_type": "test_event",
+                    "event_data": {"source": "test"},
+                },
+            },
+            msg_id=200,
+        )
+        assert "Successfully fired event" in result["result"]["content"][0]["text"]
+        populated_hass.bus.async_fire.assert_called_once_with("test_event", {"source": "test"})
+
+    async def test_search_entities_by_query(self, view, populated_hass, mock_entity_registry):
+        """Test searching entities by friendly name."""
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_entity_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "search_entities", "arguments": {"query": "bedroom"}},
+                msg_id=201,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        entity_ids = [e["entity_id"] for e in data]
+        assert "light.bedroom" in entity_ids
+
+    async def test_search_entities_by_device_class(
+        self, view, populated_hass, mock_entity_registry
+    ):
+        """Test searching entities by device class."""
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_entity_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "search_entities",
+                    "arguments": {"device_class": "temperature"},
+                },
+                msg_id=202,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "sensor.temperature"
+        assert data[0]["device_class"] == "temperature"
+
+    async def test_search_entities_by_alias(self, view, populated_hass, mock_entity_registry):
+        """Test searching entities matches aliases."""
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_entity_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "search_entities", "arguments": {"query": "lounge"}},
+                msg_id=203,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "light.living_room"
+
+    # ── New resources: devices, services, floors ─────────────────────
+
+    async def test_devices_consistency_across_tools_and_resources(self, view, mock_device_registry):
+        """Verify list_devices tool and hass://devices resource return consistent data."""
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.resources.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+        ):
+            tool_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_devices", "arguments": {}},
+                msg_id=210,
+            )
+            tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+            resource_result = await self._call(
+                view,
+                "resources/read",
+                {"uri": "hass://devices"},
+                msg_id=211,
+            )
+            resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        assert len(tool_data) == len(resource_data)
+        tool_ids = {d["id"] for d in tool_data}
+        resource_ids = {d["id"] for d in resource_data}
+        assert tool_ids == resource_ids
+
+    async def test_services_consistency_across_tools_and_resources(self, view, populated_hass):
+        """Verify list_services tool and hass://services resource return consistent data."""
+        tool_result = await self._call(
+            view,
+            "tools/call",
+            {"name": "list_services", "arguments": {}},
+            msg_id=212,
+        )
+        tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+        resource_result = await self._call(
+            view,
+            "resources/read",
+            {"uri": "hass://services"},
+            msg_id=213,
+        )
+        resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        assert tool_data == resource_data
+
+    async def test_floors_resource(self, view):
+        """Test reading floors resource."""
+        mock_floor = Mock()
+        mock_floor.floor_id = "ground_floor"
+        mock_floor.name = "Ground Floor"
+        mock_floor.icon = "mdi:home-floor-g"
+        mock_floor.level = 0
+        mock_floor.aliases = set()
+        mock_registry = Mock()
+        mock_registry.async_list_floors.return_value = [mock_floor]
+
+        with patch(
+            "custom_components.mcp_server_http_transport.resources.fr.async_get",
+            return_value=mock_registry,
+        ):
+            result = await self._call(
+                view,
+                "resources/read",
+                {"uri": "hass://floors"},
+                msg_id=214,
+            )
+
+        data = json.loads(result["result"]["contents"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["floor_id"] == "ground_floor"
+        assert data[0]["level"] == 0
+
+    # ── New prompts: automation_review, setup_guide ───────────────────
+
+    async def test_prompts_setup_guide_with_real_entity(self, view):
+        """Test setup_guide prompt includes entity domain and device class."""
+        result = await self._call(
+            view,
+            "prompts/get",
+            {"name": "setup_guide", "arguments": {"entity_id": "sensor.temperature"}},
+            msg_id=220,
+        )
+        prompt = result["result"]
+        text = prompt["messages"][0]["content"]["text"]
+        assert "sensor" in text
+        assert "temperature" in text
+        assert "22.5" in text
+
+    async def test_prompts_automation_review(self, view, populated_hass):
+        """Test automation_review prompt fetches config and builds review."""
+        mock_config = {
+            "id": "test-auto",
+            "alias": "Test Automation",
+            "trigger": [{"platform": "state"}],
+            "action": [{"service": "light.turn_on"}],
+        }
+
+        populated_hass.config.path = Mock(return_value="/config/automations.yaml")
+
+        with patch(
+            "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
+            new_callable=AsyncMock,
+            return_value=mock_config,
+        ):
+            result = await self._call(
+                view,
+                "prompts/get",
+                {
+                    "name": "automation_review",
+                    "arguments": {"automation_id": "test-auto"},
+                },
+                msg_id=221,
+            )
+
+        text = result["result"]["messages"][0]["content"]["text"]
+        assert "Test Automation" in text
+        assert "light.turn_on" in text

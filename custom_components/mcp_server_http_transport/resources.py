@@ -5,6 +5,8 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import floor_registry as fr
 
 RESOURCES = [
     {
@@ -17,6 +19,24 @@ RESOURCES = [
         "uri": "hass://areas",
         "name": "Home Assistant Areas",
         "description": "List of all configured areas",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "hass://devices",
+        "name": "Home Assistant Devices",
+        "description": "List of all registered devices",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "hass://services",
+        "name": "Home Assistant Services",
+        "description": "List of all available services by domain",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "hass://floors",
+        "name": "Home Assistant Floors",
+        "description": "List of all configured floors",
         "mimeType": "application/json",
     },
 ]
@@ -52,6 +72,15 @@ async def read_resource(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
 
     if uri == "hass://areas":
         return _read_areas(hass, uri)
+
+    if uri == "hass://devices":
+        return _read_devices(hass, uri)
+
+    if uri == "hass://services":
+        return _read_services(hass, uri)
+
+    if uri == "hass://floors":
+        return _read_floors(hass, uri)
 
     if uri.startswith("hass://entity/"):
         entity_id = uri[len("hass://entity/") :]
@@ -102,6 +131,46 @@ async def _read_dashboard(hass: HomeAssistant, uri: str, url_path: str) -> list[
 
     config = await get_dashboard_config(hass, url_path)
     return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(config, indent=2)}]
+
+
+def _read_devices(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
+    """Read all devices as a resource."""
+    registry = dr.async_get(hass)
+    devices = [
+        {
+            "id": device.id,
+            "name": device.name,
+            "manufacturer": device.manufacturer,
+            "model": device.model,
+            "area_id": device.area_id,
+            "name_by_user": device.name_by_user,
+        }
+        for device in registry.devices.values()
+    ]
+    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(devices, indent=2)}]
+
+
+def _read_services(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
+    """Read all services as a resource."""
+    services = hass.services.async_services()
+    result = {domain: list(svcs.keys()) for domain, svcs in services.items()}
+    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(result, indent=2)}]
+
+
+def _read_floors(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
+    """Read all floors as a resource."""
+    registry = fr.async_get(hass)
+    floors = [
+        {
+            "floor_id": floor.floor_id,
+            "name": floor.name,
+            "icon": floor.icon,
+            "level": floor.level,
+            "aliases": sorted(floor.aliases) if floor.aliases else [],
+        }
+        for floor in registry.async_list_floors()
+    ]
+    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(floors, indent=2)}]
 
 
 def _read_entity(hass: HomeAssistant, uri: str, entity_id: str) -> list[dict[str, Any]]:

@@ -1,7 +1,7 @@
 {
   "domain": "mcp_server_http_transport",
   "name": "MCP Server (HTTP Transport)",
-  "after_dependencies": ["recorder", "lovelace"],
+  "after_dependencies": ["recorder", "lovelace", "logbook"],
   "codeowners": ["@ganhammar"],
   "config_flow": true,
   "dependencies": [],

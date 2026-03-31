@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections import deque
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -34,8 +35,7 @@ async def get_error_log(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         def _read_log():
             try:
                 with open(log_path) as f:
-                    all_lines = f.readlines()
-                return "".join(all_lines[-lines:])
+                    return "".join(deque(f, maxlen=lines))
             except FileNotFoundError:
                 return "Log file not found"
 

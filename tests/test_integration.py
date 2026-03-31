@@ -1451,3 +1451,205 @@ class TestMCPClientSession:
         text = result["result"]["messages"][0]["content"]["text"]
         assert "Test Automation" in text
         assert "light.turn_on" in text
+
+    # ── New: batch_get_state, resources, token optimization ──────────
+
+    async def test_batch_get_state_consistency_with_get_state(self, view, mock_entity_registry):
+        """Verify batch_get_state returns the same data as individual get_state calls."""
+        entity_ids = ["light.living_room", "sensor.temperature"]
+
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            # Individual get_state calls
+            individual = {}
+            for eid in entity_ids:
+                result = await self._call(
+                    view,
+                    "tools/call",
+                    {"name": "get_state", "arguments": {"entity_id": eid}},
+                )
+                individual[eid] = json.loads(result["result"]["content"][0]["text"])
+
+            # Batch call
+            batch_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "batch_get_state", "arguments": {"entity_ids": entity_ids}},
+                msg_id=2,
+            )
+            batch_data = json.loads(batch_result["result"]["content"][0]["text"])
+
+        for entry in batch_data:
+            eid = entry["entity_id"]
+            assert entry["state"] == individual[eid]["state"]
+            assert entry["attributes"] == individual[eid]["attributes"]
+            assert entry["aliases"] == individual[eid]["aliases"]
+
+    async def test_labels_consistency_across_tools_and_resources(self, view):
+        """Verify list_labels tool and hass://labels resource return consistent data."""
+        mock_label = Mock()
+        mock_label.label_id = "important"
+        mock_label.name = "Important"
+        mock_label.color = "red"
+        mock_label.icon = "mdi:star"
+        mock_label.description = "Important items"
+        mock_registry = Mock()
+        mock_registry.async_list_labels.return_value = [mock_label]
+
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.lr.async_get",
+                return_value=mock_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.resources.lr.async_get",
+                return_value=mock_registry,
+            ),
+        ):
+            tool_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_labels", "arguments": {}},
+                msg_id=300,
+            )
+            tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+            resource_result = await self._call(
+                view,
+                "resources/read",
+                {"uri": "hass://labels"},
+                msg_id=301,
+            )
+            resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        assert tool_data == resource_data
+
+    async def test_integrations_consistency_across_tools_and_resources(self, view, populated_hass):
+        """Verify list_integrations tool and hass://integrations resource match."""
+        mock_entry = Mock()
+        mock_entry.domain = "hue"
+        mock_entry.title = "Philips Hue"
+        mock_entry.state = "loaded"
+        mock_entry.entry_id = "entry1"
+        populated_hass.config_entries.async_entries.return_value = [mock_entry]
+
+        tool_result = await self._call(
+            view,
+            "tools/call",
+            {"name": "list_integrations", "arguments": {}},
+            msg_id=310,
+        )
+        tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+        resource_result = await self._call(
+            view,
+            "resources/read",
+            {"uri": "hass://integrations"},
+            msg_id=311,
+        )
+        resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        assert tool_data == resource_data
+
+    async def test_entities_resource_matches_list_entities(self, view, mock_entity_registry):
+        """Verify hass://entities resource groups entities by domain like list_entities."""
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            tool_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {}},
+                msg_id=320,
+            )
+            tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+        resource_result = await self._call(
+            view,
+            "resources/read",
+            {"uri": "hass://entities"},
+            msg_id=321,
+        )
+        resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        # Resource groups by domain, tool returns flat list
+        resource_count = sum(len(v) for v in resource_data.values())
+        assert resource_count == len(tool_data)
+
+        # Check all domains from tool exist in resource
+        tool_domains = set(e["entity_id"].split(".")[0] for e in tool_data)
+        assert tool_domains == set(resource_data.keys())
+
+    async def test_entities_domain_resource_matches_filtered_list(self, view, mock_entity_registry):
+        """Verify hass://entities/domain/light matches list_entities with domain=light."""
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            tool_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {"domain": "light"}},
+                msg_id=330,
+            )
+            tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+        resource_result = await self._call(
+            view,
+            "resources/read",
+            {"uri": "hass://entities/domain/light"},
+            msg_id=331,
+        )
+        resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        assert len(tool_data) == len(resource_data)
+        tool_ids = {e["entity_id"] for e in tool_data}
+        resource_ids = {e["entity_id"] for e in resource_data}
+        assert tool_ids == resource_ids
+
+    async def test_list_entities_token_optimization(self, view, mock_entity_registry):
+        """Test that detailed and fields parameters control response shape."""
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            # Default (lean)
+            lean_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {}},
+                msg_id=340,
+            )
+            lean_data = json.loads(lean_result["result"]["content"][0]["text"])
+            assert "attributes" not in lean_data[0]
+            assert "last_changed" not in lean_data[0]
+            assert "entity_id" in lean_data[0]
+            assert "state" in lean_data[0]
+
+            # Detailed
+            detailed_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {"detailed": True}},
+                msg_id=341,
+            )
+            detailed_data = json.loads(detailed_result["result"]["content"][0]["text"])
+            assert "attributes" in detailed_data[0]
+            assert "last_changed" in detailed_data[0]
+            assert "last_updated" in detailed_data[0]
+
+            # Fields (selective)
+            fields_result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "list_entities",
+                    "arguments": {"fields": ["entity_id", "state"]},
+                },
+                msg_id=342,
+            )
+            fields_data = json.loads(fields_result["result"]["content"][0]["text"])
+            assert set(fields_data[0].keys()) == {"entity_id", "state"}

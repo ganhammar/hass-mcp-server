@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from . import register_prompt
 
@@ -20,7 +21,7 @@ async def daily_summary(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     from homeassistant.components.recorder import get_instance
     from homeassistant.components.recorder.history import get_significant_states
 
-    end_time = datetime.now()
+    end_time = dt_util.utcnow()
     start_time = end_time - timedelta(days=1)
 
     try:
@@ -89,7 +90,7 @@ async def energy_report(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
 
     start_time = datetime.fromisoformat(arguments.get("start_time", ""))
     end_time_str = arguments.get("end_time")
-    end_time = datetime.fromisoformat(end_time_str) if end_time_str else datetime.now()
+    end_time = datetime.fromisoformat(end_time_str) if end_time_str else dt_util.utcnow()
 
     energy_device_classes = {"energy", "power", "gas"}
     energy_units = {"kWh", "Wh", "W", "m\u00b3"}

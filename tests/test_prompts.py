@@ -807,6 +807,10 @@ class TestPrompts:
                 return_value=mock_area_registry,
             ),
             patch(
+                "custom_components.mcp_server_http_transport.prompts.workflows.dr.async_get",
+                return_value=Mock(),
+            ),
+            patch(
                 "custom_components.mcp_server_http_transport.prompts.workflows.er.async_get",
                 return_value=mock_entity_registry,
             ),

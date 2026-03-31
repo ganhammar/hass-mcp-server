@@ -6,6 +6,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from . import register_prompt
@@ -50,9 +51,14 @@ async def dashboard_builder(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             area_info = f"**Area:** {area.name} (id: {area.id})\n"
 
         entity_registry = er.async_get(hass)
+        device_registry = dr.async_get(hass)
         for state in hass.states.async_all():
             entry = entity_registry.async_get(state.entity_id)
-            if entry and entry.area_id == area_id:
+            entity_area = entry.area_id if entry else None
+            if not entity_area and entry and entry.device_id:
+                device = device_registry.async_get(entry.device_id)
+                entity_area = device.area_id if device else None
+            if entity_area == area_id:
                 entities_info.append(
                     {
                         "entity_id": state.entity_id,

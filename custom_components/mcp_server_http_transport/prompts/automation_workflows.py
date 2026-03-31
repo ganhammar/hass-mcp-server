@@ -128,7 +128,7 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
     # Fetch recent logbook entries
     logbook_text = "Logbook data not available"
     try:
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         from homeassistant.components.logbook.processor import (
             EVENT_LOGBOOK_ENTRY,
@@ -136,8 +136,9 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
             EventProcessor,
         )
         from homeassistant.components.recorder import get_instance
+        from homeassistant.util import dt as dt_util
 
-        end_time = datetime.now()
+        end_time = dt_util.utcnow()
         start_time = end_time - timedelta(days=1)
 
         if state is not None:

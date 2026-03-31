@@ -1653,3 +1653,134 @@ class TestMCPClientSession:
             )
             fields_data = json.loads(fields_result["result"]["content"][0]["text"])
             assert set(fields_data[0].keys()) == {"entity_id", "state"}
+
+    async def test_fire_event_blocked_system_events(self, view, populated_hass):
+        """Test that system events are blocked from being fired."""
+        populated_hass.bus = Mock()
+        populated_hass.bus.async_fire = Mock()
+
+        for event_type in ["homeassistant_stop", "state_changed", "call_service"]:
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "fire_event", "arguments": {"event_type": event_type}},
+            )
+            text = result["result"]["content"][0]["text"]
+            assert "not allowed" in text
+            populated_hass.bus.async_fire.assert_not_called()
+
+    async def test_search_entities_by_area(
+        self, view, populated_hass, mock_entity_registry, mock_device_registry
+    ):
+        """Test searching entities by area_id including device fallback."""
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_entity_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "search_entities", "arguments": {"area_id": "bedroom"}},
+                msg_id=400,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        entity_ids = [e["entity_id"] for e in data]
+        assert "light.bedroom" in entity_ids
+        assert "sensor.temperature" in entity_ids
+        for entry in data:
+            assert entry["area_id"] == "bedroom"
+
+    async def test_search_entities_limit(self, view, populated_hass, mock_entity_registry):
+        """Test that search_entities respects the limit parameter."""
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_entity_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "search_entities",
+                    "arguments": {"domain": "light", "limit": 1},
+                },
+                msg_id=401,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        assert len(data) == 1
+
+    async def test_get_logbook_end_to_end(self, view, populated_hass):
+        """Test get_logbook fetches entries via the recorder."""
+        mock_processor = Mock()
+        mock_processor.get_events = Mock(return_value=[{"name": "test", "message": "fired"}])
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(
+            return_value=[{"name": "test", "message": "fired"}]
+        )
+
+        with (
+            patch(
+                "homeassistant.components.logbook.processor.EventProcessor",
+                return_value=mock_processor,
+            ),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "get_logbook",
+                    "arguments": {
+                        "entity_id": "light.living_room",
+                        "start_time": "2024-01-01T00:00:00",
+                    },
+                },
+                msg_id=402,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        assert isinstance(data, list)
+
+    async def test_energy_report_prompt(self, view, populated_hass):
+        """Test energy_report prompt gathers energy entities and history."""
+        mock_history_state = Mock()
+        mock_history_state.state = "100"
+        mock_history_state.attributes = {
+            "friendly_name": "Energy",
+            "unit_of_measurement": "kWh",
+        }
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(
+            return_value={"sensor.temperature": [mock_history_state]}
+        )
+
+        with patch(
+            "homeassistant.components.recorder.get_instance",
+            return_value=mock_recorder,
+        ):
+            result = await self._call(
+                view,
+                "prompts/get",
+                {
+                    "name": "energy_report",
+                    "arguments": {"start_time": "2024-01-01T00:00:00"},
+                },
+                msg_id=403,
+            )
+        text = result["result"]["messages"][0]["content"]["text"]
+        assert "energy" in text.lower()

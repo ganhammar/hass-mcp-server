@@ -8,11 +8,13 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 
 - 🌐 **HTTP transport** (not SSE) - works remotely, not just locally
 - 🔐 **OAuth 2.0 authentication** with Dynamic Client Registration (via [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server))
-- 🏠 Full Home Assistant API access (entities, services, areas, devices, history)
+- 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, and scripts
 - 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards)
+- 🩺 System administration tools (error log, config validation, restart, system status)
 - 📊 Resources, prompts, and completions for richer AI interactions
+- 🧹 Optimization prompts for auditing automations, naming conventions, and scheduling
 
 ## Prerequisites
 
@@ -72,9 +74,9 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 
 | Tool | Description |
 |------|-------------|
-| `get_state` | Get the current state of any entity |
+| `get_state` | Get the current state of any entity (optional `fields` to limit attributes) |
 | `call_service` | Call any Home Assistant service |
-| `list_entities` | List all entities, optionally filtered by domain |
+| `list_entities` | List all entities, with optional `domain`, `detailed`, and `fields` parameters |
 | `get_config` | Get Home Assistant configuration (version, location, units, timezone) |
 | `list_areas` | List all areas |
 | `list_devices` | List devices, optionally filtered by area |
@@ -106,6 +108,15 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 | `search_entities` | Search entities by friendly name, device class, domain, or area |
 | `fire_event` | Fire a custom event on the Home Assistant event bus |
 | `get_logbook` | Fetch logbook entries for an entity or time range |
+| `get_error_log` | Fetch the Home Assistant error log (last N lines) |
+| `restart_ha` | Restart Home Assistant (requires explicit confirmation) |
+| `get_system_status` | System overview: version, domain counts, entity totals, problem entities |
+| `get_domain_stats` | Aggregate stats for a single domain (count, state breakdown, examples) |
+| `check_config` | Validate Home Assistant configuration without restarting |
+| `get_statistics` | Fetch long-term statistics (energy, climate) with configurable period |
+| `list_integrations` | List installed integrations and their status |
+| `list_labels` | List all labels for cross-domain grouping |
+| `batch_get_state` | Get state for multiple entities in one call (max 50) |
 
 ### Resources
 
@@ -116,8 +127,12 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 | `hass://devices` | All registered devices |
 | `hass://services` | All available services by domain |
 | `hass://floors` | All configured floors |
+| `hass://entities` | All entities organized by domain |
+| `hass://labels` | All labels |
+| `hass://integrations` | Installed integrations with status |
 | `hass://entity/{entity_id}` | State and attributes of a specific entity |
 | `hass://dashboard/{url_path}` | Full configuration of a specific dashboard |
+| `hass://entities/domain/{domain}` | Entities filtered by a specific domain |
 
 ### Prompts
 
@@ -128,10 +143,18 @@ That's it! Claude will now be able to interact with your Home Assistant instance
 | `automation_review` | Review an automation's config for issues and improvements |
 | `energy_report` | Summarize energy consumption data over a time range |
 | `setup_guide` | Guided troubleshooting for an entity in a problem state |
+| `automation_builder` | Step-by-step guided automation creation |
+| `automation_debugger` | Debug why an automation is not firing or misbehaving |
+| `automation_audit` | Audit all automations for conflicts, redundancies, and anti-patterns |
+| `schedule_optimizer` | Analyze automation schedules and suggest timing improvements |
+| `naming_conventions` | Scan entity names for inconsistencies and suggest standardization |
+| `dashboard_builder` | Suggest a Lovelace dashboard layout for given entities or area |
+| `change_validator` | Pre-flight check after creating or modifying configurations |
+| `security_review` | Scan for security issues in entities, integrations, and configuration |
 
 ### Completions
 
-Autocompletion is supported for `entity_id`, `domain`, `service`, `area_id`, `url_path`, `automation_id`, `scene_id`, and script `key` arguments.
+Autocompletion is supported for `entity_id`, `entity_ids`, `domain`, `service`, `area_id`, `url_path`, `automation_id`, `scene_id`, script `key`, `trigger_type`, `period`, and `config_type` arguments.
 
 ## FAQ
 

@@ -43,4 +43,9 @@ async def get_prompt(hass: HomeAssistant, name: str, arguments: dict[str, Any]) 
 
 
 # Import submodules so prompts auto-register via @register_prompt
-from . import automation, diagnostics, reporting  # noqa: F401, E402
+from . import automation as automation  # noqa: E402
+from . import automation_workflows as automation_workflows  # noqa: E402
+from . import diagnostics as diagnostics  # noqa: E402
+from . import optimization as optimization  # noqa: E402
+from . import reporting as reporting  # noqa: E402
+from . import workflows as workflows  # noqa: E402

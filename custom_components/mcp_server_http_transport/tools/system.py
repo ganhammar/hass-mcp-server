@@ -6,6 +6,7 @@ from datetime import datetime as dt
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from . import register_tool
 
@@ -102,7 +103,7 @@ async def get_history(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
     entity_id = arguments["entity_id"]
     start_time = dt.fromisoformat(arguments["start_time"])
     end_time_str = arguments.get("end_time")
-    end_time = dt.fromisoformat(end_time_str) if end_time_str else dt.now()
+    end_time = dt.fromisoformat(end_time_str) if end_time_str else dt_util.utcnow()
 
     try:
         states = await get_instance(hass).async_add_executor_job(
@@ -226,7 +227,7 @@ async def get_logbook(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
     entity_id = arguments.get("entity_id")
     start_time = dt.fromisoformat(arguments["start_time"])
     end_time_str = arguments.get("end_time")
-    end_time = dt.fromisoformat(end_time_str) if end_time_str else dt.now()
+    end_time = dt.fromisoformat(end_time_str) if end_time_str else dt_util.utcnow()
 
     entity_ids = [entity_id] if entity_id else None
 

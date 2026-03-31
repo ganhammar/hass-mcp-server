@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import label_registry as lr
 
 from . import register_tool
 
@@ -23,7 +24,15 @@ _LOGGER = logging.getLogger(__name__)
             "entity_id": {
                 "type": "string",
                 "description": "The entity ID (e.g., light.living_room)",
-            }
+            },
+            "fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Limit which attribute keys are included in the response "
+                    "(e.g., ['brightness', 'color_temp']). Omit for all attributes"
+                ),
+            },
         },
         "required": ["entity_id"],
     },
@@ -31,6 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get entity state."""
     entity_id = arguments["entity_id"]
+    fields = arguments.get("fields")
     state = hass.states.get(entity_id)
 
     if state is None:
@@ -40,10 +50,14 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
     entry = registry.async_get(entity_id)
     aliases = sorted(entry.aliases) if entry and entry.aliases else []
 
+    attributes = dict(state.attributes)
+    if fields is not None:
+        attributes = {k: v for k, v in attributes.items() if k in fields}
+
     result = {
         "entity_id": state.entity_id,
         "state": state.state,
-        "attributes": dict(state.attributes),
+        "attributes": attributes,
         "aliases": aliases,
         "last_changed": state.last_changed.isoformat(),
         "last_updated": state.last_updated.isoformat(),
@@ -113,13 +127,31 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             "domain": {
                 "type": "string",
                 "description": "Filter by domain (optional)",
-            }
+            },
+            "detailed": {
+                "type": "boolean",
+                "description": (
+                    "Include full attributes, last_changed, and last_updated "
+                    "(default false for a lean response)"
+                ),
+            },
+            "fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Whitelist specific keys to include per entity "
+                    "(e.g., ['entity_id', 'state', 'attributes']). "
+                    "Takes precedence over the detailed flag"
+                ),
+            },
         },
     },
 )
 async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List entities."""
     domain_filter = arguments.get("domain")
+    detailed = arguments.get("detailed", False)
+    fields = arguments.get("fields")
     registry = er.async_get(hass)
 
     entities = []
@@ -128,14 +160,36 @@ async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             continue
         entry = registry.async_get(state.entity_id)
         aliases = sorted(entry.aliases) if entry and entry.aliases else []
-        entities.append(
-            {
+
+        if fields is not None:
+            full = {
+                "entity_id": state.entity_id,
+                "state": state.state,
+                "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+                "aliases": aliases,
+                "attributes": dict(state.attributes),
+                "last_changed": state.last_changed.isoformat(),
+                "last_updated": state.last_updated.isoformat(),
+            }
+            entity = {k: v for k, v in full.items() if k in fields}
+        elif detailed:
+            entity = {
+                "entity_id": state.entity_id,
+                "state": state.state,
+                "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+                "aliases": aliases,
+                "attributes": dict(state.attributes),
+                "last_changed": state.last_changed.isoformat(),
+                "last_updated": state.last_updated.isoformat(),
+            }
+        else:
+            entity = {
                 "entity_id": state.entity_id,
                 "state": state.state,
                 "friendly_name": state.attributes.get("friendly_name", state.entity_id),
                 "aliases": aliases,
             }
-        )
+        entities.append(entity)
 
     return {"content": [{"type": "text", "text": json.dumps(entities, indent=2)}]}
 
@@ -332,3 +386,81 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
             break
 
     return {"content": [{"type": "text", "text": json.dumps(entities, indent=2)}]}
+
+
+@register_tool(
+    name="list_labels",
+    description=(
+        "List all labels in Home Assistant. "
+        "Labels are used to tag entities, devices, and areas for cross-domain grouping"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {},
+    },
+)
+async def list_labels(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """List all labels."""
+    registry = lr.async_get(hass)
+    labels = [
+        {
+            "label_id": label.label_id,
+            "name": label.name,
+            "color": label.color,
+            "icon": label.icon,
+            "description": label.description,
+        }
+        for label in registry.async_list_labels()
+    ]
+
+    return {"content": [{"type": "text", "text": json.dumps(labels, indent=2)}]}
+
+
+@register_tool(
+    name="batch_get_state",
+    description=(
+        "Get state for multiple entities in one call. "
+        "Reduces round trips when checking a handful of specific entities"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of entity IDs to get state for (max 50)",
+            }
+        },
+        "required": ["entity_ids"],
+    },
+)
+async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Get state for multiple entities."""
+    entity_ids = arguments["entity_ids"]
+
+    if len(entity_ids) > 50:
+        return {"content": [{"type": "text", "text": "Error: maximum 50 entity IDs per request"}]}
+
+    registry = er.async_get(hass)
+    results = []
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        if state is None:
+            results.append({"entity_id": entity_id, "error": "not found"})
+            continue
+
+        entry = registry.async_get(entity_id)
+        aliases = sorted(entry.aliases) if entry and entry.aliases else []
+
+        results.append(
+            {
+                "entity_id": state.entity_id,
+                "state": state.state,
+                "attributes": dict(state.attributes),
+                "aliases": aliases,
+                "last_changed": state.last_changed.isoformat(),
+                "last_updated": state.last_updated.isoformat(),
+            }
+        )
+
+    return {"content": [{"type": "text", "text": json.dumps(results, indent=2)}]}

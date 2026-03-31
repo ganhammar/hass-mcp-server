@@ -246,7 +246,7 @@ class TestMCPClientSession:
         # Step 2: Discover tools
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 34
+        assert len(tool_names) == 43
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool
@@ -256,12 +256,12 @@ class TestMCPClientSession:
 
         # Step 3: Discover resources
         result = await self._call(view, "resources/list", msg_id=3)
-        assert len(result["result"]["resources"]) == 5
-        assert len(result["result"]["resourceTemplates"]) == 2
+        assert len(result["result"]["resources"]) == 8
+        assert len(result["result"]["resourceTemplates"]) == 3
 
         # Step 4: Discover prompts
         result = await self._call(view, "prompts/list", msg_id=4)
-        assert len(result["result"]["prompts"]) == 5
+        assert len(result["result"]["prompts"]) == 13
         for prompt in result["result"]["prompts"]:
             assert "name" in prompt
             assert "description" in prompt
@@ -1451,3 +1451,336 @@ class TestMCPClientSession:
         text = result["result"]["messages"][0]["content"]["text"]
         assert "Test Automation" in text
         assert "light.turn_on" in text
+
+    # ── New: batch_get_state, resources, token optimization ──────────
+
+    async def test_batch_get_state_consistency_with_get_state(self, view, mock_entity_registry):
+        """Verify batch_get_state returns the same data as individual get_state calls."""
+        entity_ids = ["light.living_room", "sensor.temperature"]
+
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            # Individual get_state calls
+            individual = {}
+            for eid in entity_ids:
+                result = await self._call(
+                    view,
+                    "tools/call",
+                    {"name": "get_state", "arguments": {"entity_id": eid}},
+                )
+                individual[eid] = json.loads(result["result"]["content"][0]["text"])
+
+            # Batch call
+            batch_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "batch_get_state", "arguments": {"entity_ids": entity_ids}},
+                msg_id=2,
+            )
+            batch_data = json.loads(batch_result["result"]["content"][0]["text"])
+
+        for entry in batch_data:
+            eid = entry["entity_id"]
+            assert entry["state"] == individual[eid]["state"]
+            assert entry["attributes"] == individual[eid]["attributes"]
+            assert entry["aliases"] == individual[eid]["aliases"]
+
+    async def test_labels_consistency_across_tools_and_resources(self, view):
+        """Verify list_labels tool and hass://labels resource return consistent data."""
+        mock_label = Mock()
+        mock_label.label_id = "important"
+        mock_label.name = "Important"
+        mock_label.color = "red"
+        mock_label.icon = "mdi:star"
+        mock_label.description = "Important items"
+        mock_registry = Mock()
+        mock_registry.async_list_labels.return_value = [mock_label]
+
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.lr.async_get",
+                return_value=mock_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.resources.lr.async_get",
+                return_value=mock_registry,
+            ),
+        ):
+            tool_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_labels", "arguments": {}},
+                msg_id=300,
+            )
+            tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+            resource_result = await self._call(
+                view,
+                "resources/read",
+                {"uri": "hass://labels"},
+                msg_id=301,
+            )
+            resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        assert tool_data == resource_data
+
+    async def test_integrations_consistency_across_tools_and_resources(self, view, populated_hass):
+        """Verify list_integrations tool and hass://integrations resource match."""
+        mock_entry = Mock()
+        mock_entry.domain = "hue"
+        mock_entry.title = "Philips Hue"
+        mock_entry.state = "loaded"
+        mock_entry.entry_id = "entry1"
+        populated_hass.config_entries.async_entries.return_value = [mock_entry]
+
+        tool_result = await self._call(
+            view,
+            "tools/call",
+            {"name": "list_integrations", "arguments": {}},
+            msg_id=310,
+        )
+        tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+        resource_result = await self._call(
+            view,
+            "resources/read",
+            {"uri": "hass://integrations"},
+            msg_id=311,
+        )
+        resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        assert tool_data == resource_data
+
+    async def test_entities_resource_matches_list_entities(self, view, mock_entity_registry):
+        """Verify hass://entities resource groups entities by domain like list_entities."""
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            tool_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {}},
+                msg_id=320,
+            )
+            tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+        resource_result = await self._call(
+            view,
+            "resources/read",
+            {"uri": "hass://entities"},
+            msg_id=321,
+        )
+        resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        # Resource groups by domain, tool returns flat list
+        resource_count = sum(len(v) for v in resource_data.values())
+        assert resource_count == len(tool_data)
+
+        # Check all domains from tool exist in resource
+        tool_domains = set(e["entity_id"].split(".")[0] for e in tool_data)
+        assert tool_domains == set(resource_data.keys())
+
+    async def test_entities_domain_resource_matches_filtered_list(self, view, mock_entity_registry):
+        """Verify hass://entities/domain/light matches list_entities with domain=light."""
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            tool_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {"domain": "light"}},
+                msg_id=330,
+            )
+            tool_data = json.loads(tool_result["result"]["content"][0]["text"])
+
+        resource_result = await self._call(
+            view,
+            "resources/read",
+            {"uri": "hass://entities/domain/light"},
+            msg_id=331,
+        )
+        resource_data = json.loads(resource_result["result"]["contents"][0]["text"])
+
+        assert len(tool_data) == len(resource_data)
+        tool_ids = {e["entity_id"] for e in tool_data}
+        resource_ids = {e["entity_id"] for e in resource_data}
+        assert tool_ids == resource_ids
+
+    async def test_list_entities_token_optimization(self, view, mock_entity_registry):
+        """Test that detailed and fields parameters control response shape."""
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+            return_value=mock_entity_registry,
+        ):
+            # Default (lean)
+            lean_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {}},
+                msg_id=340,
+            )
+            lean_data = json.loads(lean_result["result"]["content"][0]["text"])
+            assert "attributes" not in lean_data[0]
+            assert "last_changed" not in lean_data[0]
+            assert "entity_id" in lean_data[0]
+            assert "state" in lean_data[0]
+
+            # Detailed
+            detailed_result = await self._call(
+                view,
+                "tools/call",
+                {"name": "list_entities", "arguments": {"detailed": True}},
+                msg_id=341,
+            )
+            detailed_data = json.loads(detailed_result["result"]["content"][0]["text"])
+            assert "attributes" in detailed_data[0]
+            assert "last_changed" in detailed_data[0]
+            assert "last_updated" in detailed_data[0]
+
+            # Fields (selective)
+            fields_result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "list_entities",
+                    "arguments": {"fields": ["entity_id", "state"]},
+                },
+                msg_id=342,
+            )
+            fields_data = json.loads(fields_result["result"]["content"][0]["text"])
+            assert set(fields_data[0].keys()) == {"entity_id", "state"}
+
+    async def test_fire_event_blocked_system_events(self, view, populated_hass):
+        """Test that system events are blocked from being fired."""
+        populated_hass.bus = Mock()
+        populated_hass.bus.async_fire = Mock()
+
+        for event_type in ["homeassistant_stop", "state_changed", "call_service"]:
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "fire_event", "arguments": {"event_type": event_type}},
+            )
+            text = result["result"]["content"][0]["text"]
+            assert "not allowed" in text
+            populated_hass.bus.async_fire.assert_not_called()
+
+    async def test_search_entities_by_area(
+        self, view, populated_hass, mock_entity_registry, mock_device_registry
+    ):
+        """Test searching entities by area_id including device fallback."""
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_entity_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {"name": "search_entities", "arguments": {"area_id": "bedroom"}},
+                msg_id=400,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        entity_ids = [e["entity_id"] for e in data]
+        assert "light.bedroom" in entity_ids
+        assert "sensor.temperature" in entity_ids
+        for entry in data:
+            assert entry["area_id"] == "bedroom"
+
+    async def test_search_entities_limit(self, view, populated_hass, mock_entity_registry):
+        """Test that search_entities respects the limit parameter."""
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_entity_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=Mock(),
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "search_entities",
+                    "arguments": {"domain": "light", "limit": 1},
+                },
+                msg_id=401,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        assert len(data) == 1
+
+    async def test_get_logbook_end_to_end(self, view, populated_hass):
+        """Test get_logbook fetches entries via the recorder."""
+        mock_processor = Mock()
+        mock_processor.get_events = Mock(return_value=[{"name": "test", "message": "fired"}])
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(
+            return_value=[{"name": "test", "message": "fired"}]
+        )
+
+        with (
+            patch(
+                "homeassistant.components.logbook.processor.EventProcessor",
+                return_value=mock_processor,
+            ),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            result = await self._call(
+                view,
+                "tools/call",
+                {
+                    "name": "get_logbook",
+                    "arguments": {
+                        "entity_id": "light.living_room",
+                        "start_time": "2024-01-01T00:00:00",
+                    },
+                },
+                msg_id=402,
+            )
+        data = json.loads(result["result"]["content"][0]["text"])
+        assert isinstance(data, list)
+
+    async def test_energy_report_prompt(self, view, populated_hass):
+        """Test energy_report prompt gathers energy entities and history."""
+        mock_history_state = Mock()
+        mock_history_state.state = "100"
+        mock_history_state.attributes = {
+            "friendly_name": "Energy",
+            "unit_of_measurement": "kWh",
+        }
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(
+            return_value={"sensor.temperature": [mock_history_state]}
+        )
+
+        with patch(
+            "homeassistant.components.recorder.get_instance",
+            return_value=mock_recorder,
+        ):
+            result = await self._call(
+                view,
+                "prompts/get",
+                {
+                    "name": "energy_report",
+                    "arguments": {"start_time": "2024-01-01T00:00:00"},
+                },
+                msg_id=403,
+            )
+        text = result["result"]["messages"][0]["content"]["text"]
+        assert "energy" in text.lower()

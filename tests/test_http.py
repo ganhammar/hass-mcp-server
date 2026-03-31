@@ -2891,6 +2891,99 @@ class TestMCPEndpointView:
         assert len(data) == 1
         assert data[0]["entity_id"] == "light.test"
 
+    async def test_post_tools_call_get_logbook_without_entity_id(self, view, mock_hass):
+        """Test get_logbook without entity_id returns all entries."""
+        mock_events = [
+            {"when": "2024-01-01T12:00:00", "name": "Light", "entity_id": "light.a"},
+            {"when": "2024-01-01T13:00:00", "name": "Switch", "entity_id": "switch.b"},
+        ]
+        mock_processor = Mock()
+        mock_processor.get_events.return_value = mock_events
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(return_value=mock_events)
+
+        mock_event_processor_cls = Mock(return_value=mock_processor)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_logbook",
+                    "arguments": {"start_time": "2024-01-01T00:00:00"},
+                },
+                "id": 85,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.logbook.processor.EventProcessor",
+                mock_event_processor_cls,
+            ),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 2
+        # Verify entity_ids=None was passed when no entity_id argument
+        call_kwargs = mock_event_processor_cls.call_args
+        assert call_kwargs[1]["entity_ids"] is None
+
+    async def test_post_tools_call_get_logbook_with_end_time(self, view, mock_hass):
+        """Test get_logbook with explicit end_time."""
+        mock_events = []
+        mock_processor = Mock()
+        mock_processor.get_events.return_value = mock_events
+
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock(return_value=mock_events)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_logbook",
+                    "arguments": {
+                        "start_time": "2024-01-01T00:00:00",
+                        "end_time": "2024-01-02T00:00:00",
+                    },
+                },
+                "id": 85,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.logbook.processor.EventProcessor",
+                return_value=mock_processor,
+            ),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert data == []
+
     # ── Resources: devices, services, floors ─────────────────────────
 
     async def test_post_resources_read_devices(self, view, mock_hass):

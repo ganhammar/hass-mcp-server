@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import floor_registry as fr
+from homeassistant.helpers import label_registry as lr
 
 RESOURCES = [
     {
@@ -39,6 +40,24 @@ RESOURCES = [
         "description": "List of all configured floors",
         "mimeType": "application/json",
     },
+    {
+        "uri": "hass://entities",
+        "name": "Home Assistant Entities",
+        "description": "All entities organized by domain (entity_id, state, friendly_name)",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "hass://labels",
+        "name": "Home Assistant Labels",
+        "description": "All labels used for cross-domain grouping of entities, devices, and areas",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "hass://integrations",
+        "name": "Home Assistant Integrations",
+        "description": "Installed integrations with their status",
+        "mimeType": "application/json",
+    },
 ]
 
 RESOURCE_TEMPLATES = [
@@ -52,6 +71,12 @@ RESOURCE_TEMPLATES = [
         "uriTemplate": "hass://dashboard/{url_path}",
         "name": "Dashboard Configuration",
         "description": "Full configuration (views and cards) of a specific dashboard",
+        "mimeType": "application/json",
+    },
+    {
+        "uriTemplate": "hass://entities/domain/{domain}",
+        "name": "Entities by Domain",
+        "description": "All entities filtered by a specific domain",
         "mimeType": "application/json",
     },
 ]
@@ -81,6 +106,19 @@ async def read_resource(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
 
     if uri == "hass://floors":
         return _read_floors(hass, uri)
+
+    if uri == "hass://entities":
+        return _read_entities(hass, uri)
+
+    if uri == "hass://labels":
+        return _read_labels(hass, uri)
+
+    if uri == "hass://integrations":
+        return _read_integrations(hass, uri)
+
+    if uri.startswith("hass://entities/domain/"):
+        domain = uri[len("hass://entities/domain/") :]
+        return _read_entities_domain(hass, uri, domain)
 
     if uri.startswith("hass://entity/"):
         entity_id = uri[len("hass://entity/") :]
@@ -188,3 +226,71 @@ def _read_entity(hass: HomeAssistant, uri: str, entity_id: str) -> list[dict[str
         "last_updated": state.last_updated.isoformat(),
     }
     return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2)}]
+
+
+def _read_entities(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
+    """Read all entities organized by domain."""
+    by_domain: dict[str, list[dict[str, Any]]] = {}
+    for state in hass.states.async_all():
+        domain = state.entity_id.split(".")[0]
+        by_domain.setdefault(domain, []).append(
+            {
+                "entity_id": state.entity_id,
+                "state": state.state,
+                "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+            }
+        )
+    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(by_domain, indent=2)}]
+
+
+def _read_entities_domain(hass: HomeAssistant, uri: str, domain: str) -> list[dict[str, Any]]:
+    """Read entities filtered by domain."""
+    entities = []
+    for state in hass.states.async_all():
+        if not state.entity_id.startswith(f"{domain}."):
+            continue
+        entities.append(
+            {
+                "entity_id": state.entity_id,
+                "state": state.state,
+                "friendly_name": state.attributes.get("friendly_name", state.entity_id),
+            }
+        )
+    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(entities, indent=2)}]
+
+
+def _read_labels(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
+    """Read all labels as a resource."""
+    registry = lr.async_get(hass)
+    labels = [
+        {
+            "label_id": label.label_id,
+            "name": label.name,
+            "color": label.color,
+            "icon": label.icon,
+            "description": label.description,
+        }
+        for label in registry.async_list_labels()
+    ]
+    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(labels, indent=2)}]
+
+
+def _read_integrations(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
+    """Read installed integrations as a resource."""
+    entries = hass.config_entries.async_entries()
+    integrations = [
+        {
+            "domain": entry.domain,
+            "title": entry.title,
+            "state": str(entry.state),
+            "entry_id": entry.entry_id,
+        }
+        for entry in entries
+    ]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(integrations, indent=2),
+        }
+    ]

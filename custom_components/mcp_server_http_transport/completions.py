@@ -18,6 +18,9 @@ async def complete(
     if arg_name == "entity_id":
         return _complete_entity_id(hass, arg_value)
 
+    if arg_name == "entity_ids":
+        return _complete_entity_id(hass, arg_value)
+
     if arg_name == "domain":
         return _complete_domain(hass, arg_value)
 
@@ -30,6 +33,15 @@ async def complete(
     if arg_name == "url_path":
         return _complete_url_path(hass, arg_value)
 
+    if arg_name == "trigger_type":
+        return _complete_trigger_type(arg_value)
+
+    if arg_name == "period":
+        return _complete_period(arg_value)
+
+    if arg_name == "config_type":
+        return _complete_config_type(arg_value)
+
     ref_name = ref.get("name", "")
 
     if arg_name == "automation_id" and ref_name in (
@@ -38,6 +50,7 @@ async def complete(
         "update_automation",
         "delete_automation",
         "automation_review",
+        "automation_debugger",
     ):
         return await _complete_automation_id(hass, arg_value)
 
@@ -154,3 +167,44 @@ async def _complete_script_key(hass: HomeAssistant, prefix: str) -> dict[str, An
         "values": matches[:MAX_COMPLETIONS],
         "hasMore": len(matches) > MAX_COMPLETIONS,
     }
+
+
+_TRIGGER_TYPES = [
+    "device",
+    "event",
+    "homeassistant",
+    "mqtt",
+    "numeric_state",
+    "state",
+    "sun",
+    "tag",
+    "template",
+    "time",
+    "time_pattern",
+    "webhook",
+    "zone",
+]
+
+
+def _complete_trigger_type(prefix: str) -> dict[str, Any]:
+    """Complete trigger types."""
+    matches = [t for t in _TRIGGER_TYPES if t.startswith(prefix)]
+    return {"values": matches, "hasMore": False}
+
+
+_PERIODS = ["5minute", "day", "hour", "month", "week"]
+
+
+def _complete_period(prefix: str) -> dict[str, Any]:
+    """Complete statistic periods."""
+    matches = [p for p in _PERIODS if p.startswith(prefix)]
+    return {"values": matches, "hasMore": False}
+
+
+_CONFIG_TYPES = ["automation", "scene", "script"]
+
+
+def _complete_config_type(prefix: str) -> dict[str, Any]:
+    """Complete configuration types."""
+    matches = [c for c in _CONFIG_TYPES if c.startswith(prefix)]
+    return {"values": matches, "hasMore": False}

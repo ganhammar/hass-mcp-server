@@ -246,7 +246,7 @@ class TestMCPClientSession:
         # Step 2: Discover tools
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 34
+        assert len(tool_names) == 43
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool
@@ -256,12 +256,12 @@ class TestMCPClientSession:
 
         # Step 3: Discover resources
         result = await self._call(view, "resources/list", msg_id=3)
-        assert len(result["result"]["resources"]) == 5
-        assert len(result["result"]["resourceTemplates"]) == 2
+        assert len(result["result"]["resources"]) == 8
+        assert len(result["result"]["resourceTemplates"]) == 3
 
         # Step 4: Discover prompts
         result = await self._call(view, "prompts/list", msg_id=4)
-        assert len(result["result"]["prompts"]) == 5
+        assert len(result["result"]["prompts"]) == 13
         for prompt in result["result"]["prompts"]:
             assert "name" in prompt
             assert "description" in prompt

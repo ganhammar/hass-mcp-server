@@ -1089,6 +1089,74 @@ class TestPrompts:
         text = body["result"]["messages"][0]["content"]["text"]
         assert "light.bedroom" in text
 
+    async def test_post_prompts_get_dashboard_builder_area_via_device(self, view, mock_hass):
+        """Test dashboard_builder resolves area via device when entity has no direct area."""
+        mock_area = Mock()
+        mock_area.id = "living_room"
+        mock_area.name = "Living Room"
+
+        mock_area_registry = Mock()
+        mock_area_registry.async_get_area.return_value = mock_area
+
+        mock_state = Mock()
+        mock_state.entity_id = "light.living_room"
+        mock_state.state = "on"
+        mock_state.attributes = {
+            "friendly_name": "Living Room Light",
+            "device_class": None,
+        }
+        mock_hass.states.async_all.return_value = [mock_state]
+
+        # Entity has no direct area but has a device_id
+        mock_entry = Mock()
+        mock_entry.area_id = None
+        mock_entry.device_id = "hue_bridge"
+        mock_entity_registry = Mock()
+        mock_entity_registry.async_get.return_value = mock_entry
+
+        # Device has the area
+        mock_device = Mock()
+        mock_device.area_id = "living_room"
+        mock_device_registry = Mock()
+        mock_device_registry.async_get.return_value = mock_device
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "dashboard_builder",
+                    "arguments": {"area_id": "living_room"},
+                },
+                "id": 268,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.prompts.workflows.ar.async_get",
+                return_value=mock_area_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.prompts.workflows.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.prompts.workflows.er.async_get",
+                return_value=mock_entity_registry,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "light.living_room" in text
+        assert "Living Room" in text
+
     async def test_post_prompts_get_dashboard_builder_no_entities(self, view, mock_hass):
         """Test dashboard_builder when no entities match."""
         request = Mock()

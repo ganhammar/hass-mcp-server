@@ -23,6 +23,7 @@ class TestGetAliasesCompat:
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get_entity_aliases",
                 return_value=["Resolved Alias"],
+                create=True,
             ) as mock_fn,
         ):
             result = entities_mod._get_aliases(mock_hass, mock_entry)

@@ -53,13 +53,32 @@ Any MCP-compatible agent can authenticate using a Home Assistant long-lived acce
 
 1. In Home Assistant, go to your profile → **Long-Lived Access Tokens** → **Create Token**
 2. Copy the generated token
-3. Configure your agent to send the token as a Bearer header:
-   ```
-   Authorization: Bearer <your-token>
-   ```
-4. Set the MCP server URL to `https://your-home-assistant.com/api/mcp`
+3. Configure your agent to send the token as a Bearer header
 
 The server tries OAuth 2.0 (OIDC) first and falls back to long-lived access token validation automatically, so both methods can be used at the same time.
+
+### Example: mcp-remote
+
+[mcp-remote](https://github.com/geelen/mcp-remote) allows connecting desktop MCP clients (Claude Desktop, Cursor, etc.) to a remote MCP server. Configure it with your long-lived access token:
+
+```json
+{
+  "mcpServers": {
+    "home-assistant": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://your-home-assistant.com/api/mcp",
+        "--header",
+        "Authorization: Bearer ${HA_TOKEN}"
+      ],
+      "env": {
+        "HA_TOKEN": "<your long-lived access token>"
+      }
+    }
+  }
+}
+```
 
 ## Usage with Claude in Browser
 

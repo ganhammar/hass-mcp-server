@@ -48,7 +48,7 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
 
     registry = er.async_get(hass)
     entry = registry.async_get(entity_id)
-    aliases = sorted(entry.aliases) if entry and entry.aliases else []
+    aliases = sorted(entry.aliases, key=str) if entry and entry.aliases else []
 
     attributes = dict(state.attributes)
     if fields is not None:
@@ -159,7 +159,7 @@ async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         if domain_filter and not state.entity_id.startswith(f"{domain_filter}."):
             continue
         entry = registry.async_get(state.entity_id)
-        aliases = sorted(entry.aliases) if entry and entry.aliases else []
+        aliases = sorted(entry.aliases, key=str) if entry and entry.aliases else []
 
         if fields is not None:
             full = {
@@ -350,7 +350,7 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
                 continue
 
         entry = entity_registry.async_get(state.entity_id)
-        aliases = sorted(entry.aliases) if entry and entry.aliases else []
+        aliases = sorted(entry.aliases, key=str) if entry and entry.aliases else []
 
         # Resolve area: entity's own area, falling back to its device's area
         entity_area = entry.area_id if entry else None
@@ -366,7 +366,7 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
             searchable = [
                 state.entity_id.lower(),
                 friendly_name,
-                *(a.lower() for a in aliases),
+                *(str(a).lower() for a in aliases),
             ]
             if not any(query in s for s in searchable):
                 continue
@@ -450,7 +450,7 @@ async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
             continue
 
         entry = registry.async_get(entity_id)
-        aliases = sorted(entry.aliases) if entry and entry.aliases else []
+        aliases = sorted(entry.aliases, key=str) if entry and entry.aliases else []
 
         results.append(
             {

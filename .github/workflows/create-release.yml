@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "custom_components/mcp_server_http_transport/manifest.json"
+  workflow_dispatch:
 
 jobs:
   create-release:

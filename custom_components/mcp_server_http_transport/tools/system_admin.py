@@ -5,6 +5,7 @@ import logging
 from collections import deque
 from typing import Any
 
+from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 
 from . import register_tool
@@ -115,7 +116,7 @@ async def get_system_status(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     integration_count = len(hass.config_entries.async_entries())
 
     result = {
-        "version": hass.config.version,
+        "version": HA_VERSION,
         "total_entities": len(all_states),
         "domain_counts": dict(sorted(domain_counts.items())),
         "problem_entities": problem_entities,

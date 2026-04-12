@@ -42,7 +42,7 @@ class TestToolsEntities:
         mock_hass.states.get.return_value = mock_state
 
         mock_entry = Mock()
-        mock_entry.aliases = {"Lounge Light"}
+        mock_entry.aliases = ["Lounge Light"]
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 
@@ -461,7 +461,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_entry.area_id = None
         mock_entry.device_id = None
         mock_er = Mock()
@@ -541,7 +541,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_entry.area_id = None
         mock_entry.device_id = None
         mock_er = Mock()
@@ -595,12 +595,12 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
         entry1 = Mock()
-        entry1.aliases = set()
+        entry1.aliases = []
         entry1.area_id = "living_room"
         entry1.device_id = None
 
         entry2 = Mock()
-        entry2.aliases = set()
+        entry2.aliases = []
         entry2.area_id = "bedroom"
         entry2.device_id = None
 
@@ -651,7 +651,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state]
 
         entry = Mock()
-        entry.aliases = set()
+        entry.aliases = []
         entry.area_id = None
         entry.device_id = "device_1"
         mock_er = Mock()
@@ -708,7 +708,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = states
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_entry.area_id = None
         mock_entry.device_id = None
         mock_er = Mock()
@@ -761,7 +761,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_entry.area_id = None
         mock_entry.device_id = None
         mock_er = Mock()
@@ -902,7 +902,7 @@ class TestToolsEntities:
         mock_hass.states.get = mock_get
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 
@@ -957,7 +957,7 @@ class TestToolsEntities:
         mock_hass.states.get = mock_get
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 
@@ -1036,7 +1036,7 @@ class TestToolsEntities:
         mock_hass.states.get.return_value = mock_state
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 

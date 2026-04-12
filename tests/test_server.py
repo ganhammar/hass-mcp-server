@@ -43,7 +43,7 @@ class TestHomeAssistantMCPServer:
         mock_hass.states.get.return_value = mock_state
 
         mock_entry = Mock()
-        mock_entry.aliases = {"Lounge Light"}
+        mock_entry.aliases = ["Lounge Light"]
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 

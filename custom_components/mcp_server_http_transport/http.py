@@ -8,14 +8,22 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
-from custom_components.oidc_provider.token_validator import get_issuer_from_request
-
 from .completions import complete
 from .prompts import get_prompt, get_prompts
 from .resources import get_resources, read_resource
 from .tools import call_tool, get_tool_schemas
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _get_base_url(request: web.Request) -> str:
+    """Get base URL from request, using proxy headers when available."""
+    try:
+        from custom_components.oidc_provider.token_validator import get_issuer_from_request
+
+        return get_issuer_from_request(request)
+    except ImportError:
+        return str(request.url.origin())
 
 
 def _get_protected_resource_metadata(base_url: str) -> dict[str, Any]:
@@ -38,7 +46,7 @@ class MCPProtectedResourceMetadataView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         """Return protected resource metadata."""
-        base_url = get_issuer_from_request(request)
+        base_url = _get_base_url(request)
         metadata = _get_protected_resource_metadata(base_url)
         return web.json_response(metadata)
 
@@ -52,7 +60,7 @@ class MCPSubpathProtectedResourceMetadataView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         """Return protected resource metadata with /mcp suffix."""
-        base_url = get_issuer_from_request(request)
+        base_url = _get_base_url(request)
         metadata = _get_protected_resource_metadata(base_url)
         return web.json_response(metadata)
 
@@ -69,35 +77,40 @@ class MCPEndpointView(HomeAssistantView):
         self.hass = hass
         self.server = server
 
-    def _validate_token(self, request: web.Request) -> dict[str, Any] | None:
-        """Validate the OAuth bearer token."""
+    async def _validate_token(self, request: web.Request) -> dict[str, Any] | None:
+        """Validate bearer token: try OIDC first, then HA long-lived access token."""
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             return None
 
         token = auth_header[7:]  # Remove "Bearer " prefix
 
-        # Import dynamically to avoid circular dependency
+        # Try OIDC validation first
         try:
             from custom_components.oidc_provider.token_validator import (
                 get_issuer_from_request,
                 validate_access_token,
             )
 
-            # Get the expected issuer from the request
             expected_issuer = get_issuer_from_request(request)
+            result = validate_access_token(self.hass, token, expected_issuer)
+            if result is not None:
+                return result
+        except ImportError:
+            pass
 
-            return validate_access_token(self.hass, token, expected_issuer)
-        except ImportError as e:
-            _LOGGER.error("OIDC provider integration not found: %s", e)
-            return None
+        # Fall back to HA long-lived access token
+        refresh_token = await self.hass.auth.async_validate_access_token(token)
+        if refresh_token is not None:
+            return {"sub": str(refresh_token.user.id)}
+
+        return None
 
     async def post(self, request: web.Request) -> web.Response:
         """Handle POST requests for MCP messages."""
-        # Validate OAuth token
-        token_payload = self._validate_token(request)
+        token_payload = await self._validate_token(request)
         if not token_payload:
-            base_url = get_issuer_from_request(request)
+            base_url = _get_base_url(request)
             # Point to protected resource metadata (RFC 9728)
             resource_metadata_url = f"{base_url}/.well-known/oauth-protected-resource/api/mcp"
             www_authenticate = (

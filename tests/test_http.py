@@ -15,7 +15,7 @@ from custom_components.mcp_server_http_transport.http import (
 )
 
 
-def test_get_base_url_with_forwarded_headers():
+def test_get_issuer_from_request_with_forwarded_headers():
     """Test get_issuer_from_request with X-Forwarded headers (proxy setup)."""
     request = Mock()
     request.headers = {
@@ -30,7 +30,7 @@ def test_get_base_url_with_forwarded_headers():
     request.url.origin.assert_not_called()
 
 
-def test_get_base_url_without_forwarded_headers():
+def test_get_issuer_from_request_without_forwarded_headers():
     """Test get_issuer_from_request without X-Forwarded headers (direct connection)."""
     request = Mock()
     request.headers = {}

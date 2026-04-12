@@ -5,7 +5,28 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from custom_components.mcp_server_http_transport import server as server_mod
 from custom_components.mcp_server_http_transport.server import HomeAssistantMCPServer
+
+
+class TestGetAliasesCompat:
+    """Test _get_aliases backward compatibility helper."""
+
+    def test_uses_async_get_entity_aliases_when_available(self):
+        """Test _get_aliases uses er.async_get_entity_aliases on HA 2026.4+."""
+        mock_hass = Mock()
+        mock_entry = Mock()
+        with (
+            patch.object(server_mod, "_HAS_GET_ENTITY_ALIASES", True),
+            patch(
+                "custom_components.mcp_server_http_transport.server.er.async_get_entity_aliases",
+                return_value=["Resolved"],
+                create=True,
+            ) as mock_fn,
+        ):
+            result = server_mod._get_aliases(mock_hass, mock_entry)
+        assert result == ["Resolved"]
+        mock_fn.assert_called_once_with(mock_hass, mock_entry)
 
 
 class TestHomeAssistantMCPServer:
@@ -43,7 +64,7 @@ class TestHomeAssistantMCPServer:
         mock_hass.states.get.return_value = mock_state
 
         mock_entry = Mock()
-        mock_entry.aliases = {"Lounge Light"}
+        mock_entry.aliases = ["Lounge Light"]
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 

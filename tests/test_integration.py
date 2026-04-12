@@ -103,7 +103,6 @@ def populated_hass():
     hass.config.elevation = 28
     hass.config.units = mock_units
     hass.config.time_zone = "Europe/Stockholm"
-    hass.config.version = "2024.12.0"
     hass.config.currency = "SEK"
     hass.config.country = "SE"
     hass.config.language = "sv"
@@ -140,31 +139,31 @@ def mock_entity_registry():
     entries = {}
 
     entry_living = Mock()
-    entry_living.aliases = {"Living Room Lamp", "Lounge Light"}
+    entry_living.aliases = ["Living Room Lamp", "Lounge Light"]
     entry_living.area_id = "living_room"
     entry_living.device_id = "hue_bridge"
     entries["light.living_room"] = entry_living
 
     entry_bedroom = Mock()
-    entry_bedroom.aliases = set()
+    entry_bedroom.aliases = []
     entry_bedroom.area_id = "bedroom"
     entry_bedroom.device_id = None
     entries["light.bedroom"] = entry_bedroom
 
     entry_temp = Mock()
-    entry_temp.aliases = {"Temp Sensor"}
+    entry_temp.aliases = ["Temp Sensor"]
     entry_temp.area_id = "bedroom"
     entry_temp.device_id = "aqara_sensor"
     entries["sensor.temperature"] = entry_temp
 
     entry_switch = Mock()
-    entry_switch.aliases = set()
+    entry_switch.aliases = []
     entry_switch.area_id = "kitchen"
     entry_switch.device_id = "smart_plug"
     entries["switch.kitchen"] = entry_switch
 
     entry_auto = Mock()
-    entry_auto.aliases = {"Wake Up Routine"}
+    entry_auto.aliases = ["Wake Up Routine"]
     entry_auto.area_id = None
     entry_auto.device_id = None
     entries["automation.morning_routine"] = entry_auto

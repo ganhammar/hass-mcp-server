@@ -191,7 +191,6 @@ class TestToolsSystemAdmin:
         mock_state3.entity_id = "switch.kitchen"
         mock_state3.state = "off"
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2, mock_state3]
-        mock_hass.config.version = "2024.12.0"
 
         mock_entry = Mock()
         mock_hass.config_entries.async_entries.return_value = [mock_entry, mock_entry]
@@ -213,7 +212,9 @@ class TestToolsSystemAdmin:
         assert response.status == 200
         body = json.loads(response.body)
         data = json.loads(body["result"]["content"][0]["text"])
-        assert data["version"] == "2024.12.0"
+        from homeassistant.const import __version__ as HA_VERSION
+
+        assert data["version"] == HA_VERSION
         assert data["total_entities"] == 3
         assert data["domain_counts"]["light"] == 1
         assert data["domain_counts"]["sensor"] == 1

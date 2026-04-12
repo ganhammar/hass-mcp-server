@@ -1,5 +1,6 @@
 """Tests for HTTP transport, auth, and JSON-RPC routing."""
 
+import builtins
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -13,6 +14,15 @@ from custom_components.mcp_server_http_transport.http import (
     _get_base_url,
     _get_protected_resource_metadata,
 )
+
+_ORIGINAL_IMPORT = builtins.__import__
+
+
+def _import_without_oidc(name, globals=None, locals=None, fromlist=(), level=0):
+    """Raise ImportError only for the dynamically imported OIDC validator."""
+    if name == "custom_components.oidc_provider.token_validator":
+        raise ImportError("oidc_provider unavailable")
+    return _ORIGINAL_IMPORT(name, globals, locals, fromlist, level)
 
 
 def test_get_issuer_from_request_with_forwarded_headers():
@@ -82,13 +92,11 @@ def test_get_base_url_without_forwarded_headers():
 
 def test_get_base_url_falls_back_when_oidc_unavailable():
     """Test _get_base_url falls back to request origin when oidc_provider not installed."""
-    import sys
-
     request = Mock()
     request.headers = {}
     request.url.origin.return_value = "http://localhost:8123"
 
-    with patch.dict(sys.modules, {"custom_components.oidc_provider.token_validator": None}):
+    with patch("builtins.__import__", side_effect=_import_without_oidc):
         result = _get_base_url(request)
 
     assert result == "http://localhost:8123"
@@ -329,8 +337,6 @@ class TestMCPEndpointView:
 
     async def test_validate_token_prefers_oidc_over_llat(self, view):
         """Test _validate_token returns OIDC result and skips LLAT when OIDC succeeds."""
-        import sys
-
         request = Mock()
         request.headers = {"Authorization": "Bearer oidc_token"}
         request.url.origin.return_value = "https://homeassistant.local"
@@ -347,6 +353,23 @@ class TestMCPEndpointView:
 
         assert result == {"sub": "oidc-user"}
         view.hass.auth.async_validate_access_token.assert_not_called()
+
+    async def test_validate_token_falls_back_to_llat_when_oidc_unavailable(self, view):
+        """Test _validate_token falls back to LLAT when oidc_provider is unavailable."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer llat_token"}
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        mock_refresh_token = Mock()
+        mock_refresh_token.user.id = "fallback-user"
+        view.hass.auth = Mock()
+        view.hass.auth.async_validate_access_token = AsyncMock(return_value=mock_refresh_token)
+
+        with patch("builtins.__import__", side_effect=_import_without_oidc):
+            result = await view._validate_token(request)
+
+        assert result == {"sub": "fallback-user"}
+        view.hass.auth.async_validate_access_token.assert_called_once_with("llat_token")
 
     async def test_post_tools_call_unknown_tool(self, view):
         """Test POST with tools/call for unknown tool."""

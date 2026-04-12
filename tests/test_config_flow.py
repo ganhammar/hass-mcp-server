@@ -14,13 +14,9 @@ class TestMCPServerConfigFlow:
     """Test the MCP Server config flow."""
 
     async def test_user_flow_creates_entry(self):
-        """Test user flow creates config entry when OIDC provider exists."""
-        mock_hass = Mock()
-        mock_hass.config_entries = Mock()
-        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
-
+        """Test user flow creates config entry."""
         flow = MCPServerConfigFlow()
-        flow.hass = mock_hass
+        flow.hass = Mock()
 
         result = await flow.async_step_user(user_input={})
 
@@ -30,12 +26,8 @@ class TestMCPServerConfigFlow:
 
     async def test_user_flow_shows_form_when_no_input(self):
         """Test user flow shows form when no input provided."""
-        mock_hass = Mock()
-        mock_hass.config_entries = Mock()
-        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
-
         flow = MCPServerConfigFlow()
-        flow.hass = mock_hass
+        flow.hass = Mock()
 
         result = await flow.async_step_user(user_input=None)
 
@@ -43,19 +35,14 @@ class TestMCPServerConfigFlow:
         assert result["step_id"] == "user"
         assert result["data_schema"] is not None
 
-    async def test_user_flow_aborts_when_oidc_provider_missing(self):
-        """Test user flow aborts when OIDC provider is not installed."""
-        mock_hass = Mock()
-        mock_hass.config_entries = Mock()
-        mock_hass.config_entries.async_domains = Mock(return_value=[])
-
+    async def test_user_flow_creates_entry_without_oidc(self):
+        """Test user flow creates entry even when OIDC provider is not installed."""
         flow = MCPServerConfigFlow()
-        flow.hass = mock_hass
+        flow.hass = Mock()
 
         result = await flow.async_step_user(user_input={})
 
-        assert result["type"] == data_entry_flow.FlowResultType.ABORT
-        assert result["reason"] == "oidc_provider_required"
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
 
     async def test_version_is_set(self):
         """Test config flow version is set."""
@@ -72,12 +59,8 @@ class TestMCPServerConfigFlow:
 
     async def test_user_flow_form_has_empty_schema(self):
         """Test user flow form has empty data schema."""
-        mock_hass = Mock()
-        mock_hass.config_entries = Mock()
-        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
-
         flow = MCPServerConfigFlow()
-        flow.hass = mock_hass
+        flow.hass = Mock()
 
         result = await flow.async_step_user(user_input=None)
 

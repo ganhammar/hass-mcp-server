@@ -10,6 +10,7 @@ from custom_components.mcp_server_http_transport.http import (
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
     MCPSubpathProtectedResourceMetadataView,
+    _get_base_url,
     _get_protected_resource_metadata,
 )
 
@@ -53,6 +54,44 @@ def test_get_base_url_with_partial_forwarded_headers():
 
     assert result == "http://localhost:8123"
     request.url.origin.assert_called_once()
+
+
+def test_get_base_url_with_forwarded_headers():
+    """Test _get_base_url delegates to get_issuer_from_request when oidc_provider available."""
+    request = Mock()
+    request.headers = {
+        "X-Forwarded-Proto": "https",
+        "X-Forwarded-Host": "example.com",
+    }
+
+    result = _get_base_url(request)
+
+    assert result == "https://example.com"
+
+
+def test_get_base_url_without_forwarded_headers():
+    """Test _get_base_url falls back to request origin without forwarded headers."""
+    request = Mock()
+    request.headers = {}
+    request.url.origin.return_value = "http://192.168.1.100:8123"
+
+    result = _get_base_url(request)
+
+    assert result == "http://192.168.1.100:8123"
+
+
+def test_get_base_url_falls_back_when_oidc_unavailable():
+    """Test _get_base_url falls back to request origin when oidc_provider not installed."""
+    import sys
+
+    request = Mock()
+    request.headers = {}
+    request.url.origin.return_value = "http://localhost:8123"
+
+    with patch.dict(sys.modules, {"custom_components.oidc_provider.token_validator": None}):
+        result = _get_base_url(request)
+
+    assert result == "http://localhost:8123"
 
 
 def test_get_protected_resource_metadata():
@@ -159,7 +198,7 @@ class TestMCPEndpointView:
         request.headers = {"Authorization": "Bearer invalid_token"}
         request.url.origin.return_value = "https://homeassistant.local"
 
-        with patch.object(view, "_validate_token", return_value=None):
+        with patch.object(view, "_validate_token", new=AsyncMock(return_value=None)):
             response = await view.post(request)
 
         assert response.status == 401
@@ -172,7 +211,7 @@ class TestMCPEndpointView:
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 1})
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", new=AsyncMock(return_value={"sub": "user123"})):
             response = await view.post(request)
 
         assert response.status == 200
@@ -188,7 +227,7 @@ class TestMCPEndpointView:
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 21})
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", new=AsyncMock(return_value={"sub": "user123"})):
             response = await view.post(request)
 
         body = json.loads(response.body)
@@ -203,7 +242,7 @@ class TestMCPEndpointView:
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "tools/list", "id": 2})
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", new=AsyncMock(return_value={"sub": "user123"})):
             response = await view.post(request)
 
         assert response.status == 200
@@ -230,7 +269,7 @@ class TestMCPEndpointView:
             return_value={"jsonrpc": "2.0", "method": "unknown_method", "id": 9}
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", new=AsyncMock(return_value={"sub": "user123"})):
             response = await view.post(request)
 
         assert response.status == 200
@@ -245,7 +284,7 @@ class TestMCPEndpointView:
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "some_notification"})
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", new=AsyncMock(return_value={"sub": "user123"})):
             response = await view.post(request)
 
         assert response.status == 202
@@ -255,9 +294,59 @@ class TestMCPEndpointView:
         request = Mock()
         request.headers = {"Authorization": "invalid_format"}
 
-        result = view._validate_token(request)
+        result = await view._validate_token(request)
 
         assert result is None
+
+    async def test_validate_token_with_valid_llat(self, view):
+        """Test _validate_token accepts a valid HA long-lived access token."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer llat_token"}
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        mock_refresh_token = Mock()
+        mock_refresh_token.user.id = "user-id-123"
+        view.hass.auth = Mock()
+        view.hass.auth.async_validate_access_token = AsyncMock(return_value=mock_refresh_token)
+
+        result = await view._validate_token(request)
+
+        assert result == {"sub": "user-id-123"}
+        view.hass.auth.async_validate_access_token.assert_called_once_with("llat_token")
+
+    async def test_validate_token_with_invalid_llat(self, view):
+        """Test _validate_token returns None when both OIDC and LLAT validation fail."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer bad_token"}
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        view.hass.auth = Mock()
+        view.hass.auth.async_validate_access_token = AsyncMock(return_value=None)
+
+        result = await view._validate_token(request)
+
+        assert result is None
+
+    async def test_validate_token_prefers_oidc_over_llat(self, view):
+        """Test _validate_token returns OIDC result and skips LLAT when OIDC succeeds."""
+        import sys
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer oidc_token"}
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        view.hass.auth = Mock()
+        view.hass.auth.async_validate_access_token = AsyncMock()
+
+        mock_validator = sys.modules["custom_components.oidc_provider.token_validator"]
+        mock_validator.validate_access_token.return_value = {"sub": "oidc-user"}
+        try:
+            result = await view._validate_token(request)
+        finally:
+            mock_validator.validate_access_token.return_value = None
+
+        assert result == {"sub": "oidc-user"}
+        view.hass.auth.async_validate_access_token.assert_not_called()
 
     async def test_post_tools_call_unknown_tool(self, view):
         """Test POST with tools/call for unknown tool."""
@@ -273,7 +362,7 @@ class TestMCPEndpointView:
         )
         request.url.origin.return_value = "https://homeassistant.local"
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", new=AsyncMock(return_value={"sub": "user123"})):
             response = await view.post(request)
 
         assert response.status == 500

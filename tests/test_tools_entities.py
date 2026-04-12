@@ -7,6 +7,36 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.tools import entities as entities_mod
+
+
+class TestGetAliasesCompat:
+    """Test _get_aliases backward compatibility helper."""
+
+    def test_uses_async_get_entity_aliases_when_available(self):
+        """Test _get_aliases uses er.async_get_entity_aliases on HA 2026.4+."""
+        mock_hass = Mock()
+        mock_entry = Mock()
+        mock_entry.aliases = ["Test Alias"]
+        with (
+            patch.object(entities_mod, "_HAS_GET_ENTITY_ALIASES", True),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get_entity_aliases",
+                return_value=["Resolved Alias"],
+            ) as mock_fn,
+        ):
+            result = entities_mod._get_aliases(mock_hass, mock_entry)
+        assert result == ["Resolved Alias"]
+        mock_fn.assert_called_once_with(mock_hass, mock_entry)
+
+    def test_falls_back_to_sorted_str_on_older_ha(self):
+        """Test _get_aliases falls back to sorted(str(a) ...) on older HA."""
+        mock_hass = Mock()
+        mock_entry = Mock()
+        mock_entry.aliases = ["Bravo", "Alpha"]
+        with patch.object(entities_mod, "_HAS_GET_ENTITY_ALIASES", False):
+            result = entities_mod._get_aliases(mock_hass, mock_entry)
+        assert result == ["Alpha", "Bravo"]
 
 
 class TestToolsEntities:

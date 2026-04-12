@@ -67,7 +67,6 @@ class TestResources:
         mock_hass.config.elevation = 10
         mock_hass.config.units = mock_units
         mock_hass.config.time_zone = "Europe/Stockholm"
-        mock_hass.config.version = "2024.12.0"
         mock_hass.config.currency = "SEK"
         mock_hass.config.country = "SE"
         mock_hass.config.language = "en"

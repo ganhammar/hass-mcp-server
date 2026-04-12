@@ -40,7 +40,6 @@ class TestToolsSystem:
         mock_hass.config.elevation = 10
         mock_hass.config.units = mock_units
         mock_hass.config.time_zone = "Europe/Stockholm"
-        mock_hass.config.version = "2024.12.0"
         mock_hass.config.currency = "SEK"
         mock_hass.config.country = "SE"
         mock_hass.config.language = "en"
@@ -64,7 +63,9 @@ class TestToolsSystem:
         config = json.loads(body["result"]["content"][0]["text"])
         assert config["location_name"] == "Home"
         assert config["latitude"] == 59.0
-        assert config["version"] == "2024.12.0"
+        from homeassistant.const import __version__ as HA_VERSION
+
+        assert config["version"] == HA_VERSION
         assert config["time_zone"] == "Europe/Stockholm"
         assert config["unit_system"]["temperature"] == "°C"
 

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime as dt
 from typing import Any
 
+from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
@@ -31,7 +32,7 @@ async def get_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         "elevation": config.elevation,
         "unit_system": config.units.as_dict(),
         "time_zone": str(config.time_zone),
-        "version": config.version,
+        "version": HA_VERSION,
         "currency": config.currency,
         "country": config.country,
         "language": config.language,

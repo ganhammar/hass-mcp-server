@@ -7,6 +7,37 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.tools import entities as entities_mod
+
+
+class TestGetAliasesCompat:
+    """Test _get_aliases backward compatibility helper."""
+
+    def test_uses_async_get_entity_aliases_when_available(self):
+        """Test _get_aliases uses er.async_get_entity_aliases on HA 2026.4+."""
+        mock_hass = Mock()
+        mock_entry = Mock()
+        mock_entry.aliases = ["Test Alias"]
+        with (
+            patch.object(entities_mod, "_HAS_GET_ENTITY_ALIASES", True),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get_entity_aliases",
+                return_value=["Resolved Alias"],
+                create=True,
+            ) as mock_fn,
+        ):
+            result = entities_mod._get_aliases(mock_hass, mock_entry)
+        assert result == ["Resolved Alias"]
+        mock_fn.assert_called_once_with(mock_hass, mock_entry)
+
+    def test_falls_back_to_sorted_str_on_older_ha(self):
+        """Test _get_aliases falls back to sorted(str(a) ...) on older HA."""
+        mock_hass = Mock()
+        mock_entry = Mock()
+        mock_entry.aliases = ["Bravo", "Alpha"]
+        with patch.object(entities_mod, "_HAS_GET_ENTITY_ALIASES", False):
+            result = entities_mod._get_aliases(mock_hass, mock_entry)
+        assert result == ["Alpha", "Bravo"]
 
 
 class TestToolsEntities:
@@ -42,7 +73,7 @@ class TestToolsEntities:
         mock_hass.states.get.return_value = mock_state
 
         mock_entry = Mock()
-        mock_entry.aliases = {"Lounge Light"}
+        mock_entry.aliases = ["Lounge Light"]
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 
@@ -461,7 +492,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_entry.area_id = None
         mock_entry.device_id = None
         mock_er = Mock()
@@ -541,7 +572,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_entry.area_id = None
         mock_entry.device_id = None
         mock_er = Mock()
@@ -595,12 +626,12 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
         entry1 = Mock()
-        entry1.aliases = set()
+        entry1.aliases = []
         entry1.area_id = "living_room"
         entry1.device_id = None
 
         entry2 = Mock()
-        entry2.aliases = set()
+        entry2.aliases = []
         entry2.area_id = "bedroom"
         entry2.device_id = None
 
@@ -651,7 +682,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state]
 
         entry = Mock()
-        entry.aliases = set()
+        entry.aliases = []
         entry.area_id = None
         entry.device_id = "device_1"
         mock_er = Mock()
@@ -708,7 +739,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = states
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_entry.area_id = None
         mock_entry.device_id = None
         mock_er = Mock()
@@ -761,7 +792,7 @@ class TestToolsEntities:
         mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_entry.area_id = None
         mock_entry.device_id = None
         mock_er = Mock()
@@ -902,7 +933,7 @@ class TestToolsEntities:
         mock_hass.states.get = mock_get
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 
@@ -957,7 +988,7 @@ class TestToolsEntities:
         mock_hass.states.get = mock_get
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 
@@ -1036,7 +1067,7 @@ class TestToolsEntities:
         mock_hass.states.get.return_value = mock_state
 
         mock_entry = Mock()
-        mock_entry.aliases = set()
+        mock_entry.aliases = []
         mock_er = Mock()
         mock_er.async_get.return_value = mock_entry
 

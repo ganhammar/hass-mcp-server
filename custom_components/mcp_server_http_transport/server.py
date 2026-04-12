@@ -12,6 +12,15 @@ from mcp.types import TextContent, Tool
 
 _LOGGER = logging.getLogger(__name__)
 
+_HAS_GET_ENTITY_ALIASES = hasattr(er, "async_get_entity_aliases")
+
+
+def _get_aliases(hass: "HomeAssistant", entry: er.RegistryEntry) -> list[str]:
+    """Get entity aliases, handling ComputedNameType on HA 2026.4+."""
+    if _HAS_GET_ENTITY_ALIASES:
+        return er.async_get_entity_aliases(hass, entry)
+    return sorted(str(a) for a in entry.aliases) if entry.aliases else []
+
 
 class HomeAssistantMCPServer:
     """Home Assistant MCP Server."""
@@ -108,7 +117,7 @@ class HomeAssistantMCPServer:
 
         registry = er.async_get(self.hass)
         entry = registry.async_get(entity_id)
-        aliases = sorted(entry.aliases) if entry and entry.aliases else []
+        aliases = _get_aliases(self.hass, entry) if entry else []
 
         result = {
             "entity_id": state.entity_id,
@@ -149,7 +158,7 @@ class HomeAssistantMCPServer:
             if domain_filter and not state.entity_id.startswith(f"{domain_filter}."):
                 continue
             entry = registry.async_get(state.entity_id)
-            aliases = sorted(entry.aliases) if entry and entry.aliases else []
+            aliases = _get_aliases(self.hass, entry) if entry else []
             entities.append(
                 {
                     "entity_id": state.entity_id,

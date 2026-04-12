@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
@@ -141,7 +142,7 @@ def _read_config(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         "elevation": config.elevation,
         "unit_system": config.units.as_dict(),
         "time_zone": str(config.time_zone),
-        "version": config.version,
+        "version": HA_VERSION,
         "currency": config.currency,
         "country": config.country,
         "language": config.language,

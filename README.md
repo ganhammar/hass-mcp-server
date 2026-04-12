@@ -8,6 +8,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 
 - 🌐 **HTTP transport** (not SSE) - works remotely, not just locally
 - 🔐 **OAuth 2.0 authentication** with Dynamic Client Registration (via [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server))
+- 🔑 **Long-lived access token authentication** for agents that don't support OAuth 2.0
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, and scripts
@@ -18,7 +19,10 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 
 ## Prerequisites
 
-This plugin requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) to be installed and configured for OIDC authentication.
+The integration supports two authentication methods — you can use either one or both simultaneously:
+
+- **OAuth 2.0 (for Claude in browser):** requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) to be installed and configured.
+- **Long-lived access token (for other agents):** no additional dependencies — uses Home Assistant's built-in token system.
 
 ## Installation
 
@@ -42,6 +46,20 @@ This plugin requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-s
 1. Click "Add Integration"
 1. Search for "MCP Server"
 1. Follow the configuration steps
+
+## Usage with other agents (long-lived access token)
+
+Any MCP-compatible agent can authenticate using a Home Assistant long-lived access token.
+
+1. In Home Assistant, go to your profile → **Long-Lived Access Tokens** → **Create Token**
+2. Copy the generated token
+3. Configure your agent to send the token as a Bearer header:
+   ```
+   Authorization: Bearer <your-token>
+   ```
+4. Set the MCP server URL to `https://your-home-assistant.com/api/mcp`
+
+The server tries OAuth 2.0 (OIDC) first and falls back to long-lived access token validation automatically, so both methods can be used at the same time.
 
 ## Usage with Claude in Browser
 

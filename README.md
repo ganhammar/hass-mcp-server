@@ -8,7 +8,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 
 - 🌐 **HTTP transport** (not SSE) - works remotely, not just locally
 - 🔐 **OAuth 2.0 authentication** with Dynamic Client Registration (via [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server))
-- 🔑 **Long-lived access token authentication** for agents that don't support OAuth 2.0
+- 🔑 **Long-lived access token / static env token** authentication for agents that don't support OAuth 2.0
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, and scripts
@@ -23,6 +23,7 @@ The integration supports two authentication methods — you can use either one o
 
 - **OAuth 2.0 (for Claude in browser):** requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) to be installed and configured.
 - **Long-lived access token (for other agents):** no additional dependencies — uses Home Assistant's built-in token system.
+- **Static env token:** set `MCP_BEARER_TOKEN` environment variable on the HA host for a simple shared secret.
 
 ## Installation
 
@@ -60,6 +61,16 @@ Any MCP-compatible agent can authenticate using a Home Assistant long-lived acce
 4. Set the MCP server URL to `https://your-home-assistant.com/api/mcp`
 
 The server tries OAuth 2.0 (OIDC) first and falls back to long-lived access token validation automatically, so both methods can be used at the same time.
+
+### Static token via environment variable
+
+If you prefer not to use a HA-issued token, you can set a static shared secret via the `MCP_BEARER_TOKEN` environment variable on your Home Assistant host:
+
+```bash
+MCP_BEARER_TOKEN=your-secret-token
+```
+
+Any request with `Authorization: Bearer your-secret-token` will be accepted. This is checked last — OIDC and long-lived access tokens take priority.
 
 ## Usage with Claude in Browser
 

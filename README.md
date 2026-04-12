@@ -8,7 +8,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 
 - 🌐 **HTTP transport** (not SSE) - works remotely, not just locally
 - 🔐 **OAuth 2.0 authentication** with Dynamic Client Registration (via [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server))
-- 🔑 **Long-lived access token / static env token** authentication for agents that don't support OAuth 2.0
+- 🔑 **Long-lived access token authentication** for agents that don't support OAuth 2.0
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, and scripts
@@ -23,7 +23,6 @@ The integration supports two authentication methods — you can use either one o
 
 - **OAuth 2.0 (for Claude in browser):** requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) to be installed and configured.
 - **Long-lived access token (for other agents):** no additional dependencies — uses Home Assistant's built-in token system.
-- **Static env token:** set `MCP_BEARER_TOKEN` environment variable on the HA host for a simple shared secret.
 
 ## Installation
 
@@ -54,23 +53,32 @@ Any MCP-compatible agent can authenticate using a Home Assistant long-lived acce
 
 1. In Home Assistant, go to your profile → **Long-Lived Access Tokens** → **Create Token**
 2. Copy the generated token
-3. Configure your agent to send the token as a Bearer header:
-   ```
-   Authorization: Bearer <your-token>
-   ```
-4. Set the MCP server URL to `https://your-home-assistant.com/api/mcp`
+3. Configure your agent to send the token as a Bearer header
 
 The server tries OAuth 2.0 (OIDC) first and falls back to long-lived access token validation automatically, so both methods can be used at the same time.
 
-### Static token via environment variable
+### Example: mcp-remote
 
-If you prefer not to use a HA-issued token, you can set a static shared secret via the `MCP_BEARER_TOKEN` environment variable on your Home Assistant host:
+[mcp-remote](https://github.com/geelen/mcp-remote) allows connecting desktop MCP clients (Claude Desktop, Cursor, etc.) to a remote MCP server. Configure it with your long-lived access token:
 
-```bash
-MCP_BEARER_TOKEN=your-secret-token
+```json
+{
+  "mcpServers": {
+    "home-assistant": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://your-home-assistant.com/api/mcp",
+        "--header",
+        "Authorization: Bearer ${HA_TOKEN}"
+      ],
+      "env": {
+        "HA_TOKEN": "<your long-lived access token>"
+      }
+    }
+  }
+}
 ```
-
-Any request with `Authorization: Bearer your-secret-token` will be accepted. This is checked last — OIDC and long-lived access tokens take priority.
 
 ## Usage with Claude in Browser
 

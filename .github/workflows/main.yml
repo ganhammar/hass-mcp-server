@@ -25,18 +25,14 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version:
-          - "3.13"
-
+    name: test
     steps:
     - uses: actions/checkout@v5
 
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.13
       uses: actions/setup-python@v6
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.13"
 
     - name: Install Poetry
       uses: snok/install-poetry@v1
@@ -57,11 +53,8 @@ jobs:
     - name: Run unit tests
       run: poetry run pytest tests/ -v --ignore=tests/test_integration.py
 
-    - name: Run integration tests
-      run: poetry run pytest tests/test_integration.py -v
-
     - name: Run tests with coverage
-      run: poetry run pytest tests/ --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
+      run: poetry run pytest tests/ --ignore=tests/test_integration.py --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
@@ -69,3 +62,40 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
         file: ./coverage.xml
         fail_ci_if_error: false
+
+  integration-test:
+    runs-on: ubuntu-latest
+    name: integration (py${{ matrix.python-version }}, HA ${{ matrix.ha-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.14"
+            ha-version: "2026.4.2"
+            ha-test-helper: "0.13.323"
+          - python-version: "3.13"
+            ha-version: "2025.10.1"
+            ha-test-helper: "0.13.286"
+            extra-deps: "pycares<5"
+          - python-version: "3.13"
+            ha-version: "2025.4.4"
+            ha-test-helper: "0.13.236"
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m venv .venv
+        .venv/bin/pip install "pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }}" mcp
+        if [ -n "$EXTRA_DEPS" ]; then .venv/bin/pip install $EXTRA_DEPS; fi
+      env:
+        EXTRA_DEPS: ${{ matrix.extra-deps }}
+
+    - name: Run integration tests
+      run: .venv/bin/pytest tests/test_integration.py -v

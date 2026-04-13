@@ -2,12 +2,13 @@
 
 A Home Assistant Custom Component that provides an MCP (Model Context Protocol) server using **HTTP transport**, allowing AI assistants like Claude to interact with your Home Assistant instance.
 
-**Note:** Unlike other Home Assistant MCP servers that use SSE (Server-Sent Events), this implementation uses HTTP transport with OAuth 2.0 authentication, making it suitable for remote access and integration with services like Claude in browser.
+**Why HTTP transport with OAuth?** This project was built primarily to support MCP Streamable HTTP transport, enabling web-based clients like Claude that require OIDC and OAuth 2.0 Dynamic Client Registration (RFC 7591). Since Home Assistant already has an [official MCP integration](https://www.home-assistant.io/integrations/mcp_server/) that supports SSE transport, there wasn't a need to duplicate that. For local or custom client setups, Long-Lived Access Token authentication can be enabled as an alternative.
 
 ## Features
 
 - 🌐 **HTTP transport** (not SSE) - works remotely, not just locally
 - 🔐 **OAuth 2.0 authentication** with Dynamic Client Registration (via [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server))
+- 🔑 **Long-Lived Access Token** authentication (opt-in) for local and custom client setups
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, and scripts
@@ -18,7 +19,12 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 
 ## Prerequisites
 
-This plugin requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) to be installed and configured for OIDC authentication.
+The integration supports two authentication methods:
+
+- **OAuth 2.0** (default): Required for browser-based clients like Claude. Requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) to be installed and configured.
+- **Long-Lived Access Tokens** (opt-in): For local agents and custom MCP clients that can't run an OAuth browser flow. No extra dependencies. Must be enabled in the integration settings.
+
+You can use both methods at the same time. When both are active, the server tries OAuth first and falls back to the Long-Lived Access Token.
 
 ## Installation
 
@@ -38,12 +44,18 @@ This plugin requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-s
 
 ## Configuration
 
-1. Go to Settings → Devices & Services
+1. Go to Settings > Devices & Services
 1. Click "Add Integration"
 1. Search for "MCP Server"
-1. Follow the configuration steps
+1. Choose your authentication method:
+   - Leave "Enable native Home Assistant authentication" **unchecked** for OAuth-only (requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server))
+   - **Check** it to allow Long-Lived Access Tokens (can be used alongside OAuth or on its own)
 
-## Usage with Claude in Browser
+You can change this setting later via Settings > Devices & Services > MCP Server > Configure.
+
+## Usage with Claude in Browser (OAuth)
+
+This requires the [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) integration to be installed.
 
 The MCP server uses OAuth 2.0 Dynamic Client Registration (DCR), which allows Claude to automatically register itself without manual client setup.
 
@@ -67,6 +79,14 @@ The MCP server uses OAuth 2.0 Dynamic Client Registration (DCR), which allows Cl
    - Click "Authorize" to grant access
 
 That's it! Claude will now be able to interact with your Home Assistant instance through the MCP server.
+
+## Usage with Long-Lived Access Tokens
+
+For local agents or MCP clients that can't run an OAuth browser flow, you can authenticate with a Home Assistant Long-Lived Access Token. This must be enabled first.
+
+1. Enable native authentication: Settings > Devices & Services > MCP Server > Configure > check "Enable native Home Assistant authentication"
+2. Create a token: go to your Home Assistant user profile > Long-Lived Access Tokens > Create Token
+3. Configure your MCP client to send the token as a Bearer header to `http://your-home-assistant:8123/api/mcp`
 
 ## MCP Capabilities
 

@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from mcp.server import Server
 
-from .const import DOMAIN
+from .const import CONF_NATIVE_AUTH, DOMAIN
 from .http import (
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
@@ -29,6 +29,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up MCP Server from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
+    native_auth_enabled = entry.data.get(CONF_NATIVE_AUTH, False)
+
     # Create MCP server
     server = Server("home-assistant-mcp-server")
     hass.data[DOMAIN]["server"] = server
@@ -36,10 +38,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register HTTP endpoints
     hass.http.register_view(MCPProtectedResourceMetadataView())
     hass.http.register_view(MCPSubpathProtectedResourceMetadataView())
-    hass.http.register_view(MCPEndpointView(hass, server))
+    hass.http.register_view(MCPEndpointView(hass, server, native_auth_enabled))
 
-    _LOGGER.info("MCP Server initialized at /api/mcp")
+    _LOGGER.info("MCP Server initialized at /api/mcp (native_auth=%s)", native_auth_enabled)
+
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload integration when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

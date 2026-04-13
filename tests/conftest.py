@@ -49,4 +49,7 @@ def mock_config_entry():
     entry = Mock()
     entry.data = {}
     entry.options = {}
+    entry.async_on_unload = Mock()
+    entry.add_update_listener = Mock()
+    entry.entry_id = "test_entry_id"
     return entry

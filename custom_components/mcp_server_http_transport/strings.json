@@ -3,11 +3,35 @@
     "step": {
       "user": {
         "title": "MCP Server (HTTP Transport)",
-        "description": "Set up the MCP Server integration for Home Assistant."
+        "description": "Set up the MCP Server integration for Home Assistant.",
+        "data": {
+          "native_auth_enabled": "Enable native Home Assistant authentication"
+        },
+        "data_description": {
+          "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required."
+        }
       }
+    },
+    "error": {
+      "oidc_provider_required": "The OIDC Provider integration is required when native authentication is disabled. Install it from {oidc_provider_url} or enable native authentication."
     },
     "abort": {
       "oidc_provider_required": "The OIDC Provider integration is required but not installed. Please install hass-oidc-provider from {oidc_provider_url} first."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "native_auth_enabled": "Enable native Home Assistant authentication"
+        },
+        "data_description": {
+          "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required."
+        }
+      }
+    },
+    "error": {
+      "oidc_provider_required": "The OIDC Provider integration is required when native authentication is disabled. Install it or keep native authentication enabled."
     }
   }
 }

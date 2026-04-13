@@ -10,6 +10,7 @@ from custom_components.mcp_server_http_transport.http import (
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
     MCPSubpathProtectedResourceMetadataView,
+    _get_issuer,
     _get_protected_resource_metadata,
 )
 
@@ -53,6 +54,24 @@ def test_get_base_url_with_partial_forwarded_headers():
 
     assert result == "http://localhost:8123"
     request.url.origin.assert_called_once()
+
+
+def test_get_issuer_returns_none_when_oidc_unavailable():
+    """Test _get_issuer returns None when oidc_provider import fails."""
+    import sys
+
+    request = Mock()
+    # Temporarily remove the mocked oidc module so the import raises ImportError
+    saved = sys.modules.pop("custom_components.oidc_provider.token_validator", None)
+    saved_parent = sys.modules.pop("custom_components.oidc_provider", None)
+    try:
+        result = _get_issuer(request)
+        assert result is None
+    finally:
+        if saved is not None:
+            sys.modules["custom_components.oidc_provider.token_validator"] = saved
+        if saved_parent is not None:
+            sys.modules["custom_components.oidc_provider"] = saved_parent
 
 
 def test_get_protected_resource_metadata():
@@ -101,6 +120,19 @@ class TestMCPProtectedResourceMetadataView:
         body = json.loads(response.body)
         assert body["resource"] == "https://example.com/api/mcp"
 
+    async def test_get_returns_404_when_oidc_unavailable(self):
+        """Test GET returns 404 when OIDC provider is not installed."""
+        request = Mock()
+
+        view = MCPProtectedResourceMetadataView()
+        with patch(
+            "custom_components.mcp_server_http_transport.http._get_issuer",
+            return_value=None,
+        ):
+            response = await view.get(request)
+
+        assert response.status == 404
+
 
 class TestMCPSubpathProtectedResourceMetadataView:
     """Test the MCP protected resource metadata view with /mcp suffix."""
@@ -117,6 +149,19 @@ class TestMCPSubpathProtectedResourceMetadataView:
         assert response.status == 200
         body = json.loads(response.body)
         assert body["resource"] == "https://homeassistant.local/api/mcp"
+
+    async def test_get_returns_404_when_oidc_unavailable(self):
+        """Test GET returns 404 when OIDC provider is not installed."""
+        request = Mock()
+
+        view = MCPSubpathProtectedResourceMetadataView()
+        with patch(
+            "custom_components.mcp_server_http_transport.http._get_issuer",
+            return_value=None,
+        ):
+            response = await view.get(request)
+
+        assert response.status == 404
 
 
 class TestMCPEndpointView:
@@ -255,7 +300,7 @@ class TestMCPEndpointView:
         request = Mock()
         request.headers = {"Authorization": "invalid_format"}
 
-        result = view._validate_token(request)
+        result = await view._validate_token(request)
 
         assert result is None
 
@@ -280,3 +325,151 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert "error" in body
         assert "Unknown tool" in body["error"]["message"]
+
+
+class TestNativeAuth:
+    """Test native HA authentication (Long-Lived Access Tokens)."""
+
+    @pytest.fixture
+    def mock_hass(self):
+        """Create a mock Home Assistant instance with auth."""
+        hass = Mock()
+        hass.states = Mock()
+        hass.services = Mock()
+        hass.auth = Mock()
+        hass.auth.async_validate_access_token = Mock(return_value=None)
+        return hass
+
+    @pytest.fixture
+    def view(self, mock_hass):
+        """Create an MCPEndpointView with native auth enabled."""
+        return MCPEndpointView(mock_hass, Mock(), native_auth_enabled=True)
+
+    @pytest.fixture
+    def view_disabled(self, mock_hass):
+        """Create an MCPEndpointView with native auth disabled."""
+        return MCPEndpointView(mock_hass, Mock(), native_auth_enabled=False)
+
+    async def test_llat_validates_when_enabled(self, view, mock_hass):
+        """Test that a valid LLAT is accepted when native auth is enabled."""
+        mock_refresh_token = Mock()
+        mock_refresh_token.user.id = "user_abc"
+        mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_llat"}
+
+        result = await view._validate_token(request)
+
+        assert result == {"sub": "user_abc"}
+        mock_hass.auth.async_validate_access_token.assert_called_once_with("valid_llat")
+
+    async def test_llat_rejected_when_disabled(self, view_disabled, mock_hass):
+        """Test that LLAT is not tried when native auth is disabled."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer some_token"}
+
+        result = await view_disabled._validate_token(request)
+
+        assert result is None
+        mock_hass.auth.async_validate_access_token.assert_not_called()
+
+    async def test_invalid_llat_returns_none(self, view, mock_hass):
+        """Test that an invalid LLAT returns None."""
+        mock_hass.auth.async_validate_access_token.return_value = None
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer bad_token"}
+
+        result = await view._validate_token(request)
+
+        assert result is None
+
+    async def test_oidc_tried_before_llat(self, view, mock_hass):
+        """Test that OIDC validation is attempted before LLAT."""
+        import sys
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer oidc_token"}
+
+        mock_validator = sys.modules["custom_components.oidc_provider.token_validator"]
+        original = mock_validator.validate_access_token.return_value
+        mock_validator.validate_access_token.return_value = {"sub": "oidc_user"}
+        try:
+            result = await view._validate_token(request)
+        finally:
+            mock_validator.validate_access_token.return_value = original
+
+        assert result == {"sub": "oidc_user"}
+        mock_hass.auth.async_validate_access_token.assert_not_called()
+
+    async def test_llat_fallback_after_oidc_fails(self, view, mock_hass):
+        """Test LLAT is tried as fallback when OIDC validation returns None."""
+        mock_refresh_token = Mock()
+        mock_refresh_token.user.id = "ha_user"
+        mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer llat_token"}
+
+        # OIDC will fail (ImportError from conftest mock returning None)
+        result = await view._validate_token(request)
+
+        assert result == {"sub": "ha_user"}
+
+    async def test_validate_token_import_error_falls_through(self, view, mock_hass):
+        """Test _validate_token handles ImportError from OIDC and falls through to LLAT."""
+        import sys
+
+        mock_refresh_token = Mock()
+        mock_refresh_token.user.id = "fallback_user"
+        mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer some_token"}
+
+        saved = sys.modules.pop("custom_components.oidc_provider.token_validator", None)
+        saved_parent = sys.modules.pop("custom_components.oidc_provider", None)
+        try:
+            result = await view._validate_token(request)
+        finally:
+            if saved is not None:
+                sys.modules["custom_components.oidc_provider.token_validator"] = saved
+            if saved_parent is not None:
+                sys.modules["custom_components.oidc_provider"] = saved_parent
+
+        assert result == {"sub": "fallback_user"}
+
+    async def test_401_without_oidc_metadata_when_oidc_unavailable(self, view, mock_hass):
+        """Test 401 response uses plain Bearer when OIDC is not available."""
+        mock_hass.auth.async_validate_access_token.return_value = None
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer bad_token"}
+        request.url.origin.return_value = "http://localhost:8123"
+
+        with patch(
+            "custom_components.mcp_server_http_transport.http._get_issuer",
+            return_value=None,
+        ):
+            response = await view.post(request)
+
+        assert response.status == 401
+        assert 'realm="Home Assistant MCP Server"' in response.headers["WWW-Authenticate"]
+        assert "resource_metadata" not in response.headers["WWW-Authenticate"]
+
+    async def test_native_auth_full_request(self, view, mock_hass):
+        """Test a full request with native auth from token to response."""
+        mock_refresh_token = Mock()
+        mock_refresh_token.user.id = "user_xyz"
+        mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer my_llat"}
+        request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 1})
+
+        response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert body["result"]["protocolVersion"] == "2024-11-05"

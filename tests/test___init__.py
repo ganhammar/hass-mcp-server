@@ -1,6 +1,6 @@
 """Test __init__.py for MCP Server integration."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.mcp_server_http_transport import (
     DOMAIN,
@@ -139,6 +139,21 @@ class TestAsyncSetupEntry:
         await async_setup_entry(mock_hass, mock_config_entry)
 
         mock_endpoint_view_class.assert_called_once_with(mock_hass, mock_server, True)
+
+
+class TestUpdateListener:
+    """Test config entry update listener."""
+
+    async def test_update_listener_reloads_entry(self, mock_hass, mock_config_entry):
+        """Test _async_update_listener triggers a reload."""
+        from custom_components.mcp_server_http_transport import _async_update_listener
+
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_reload = AsyncMock()
+
+        await _async_update_listener(mock_hass, mock_config_entry)
+
+        mock_hass.config_entries.async_reload.assert_called_once_with(mock_config_entry.entry_id)
 
 
 class TestAsyncUnloadEntry:

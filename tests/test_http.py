@@ -10,6 +10,7 @@ from custom_components.mcp_server_http_transport.http import (
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
     MCPSubpathProtectedResourceMetadataView,
+    _get_issuer,
     _get_protected_resource_metadata,
 )
 
@@ -53,6 +54,24 @@ def test_get_base_url_with_partial_forwarded_headers():
 
     assert result == "http://localhost:8123"
     request.url.origin.assert_called_once()
+
+
+def test_get_issuer_returns_none_when_oidc_unavailable():
+    """Test _get_issuer returns None when oidc_provider import fails."""
+    import sys
+
+    request = Mock()
+    # Temporarily remove the mocked oidc module so the import raises ImportError
+    saved = sys.modules.pop("custom_components.oidc_provider.token_validator", None)
+    saved_parent = sys.modules.pop("custom_components.oidc_provider", None)
+    try:
+        result = _get_issuer(request)
+        assert result is None
+    finally:
+        if saved is not None:
+            sys.modules["custom_components.oidc_provider.token_validator"] = saved
+        if saved_parent is not None:
+            sys.modules["custom_components.oidc_provider"] = saved_parent
 
 
 def test_get_protected_resource_metadata():
@@ -101,6 +120,19 @@ class TestMCPProtectedResourceMetadataView:
         body = json.loads(response.body)
         assert body["resource"] == "https://example.com/api/mcp"
 
+    async def test_get_returns_404_when_oidc_unavailable(self):
+        """Test GET returns 404 when OIDC provider is not installed."""
+        request = Mock()
+
+        view = MCPProtectedResourceMetadataView()
+        with patch(
+            "custom_components.mcp_server_http_transport.http._get_issuer",
+            return_value=None,
+        ):
+            response = await view.get(request)
+
+        assert response.status == 404
+
 
 class TestMCPSubpathProtectedResourceMetadataView:
     """Test the MCP protected resource metadata view with /mcp suffix."""
@@ -117,6 +149,19 @@ class TestMCPSubpathProtectedResourceMetadataView:
         assert response.status == 200
         body = json.loads(response.body)
         assert body["resource"] == "https://homeassistant.local/api/mcp"
+
+    async def test_get_returns_404_when_oidc_unavailable(self):
+        """Test GET returns 404 when OIDC provider is not installed."""
+        request = Mock()
+
+        view = MCPSubpathProtectedResourceMetadataView()
+        with patch(
+            "custom_components.mcp_server_http_transport.http._get_issuer",
+            return_value=None,
+        ):
+            response = await view.get(request)
+
+        assert response.status == 404
 
 
 class TestMCPEndpointView:
@@ -342,22 +387,21 @@ class TestNativeAuth:
 
     async def test_oidc_tried_before_llat(self, view, mock_hass):
         """Test that OIDC validation is attempted before LLAT."""
+        import sys
+
         request = Mock()
         request.headers = {"Authorization": "Bearer oidc_token"}
 
-        oidc_result = {"sub": "oidc_user", "scope": "openid"}
-
-        with patch(
-            "custom_components.mcp_server_http_transport.http.validate_access_token",
-            return_value=oidc_result,
-            create=True,
-        ):
-            # OIDC succeeds, LLAT should not be called
+        mock_validator = sys.modules["custom_components.oidc_provider.token_validator"]
+        original = mock_validator.validate_access_token.return_value
+        mock_validator.validate_access_token.return_value = {"sub": "oidc_user"}
+        try:
             result = await view._validate_token(request)
+        finally:
+            mock_validator.validate_access_token.return_value = original
 
-        # OIDC succeeded, so result should be the OIDC payload
-        if result is not None and result.get("sub") == "oidc_user":
-            mock_hass.auth.async_validate_access_token.assert_not_called()
+        assert result == {"sub": "oidc_user"}
+        mock_hass.auth.async_validate_access_token.assert_not_called()
 
     async def test_llat_fallback_after_oidc_fails(self, view, mock_hass):
         """Test LLAT is tried as fallback when OIDC validation returns None."""
@@ -372,6 +416,29 @@ class TestNativeAuth:
         result = await view._validate_token(request)
 
         assert result == {"sub": "ha_user"}
+
+    async def test_validate_token_import_error_falls_through(self, view, mock_hass):
+        """Test _validate_token handles ImportError from OIDC and falls through to LLAT."""
+        import sys
+
+        mock_refresh_token = Mock()
+        mock_refresh_token.user.id = "fallback_user"
+        mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer some_token"}
+
+        saved = sys.modules.pop("custom_components.oidc_provider.token_validator", None)
+        saved_parent = sys.modules.pop("custom_components.oidc_provider", None)
+        try:
+            result = await view._validate_token(request)
+        finally:
+            if saved is not None:
+                sys.modules["custom_components.oidc_provider.token_validator"] = saved
+            if saved_parent is not None:
+                sys.modules["custom_components.oidc_provider"] = saved_parent
+
+        assert result == {"sub": "fallback_user"}
 
     async def test_401_without_oidc_metadata_when_oidc_unavailable(self, view, mock_hass):
         """Test 401 response uses plain Bearer when OIDC is not available."""

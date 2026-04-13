@@ -25,10 +25,16 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    name: test (py${{ matrix.python-version }}, HA ${{ matrix.ha-version }})
     strategy:
       matrix:
-        python-version:
-          - "3.13"
+        include:
+          - python-version: "3.14"
+            ha-version: "2026.4.2"
+          - python-version: "3.13"
+            ha-version: "2025.10.4"
+          - python-version: "3.13"
+            ha-version: "2025.4.4"
 
     steps:
     - uses: actions/checkout@v5
@@ -47,6 +53,9 @@ jobs:
 
     - name: Install dependencies
       run: poetry install --no-interaction
+
+    - name: Pin Home Assistant version
+      run: poetry run pip install homeassistant==${{ matrix.ha-version }}
 
     - name: Check formatting with Black
       run: poetry run black --check custom_components/ tests/

@@ -7,9 +7,15 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 
-from .const import DOMAIN
+from .const import CONF_NATIVE_AUTH, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+STEP_USER_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_NATIVE_AUTH, default=False): bool,
+    }
+)
 
 
 class MCPServerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -21,21 +27,24 @@ class MCPServerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Handle the initial step."""
-        # Check if OIDC Provider is installed
-        if "oidc_provider" not in self.hass.config_entries.async_domains():
-            return self.async_abort(
-                reason="oidc_provider_required",
-                description_placeholders={
-                    "oidc_provider_url": "https://github.com/ganhammar/hass-oidc-provider"
-                },
-            )
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            return self.async_create_entry(title="MCP Server", data=user_input)
+            native_auth = user_input.get(CONF_NATIVE_AUTH, False)
+
+            # OIDC provider is only required when native auth is disabled
+            if not native_auth and "oidc_provider" not in self.hass.config_entries.async_domains():
+                errors["base"] = "oidc_provider_required"
+            else:
+                return self.async_create_entry(title="MCP Server", data=user_input)
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({}),
+            data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+            description_placeholders={
+                "oidc_provider_url": "https://github.com/ganhammar/hass-oidc-provider"
+            },
         )
 
     @staticmethod
@@ -55,9 +64,20 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
     ) -> config_entries.FlowResult:
         """Manage the options."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Merge options into config entry data so the integration reads from one place
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                data={**self.config_entry.data, **user_input},
+            )
+            return self.async_create_entry(title="", data={})
+
+        current_native_auth = self.config_entry.data.get(CONF_NATIVE_AUTH, False)
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_NATIVE_AUTH, default=current_native_auth): bool,
+                }
+            ),
         )

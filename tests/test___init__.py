@@ -116,7 +116,29 @@ class TestAsyncSetupEntry:
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
         assert result is True
-        mock_endpoint_view_class.assert_called_once_with(mock_hass, mock_server)
+        mock_endpoint_view_class.assert_called_once_with(mock_hass, mock_server, False)
+
+    @patch("custom_components.mcp_server_http_transport.Server")
+    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
+    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
+    async def test_async_setup_entry_passes_native_auth_enabled(
+        self,
+        mock_subpath_view,
+        mock_metadata_view,
+        mock_endpoint_view_class,
+        mock_server_class,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """Test async_setup_entry passes native_auth_enabled to endpoint view."""
+        mock_config_entry.data = {"native_auth_enabled": True}
+        mock_server = Mock()
+        mock_server_class.return_value = mock_server
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        mock_endpoint_view_class.assert_called_once_with(mock_hass, mock_server, True)
 
 
 class TestAsyncUnloadEntry:

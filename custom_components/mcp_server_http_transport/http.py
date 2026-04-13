@@ -1,7 +1,6 @@
 """HTTP transport for MCP server."""
 
 import logging
-import os
 from typing import Any
 
 from aiohttp import web
@@ -10,7 +9,6 @@ from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
 from .completions import complete
-from .const import ENV_BEARER_TOKEN
 from .prompts import get_prompt, get_prompts
 from .resources import get_resources, read_resource
 from .tools import call_tool, get_tool_schemas
@@ -105,11 +103,6 @@ class MCPEndpointView(HomeAssistantView):
         refresh_token = await self.hass.auth.async_validate_access_token(token)
         if refresh_token is not None:
             return {"sub": str(refresh_token.user.id)}
-
-        # Fall back to static token from environment variable
-        env_token = os.environ.get(ENV_BEARER_TOKEN)
-        if env_token and token == env_token:
-            return {"sub": "env_token"}
 
         return None
 

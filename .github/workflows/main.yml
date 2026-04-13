@@ -92,7 +92,10 @@ jobs:
     - name: Install dependencies
       run: |
         python -m venv .venv
-        .venv/bin/pip install pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }} mcp ${{ matrix.extra-deps || '' }}
+        .venv/bin/pip install "pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }}" mcp
+        if [ -n "$EXTRA_DEPS" ]; then .venv/bin/pip install $EXTRA_DEPS; fi
+      env:
+        EXTRA_DEPS: ${{ matrix.extra-deps }}
 
     - name: Run integration tests
       run: .venv/bin/pytest tests/test_integration.py -v

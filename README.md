@@ -2,12 +2,13 @@
 
 A Home Assistant Custom Component that provides an MCP (Model Context Protocol) server using **HTTP transport**, allowing AI assistants like Claude to interact with your Home Assistant instance.
 
-**Note:** Unlike other Home Assistant MCP servers that use SSE (Server-Sent Events), this implementation uses HTTP transport with OAuth 2.0 authentication, making it suitable for remote access and integration with services like Claude in browser.
+**Why HTTP transport with OAuth?** This project was built primarily to support MCP Streamable HTTP transport, enabling web-based clients like Claude that require OIDC and OAuth 2.0 Dynamic Client Registration (RFC 7591). Since Home Assistant already has an [official MCP integration](https://www.home-assistant.io/integrations/mcp_server/) that supports SSE transport, there wasn't a need to duplicate that. For local or custom client setups, Long-Lived Access Token authentication is available as an alternative.
 
 ## Features
 
 - 🌐 **HTTP transport** (not SSE) - works remotely, not just locally
 - 🔐 **OAuth 2.0 authentication** with Dynamic Client Registration (via [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server))
+- 🔑 **Long-Lived Access Token** authentication for local and custom client setups
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, and scripts
@@ -18,7 +19,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 
 ## Prerequisites
 
-This plugin requires [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) to be installed and configured for OIDC authentication.
+If using OAuth 2.0 authentication (required for browser-based clients like Claude), [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) must be installed and configured. Long-Lived Access Token authentication has no additional prerequisites.
 
 ## Installation
 
@@ -67,6 +68,16 @@ The MCP server uses OAuth 2.0 Dynamic Client Registration (DCR), which allows Cl
    - Click "Authorize" to grant access
 
 That's it! Claude will now be able to interact with your Home Assistant instance through the MCP server.
+
+## Usage with Long-Lived Access Tokens
+
+For local or custom client setups, you can use a Home Assistant Long-Lived Access Token instead of OAuth.
+
+1. Enable native authentication in the integration settings (Settings > Devices & Services > MCP Server > Configure > Enable native Home Assistant authentication)
+2. In Home Assistant, go to your user profile and create a Long-Lived Access Token
+3. Configure your MCP client to connect to `http://your-home-assistant:8123/api/mcp` with the token as a Bearer token in the `Authorization` header
+
+When both OAuth and native authentication are enabled, the server tries OAuth first and falls back to the Long-Lived Access Token automatically.
 
 ## MCP Capabilities
 

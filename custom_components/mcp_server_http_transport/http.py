@@ -103,7 +103,7 @@ class MCPEndpointView(HomeAssistantView):
 
             expected_issuer = get_issuer_from_request(request)
             result = validate_access_token(self.hass, token, expected_issuer)
-            if result:
+            if result is not None:
                 return result
         except ImportError as e:
             _LOGGER.debug("OIDC provider not available: %s", e)
@@ -140,6 +140,7 @@ class MCPEndpointView(HomeAssistantView):
                 headers={"WWW-Authenticate": www_authenticate},
             )
 
+        body = None
         try:
             # Parse JSON-RPC message
             body = await request.json()

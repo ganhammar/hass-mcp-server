@@ -29,6 +29,9 @@
           "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required."
         }
       }
+    },
+    "error": {
+      "oidc_provider_required": "The OIDC Provider integration is required when native authentication is disabled. Install it or keep native authentication enabled."
     }
   }
 }

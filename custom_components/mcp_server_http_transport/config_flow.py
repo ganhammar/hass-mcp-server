@@ -63,13 +63,19 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Manage the options."""
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            # Merge options into config entry data so the integration reads from one place
-            self.hass.config_entries.async_update_entry(
-                self.config_entry,
-                data={**self.config_entry.data, **user_input},
-            )
-            return self.async_create_entry(title="", data={})
+            native_auth = user_input.get(CONF_NATIVE_AUTH, False)
+
+            if not native_auth and "oidc_provider" not in self.hass.config_entries.async_domains():
+                errors["base"] = "oidc_provider_required"
+            else:
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={**self.config_entry.data, **user_input},
+                )
+                return self.async_create_entry(title="", data={})
 
         current_native_auth = self.config_entry.data.get(CONF_NATIVE_AUTH, False)
 
@@ -80,4 +86,5 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(CONF_NATIVE_AUTH, default=current_native_auth): bool,
                 }
             ),
+            errors=errors,
         )

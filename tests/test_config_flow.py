@@ -103,7 +103,7 @@ class TestMCPServerConfigFlow:
 class TestMCPServerOptionsFlow:
     """Test the MCP Server options flow."""
 
-    def _create_flow(self, data=None):
+    def _create_flow(self, data=None, installed_domains=None):
         """Create an options flow with mocked internals."""
         mock_config_entry = Mock()
         mock_config_entry.data = data or {}
@@ -113,6 +113,9 @@ class TestMCPServerOptionsFlow:
         flow.hass = Mock()
         flow.hass.config_entries = Mock()
         flow.hass.config_entries.async_get_known_entry.return_value = mock_config_entry
+        flow.hass.config_entries.async_domains.return_value = (
+            installed_domains if installed_domains is not None else ["oidc_provider"]
+        )
         flow._config_entry = mock_config_entry
         flow.handler = mock_config_entry.entry_id
         return flow
@@ -143,6 +146,16 @@ class TestMCPServerOptionsFlow:
         flow.hass.config_entries.async_update_entry.assert_called_once()
         call_kwargs = flow.hass.config_entries.async_update_entry.call_args
         assert call_kwargs[1]["data"][CONF_NATIVE_AUTH] is True
+
+    async def test_init_step_error_disabling_native_without_oidc(self):
+        """Test options flow shows error when disabling native auth without OIDC."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True}, installed_domains=[])
+
+        result = await flow.async_step_init(user_input={CONF_NATIVE_AUTH: False})
+
+        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["errors"]["base"] == "oidc_provider_required"
+        flow.hass.config_entries.async_update_entry.assert_not_called()
 
     async def test_init_step_defaults_to_false(self):
         """Test init step defaults native_auth_enabled to False."""

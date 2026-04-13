@@ -2,6 +2,7 @@
 
 import builtins
 import json
+import sys
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest

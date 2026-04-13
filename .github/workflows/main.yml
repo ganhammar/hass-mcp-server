@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - python-version: "3.13"
+          - python-version: "3.14"
             ha-version: "2026.4.2"
             ha-test-helper: "0.13.323"
           - python-version: "3.13"
@@ -57,9 +57,13 @@ jobs:
 
     - name: Install dependencies
       run: poetry install --no-interaction
+      env:
+        PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
 
     - name: Pin HA test helper version
       run: poetry run pip install pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }}
+      env:
+        PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
 
     - name: Check formatting with Black
       run: poetry run black --check custom_components/ tests/

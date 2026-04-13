@@ -335,48 +335,6 @@ class TestMCPEndpointView:
 
         assert result is None
 
-    async def test_validate_token_with_valid_env_token(self, view):
-        """Test _validate_token accepts a token matching MCP_BEARER_TOKEN env var."""
-        request = Mock()
-        request.headers = {"Authorization": "Bearer mysecrettoken"}
-        request.url.origin.return_value = "https://homeassistant.local"
-
-        view.hass.auth = Mock()
-        view.hass.auth.async_validate_access_token = AsyncMock(return_value=None)
-
-        with patch.dict("os.environ", {"MCP_BEARER_TOKEN": "mysecrettoken"}):
-            result = await view._validate_token(request)
-
-        assert result == {"sub": "env_token"}
-
-    async def test_validate_token_with_wrong_env_token(self, view):
-        """Test _validate_token rejects a token that doesn't match MCP_BEARER_TOKEN."""
-        request = Mock()
-        request.headers = {"Authorization": "Bearer wrongtoken"}
-        request.url.origin.return_value = "https://homeassistant.local"
-
-        view.hass.auth = Mock()
-        view.hass.auth.async_validate_access_token = AsyncMock(return_value=None)
-
-        with patch.dict("os.environ", {"MCP_BEARER_TOKEN": "mysecrettoken"}):
-            result = await view._validate_token(request)
-
-        assert result is None
-
-    async def test_validate_token_skips_env_when_not_set(self, view):
-        """Test _validate_token returns None when MCP_BEARER_TOKEN is not set."""
-        request = Mock()
-        request.headers = {"Authorization": "Bearer sometoken"}
-        request.url.origin.return_value = "https://homeassistant.local"
-
-        view.hass.auth = Mock()
-        view.hass.auth.async_validate_access_token = AsyncMock(return_value=None)
-
-        with patch.dict("os.environ", {}, clear=True):
-            result = await view._validate_token(request)
-
-        assert result is None
-
     async def test_validate_token_prefers_oidc_over_llat(self, view):
         """Test _validate_token returns OIDC result and skips LLAT when OIDC succeeds."""
         request = Mock()

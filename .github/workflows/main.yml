@@ -25,7 +25,47 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    name: test (py${{ matrix.python-version }}, HA ${{ matrix.ha-version }})
+    name: test
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Install dependencies
+      run: poetry install --no-interaction
+
+    - name: Check formatting with Black
+      run: poetry run black --check custom_components/ tests/
+
+    - name: Lint with Ruff
+      run: poetry run ruff check custom_components/ tests/
+
+    - name: Run unit tests
+      run: poetry run pytest tests/ -v --ignore=tests/test_integration.py
+
+    - name: Run tests with coverage
+      run: poetry run pytest tests/ --ignore=tests/test_integration.py --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  integration-test:
+    runs-on: ubuntu-latest
+    name: integration (py${{ matrix.python-version }}, HA ${{ matrix.ha-version }})
     strategy:
       fail-fast: false
       matrix:
@@ -36,6 +76,7 @@ jobs:
           - python-version: "3.13"
             ha-version: "2025.10.1"
             ha-test-helper: "0.13.286"
+            extra-deps: "pycares<5"
           - python-version: "3.13"
             ha-version: "2025.4.4"
             ha-test-helper: "0.13.236"
@@ -51,26 +92,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m venv .venv
-        .venv/bin/pip install pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }} mcp black ruff
-
-    - name: Check formatting with Black
-      run: .venv/bin/black --check custom_components/ tests/
-
-    - name: Lint with Ruff
-      run: .venv/bin/ruff check custom_components/ tests/
-
-    - name: Run unit tests
-      run: .venv/bin/pytest tests/ -v --ignore=tests/test_integration.py
+        .venv/bin/pip install pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }} mcp ${{ matrix.extra-deps || '' }}
 
     - name: Run integration tests
       run: .venv/bin/pytest tests/test_integration.py -v
-
-    - name: Run tests with coverage
-      run: .venv/bin/pytest tests/ --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        file: ./coverage.xml
-        fail_ci_if_error: false

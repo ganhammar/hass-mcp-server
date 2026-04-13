@@ -56,14 +56,9 @@ jobs:
         virtualenvs-in-project: true
 
     - name: Install dependencies
-      run: poetry install --no-interaction
-      env:
-        PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
-
-    - name: Pin HA test helper version
-      run: poetry run pip install pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }}
-      env:
-        PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+      run: |
+        poetry run pip install pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }}
+        poetry install --no-interaction
 
     - name: Check formatting with Black
       run: poetry run black --check custom_components/ tests/

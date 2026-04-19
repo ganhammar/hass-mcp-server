@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 
-from . import register_tool
+from . import _HAJSONEncoder, register_tool
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ async def get_system_status(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         "integration_count": integration_count,
     }
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -173,7 +173,7 @@ async def get_domain_stats(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         "examples": examples,
     }
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -198,7 +198,7 @@ async def check_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             "valid": len(errors) == 0,
             "errors": errors,
         }
-        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
     except Exception as e:
         _LOGGER.error("Error checking config: %s", e)
         return {"content": [{"type": "text", "text": f"Error checking config: {str(e)}"}]}
@@ -225,4 +225,4 @@ async def list_integrations(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         for entry in entries
     ]
 
-    return {"content": [{"type": "text", "text": json.dumps(integrations, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(integrations, indent=2, cls=_HAJSONEncoder)}]}

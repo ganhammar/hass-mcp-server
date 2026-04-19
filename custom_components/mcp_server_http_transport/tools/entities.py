@@ -10,7 +10,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
 
-from . import register_tool
+from . import _HAJSONEncoder, register_tool
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
         "last_updated": state.last_updated.isoformat(),
     }
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -200,7 +200,7 @@ async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             }
         entities.append(entity)
 
-    return {"content": [{"type": "text", "text": json.dumps(entities, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -223,7 +223,7 @@ async def list_areas(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         for area in registry.async_list_areas()
     ]
 
-    return {"content": [{"type": "text", "text": json.dumps(areas, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(areas, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -259,7 +259,7 @@ async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             }
         )
 
-    return {"content": [{"type": "text", "text": json.dumps(devices, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(devices, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -288,7 +288,7 @@ async def list_services(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     for domain, domain_services in services.items():
         result[domain] = list(domain_services.keys())
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -394,7 +394,7 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         if len(entities) >= limit:
             break
 
-    return {"content": [{"type": "text", "text": json.dumps(entities, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -422,7 +422,7 @@ async def list_labels(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         for label in registry.async_list_labels()
     ]
 
-    return {"content": [{"type": "text", "text": json.dumps(labels, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(labels, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -472,4 +472,4 @@ async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
             }
         )
 
-    return {"content": [{"type": "text", "text": json.dumps(results, indent=2)}]}
+    return {"content": [{"type": "text", "text": json.dumps(results, indent=2, cls=_HAJSONEncoder)}]}

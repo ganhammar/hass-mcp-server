@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from . import register_tool
+from . import _HAJSONEncoder, register_tool
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
                     entry[key] = stat[key]
             result.append(entry)
 
-        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
     except Exception as e:
         _LOGGER.error("Error getting statistics: %s", e)
         return {"content": [{"type": "text", "text": f"Error getting statistics: {str(e)}"}]}

@@ -1,8 +1,21 @@
 """MCP tool definitions and handlers for Home Assistant."""
 
+import json
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+
+
+class _HAJSONEncoder(json.JSONEncoder):
+    """JSON encoder that handles datetime/date objects in HA state attributes."""
+
+    def default(self, o: Any) -> Any:
+        if isinstance(o, datetime):
+            return o.isoformat()
+        if isinstance(o, date):
+            return o.isoformat()
+        return super().default(o)
 
 # Tool registry: name -> {"schema": {...}, "handler": callable}
 TOOLS: dict[str, dict[str, Any]] = {}

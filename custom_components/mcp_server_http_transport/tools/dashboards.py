@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from . import register_tool
+from . import _HAJSONEncoder, register_tool
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -
 
     try:
         dashboards = await list_dashboards(hass)
-        return {"content": [{"type": "text", "text": json.dumps(dashboards, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps(dashboards, indent=2, cls=_HAJSONEncoder)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing dashboards: {str(e)}"}]}
 
@@ -58,7 +58,7 @@ async def get_dashboard_config_tool(
 
     try:
         config = await get_dashboard_config(hass, arguments["url_path"])
-        return {"content": [{"type": "text", "text": json.dumps(config, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps(config, indent=2, cls=_HAJSONEncoder)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting dashboard config: {str(e)}"}]}
 
@@ -199,7 +199,7 @@ async def create_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
                     "type": "text",
                     "text": (
                         f"Successfully created dashboard '{arguments['url_path']}': "
-                        f"{json.dumps(item, indent=2)}"
+                        f"{json.dumps(item, indent=2, cls=_HAJSONEncoder)}"
                     ),
                 }
             ]
@@ -256,7 +256,7 @@ async def update_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
                     "type": "text",
                     "text": (
                         f"Successfully updated dashboard '{url_path}': "
-                        f"{json.dumps(item, indent=2)}"
+                        f"{json.dumps(item, indent=2, cls=_HAJSONEncoder)}"
                     ),
                 }
             ]

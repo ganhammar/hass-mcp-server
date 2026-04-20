@@ -93,7 +93,9 @@ async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
                     entry[key] = stat[key]
             result.append(entry)
 
-        return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+        return {
+            "content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]
+        }
     except Exception as e:
         _LOGGER.error("Error getting statistics: %s", e)
         return {"content": [{"type": "text", "text": f"Error getting statistics: {str(e)}"}]}

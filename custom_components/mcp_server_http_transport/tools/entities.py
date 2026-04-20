@@ -200,7 +200,9 @@ async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             }
         entities.append(entity)
 
-    return {"content": [{"type": "text", "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder)}]}
+    return {
+        "content": [{"type": "text", "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder)}]
+    }
 
 
 @register_tool(
@@ -259,7 +261,9 @@ async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             }
         )
 
-    return {"content": [{"type": "text", "text": json.dumps(devices, indent=2, cls=_HAJSONEncoder)}]}
+    return {
+        "content": [{"type": "text", "text": json.dumps(devices, indent=2, cls=_HAJSONEncoder)}]
+    }
 
 
 @register_tool(
@@ -394,7 +398,9 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         if len(entities) >= limit:
             break
 
-    return {"content": [{"type": "text", "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder)}]}
+    return {
+        "content": [{"type": "text", "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder)}]
+    }
 
 
 @register_tool(
@@ -472,4 +478,6 @@ async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
             }
         )
 
-    return {"content": [{"type": "text", "text": json.dumps(results, indent=2, cls=_HAJSONEncoder)}]}
+    return {
+        "content": [{"type": "text", "text": json.dumps(results, indent=2, cls=_HAJSONEncoder)}]
+    }

@@ -124,7 +124,9 @@ async def get_history(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
                     "attributes": dict(state.attributes),
                 }
             )
-        return {"content": [{"type": "text", "text": json.dumps(history, indent=2, cls=_HAJSONEncoder)}]}
+        return {
+            "content": [{"type": "text", "text": json.dumps(history, indent=2, cls=_HAJSONEncoder)}]
+        }
     except Exception as e:
         _LOGGER.error("Error getting history: %s", e)
         return {"content": [{"type": "text", "text": f"Error getting history: {str(e)}"}]}
@@ -243,7 +245,9 @@ async def get_logbook(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
             processor.get_events, start_time, end_time
         )
 
-        return {"content": [{"type": "text", "text": json.dumps(events, indent=2, cls=_HAJSONEncoder)}]}
+        return {
+            "content": [{"type": "text", "text": json.dumps(events, indent=2, cls=_HAJSONEncoder)}]
+        }
     except Exception as e:
         _LOGGER.error("Error getting logbook: %s", e)
         return {"content": [{"type": "text", "text": f"Error getting logbook: {str(e)}"}]}

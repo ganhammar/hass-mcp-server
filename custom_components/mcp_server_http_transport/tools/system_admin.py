@@ -198,7 +198,9 @@ async def check_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             "valid": len(errors) == 0,
             "errors": errors,
         }
-        return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+        return {
+            "content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]
+        }
     except Exception as e:
         _LOGGER.error("Error checking config: %s", e)
         return {"content": [{"type": "text", "text": f"Error checking config: {str(e)}"}]}
@@ -225,4 +227,8 @@ async def list_integrations(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         for entry in entries
     ]
 
-    return {"content": [{"type": "text", "text": json.dumps(integrations, indent=2, cls=_HAJSONEncoder)}]}
+    return {
+        "content": [
+            {"type": "text", "text": json.dumps(integrations, indent=2, cls=_HAJSONEncoder)}
+        ]
+    }

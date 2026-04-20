@@ -25,7 +25,11 @@ async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -
 
     try:
         dashboards = await list_dashboards(hass)
-        return {"content": [{"type": "text", "text": json.dumps(dashboards, indent=2, cls=_HAJSONEncoder)}]}
+        return {
+            "content": [
+                {"type": "text", "text": json.dumps(dashboards, indent=2, cls=_HAJSONEncoder)}
+            ]
+        }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing dashboards: {str(e)}"}]}
 
@@ -58,7 +62,9 @@ async def get_dashboard_config_tool(
 
     try:
         config = await get_dashboard_config(hass, arguments["url_path"])
-        return {"content": [{"type": "text", "text": json.dumps(config, indent=2, cls=_HAJSONEncoder)}]}
+        return {
+            "content": [{"type": "text", "text": json.dumps(config, indent=2, cls=_HAJSONEncoder)}]
+        }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting dashboard config: {str(e)}"}]}
 

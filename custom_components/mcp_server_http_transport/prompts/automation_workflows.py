@@ -6,6 +6,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ..json_utils import _HAJSONEncoder
 from . import register_prompt
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
     # Fetch automation config
     try:
         config = await read_list_entry(hass, "automations.yaml", automation_id)
-        config_text = json.dumps(config, indent=2)
+        config_text = json.dumps(config, indent=2, cls=_HAJSONEncoder)
     except Exception:
         _LOGGER.exception("Error reading automation config for '%s'", automation_id)
         config_text = f"Automation with id '{automation_id}' not found in automations.yaml"
@@ -121,6 +122,7 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
                 "mode": state.attributes.get("mode", "single"),
             },
             indent=2,
+            cls=_HAJSONEncoder,
         )
     else:
         state_text = f"Automation entity not found for id '{automation_id}'"
@@ -150,7 +152,11 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
             events = await get_instance(hass).async_add_executor_job(
                 processor.get_events, start_time, end_time
             )
-            logbook_text = json.dumps(events[:20], indent=2) if events else "No recent events"
+            logbook_text = (
+                json.dumps(events[:20], indent=2, cls=_HAJSONEncoder)
+                if events
+                else "No recent events"
+            )
     except Exception:
         _LOGGER.debug("Could not fetch logbook entries for automation debug")
 
@@ -195,7 +201,7 @@ async def automation_audit(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     automations = None
     try:
         automations = await read_list_entries(hass, "automations.yaml")
-        automations_text = json.dumps(automations, indent=2)
+        automations_text = json.dumps(automations, indent=2, cls=_HAJSONEncoder)
     except Exception:
         _LOGGER.exception("Error reading automations for audit")
         automations_text = "Unable to read automations.yaml"
@@ -211,7 +217,7 @@ async def automation_audit(hass: HomeAssistant, arguments: dict[str, Any]) -> di
                     "last_triggered": str(state.attributes.get("last_triggered", "never")),
                 }
             )
-    states_text = json.dumps(auto_states, indent=2)
+    states_text = json.dumps(auto_states, indent=2, cls=_HAJSONEncoder)
 
     return {
         "description": "Audit all automations",

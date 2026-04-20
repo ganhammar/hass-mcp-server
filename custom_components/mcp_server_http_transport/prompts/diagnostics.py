@@ -5,6 +5,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ..json_utils import _HAJSONEncoder
 from . import register_prompt
 
 
@@ -36,6 +37,7 @@ def troubleshoot_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
                 "last_updated": state.last_updated.isoformat(),
             },
             indent=2,
+            cls=_HAJSONEncoder,
         )
 
     return {
@@ -90,6 +92,7 @@ def setup_guide(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any
                 "last_updated": state.last_updated.isoformat(),
             },
             indent=2,
+            cls=_HAJSONEncoder,
         )
 
     return {

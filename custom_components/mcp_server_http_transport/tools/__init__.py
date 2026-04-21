@@ -4,6 +4,8 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ..json_utils import _HAJSONEncoder  # noqa: F401
+
 # Tool registry: name -> {"schema": {...}, "handler": callable}
 TOOLS: dict[str, dict[str, Any]] = {}
 

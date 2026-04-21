@@ -6,6 +6,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ..json_utils import _HAJSONEncoder
 from . import register_prompt
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ async def schedule_optimizer(hass: HomeAssistant, arguments: dict[str, Any]) -> 
 
     try:
         automations = await read_list_entries(hass, "automations.yaml")
-        automations_text = json.dumps(automations, indent=2)
+        automations_text = json.dumps(automations, indent=2, cls=_HAJSONEncoder)
     except Exception:
         _LOGGER.exception("Error reading automations for schedule optimizer")
         automations_text = "Unable to read automations.yaml"
@@ -45,7 +46,7 @@ async def schedule_optimizer(hass: HomeAssistant, arguments: dict[str, Any]) -> 
             entity_context = (
                 f"\n**Focus entity:** {entity_id}\n"
                 f"Current state: {state.state}\n"
-                f"Attributes: {json.dumps(dict(state.attributes), indent=2)}\n"
+                f"Attributes: {json.dumps(dict(state.attributes), indent=2, cls=_HAJSONEncoder)}\n"
             )
         else:
             entity_context = f"\n**Focus entity:** {entity_id} (not found)\n"
@@ -100,7 +101,7 @@ async def naming_conventions(hass: HomeAssistant, arguments: dict[str, Any]) -> 
             }
         )
 
-    entities_text = json.dumps(by_domain, indent=2)
+    entities_text = json.dumps(by_domain, indent=2, cls=_HAJSONEncoder)
     total = sum(len(v) for v in by_domain.values())
 
     return {

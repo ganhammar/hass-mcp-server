@@ -10,6 +10,8 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
 
+from .json_utils import _HAJSONEncoder
+
 RESOURCES = [
     {
         "uri": "hass://config",
@@ -147,7 +149,13 @@ def _read_config(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         "country": config.country,
         "language": config.language,
     }
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(data, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_areas(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
@@ -161,7 +169,13 @@ def _read_areas(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         }
         for area in registry.async_list_areas()
     ]
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(areas, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(areas, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 async def _read_dashboard(hass: HomeAssistant, uri: str, url_path: str) -> list[dict[str, Any]]:
@@ -169,7 +183,13 @@ async def _read_dashboard(hass: HomeAssistant, uri: str, url_path: str) -> list[
     from .dashboard_manager import get_dashboard_config
 
     config = await get_dashboard_config(hass, url_path)
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(config, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(config, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_devices(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
@@ -186,14 +206,26 @@ def _read_devices(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         }
         for device in registry.devices.values()
     ]
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(devices, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(devices, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_services(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
     """Read all services as a resource."""
     services = hass.services.async_services()
     result = {domain: list(svcs.keys()) for domain, svcs in services.items()}
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(result, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(result, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_floors(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
@@ -209,7 +241,13 @@ def _read_floors(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         }
         for floor in registry.async_list_floors()
     ]
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(floors, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(floors, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_entity(hass: HomeAssistant, uri: str, entity_id: str) -> list[dict[str, Any]]:
@@ -226,7 +264,13 @@ def _read_entity(hass: HomeAssistant, uri: str, entity_id: str) -> list[dict[str
         "last_changed": state.last_changed.isoformat(),
         "last_updated": state.last_updated.isoformat(),
     }
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(data, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_entities(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
@@ -241,7 +285,13 @@ def _read_entities(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
                 "friendly_name": state.attributes.get("friendly_name", state.entity_id),
             }
         )
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(by_domain, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(by_domain, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_entities_domain(hass: HomeAssistant, uri: str, domain: str) -> list[dict[str, Any]]:
@@ -257,7 +307,13 @@ def _read_entities_domain(hass: HomeAssistant, uri: str, domain: str) -> list[di
                 "friendly_name": state.attributes.get("friendly_name", state.entity_id),
             }
         )
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(entities, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_labels(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
@@ -273,7 +329,13 @@ def _read_labels(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         }
         for label in registry.async_list_labels()
     ]
-    return [{"uri": uri, "mimeType": "application/json", "text": json.dumps(labels, indent=2)}]
+    return [
+        {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(labels, indent=2, cls=_HAJSONEncoder),
+        }
+    ]
 
 
 def _read_integrations(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
@@ -292,6 +354,6 @@ def _read_integrations(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(integrations, indent=2),
+            "text": json.dumps(integrations, indent=2, cls=_HAJSONEncoder),
         }
     ]

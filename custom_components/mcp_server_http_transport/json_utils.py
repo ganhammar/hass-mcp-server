@@ -13,4 +13,6 @@ class _HAJSONEncoder(json.JSONEncoder):
             return o.isoformat()
         if isinstance(o, date):
             return o.isoformat()
+        if isinstance(o, (set, frozenset)):
+            return sorted(o) if all(isinstance(x, str) for x in o) else list(o)
         return super().default(o)

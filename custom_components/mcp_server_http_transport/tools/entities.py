@@ -444,7 +444,15 @@ async def list_labels(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "List of entity IDs to get state for (max 50)",
-            }
+            },
+            "fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Limit which attribute keys are included in each entity's response "
+                    "(e.g., ['brightness', 'color_temp']). Omit for all attributes"
+                ),
+            },
         },
         "required": ["entity_ids"],
     },
@@ -452,6 +460,7 @@ async def list_labels(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
 async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get state for multiple entities."""
     entity_ids = arguments["entity_ids"]
+    fields = arguments.get("fields")
 
     if len(entity_ids) > 50:
         return {"content": [{"type": "text", "text": "Error: maximum 50 entity IDs per request"}]}
@@ -467,11 +476,15 @@ async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         entry = registry.async_get(entity_id)
         aliases = _get_aliases(hass, entry) if entry else []
 
+        attributes = dict(state.attributes)
+        if fields is not None:
+            attributes = {k: v for k, v in attributes.items() if k in fields}
+
         results.append(
             {
                 "entity_id": state.entity_id,
                 "state": state.state,
-                "attributes": dict(state.attributes),
+                "attributes": attributes,
                 "aliases": aliases,
                 "last_changed": state.last_changed.isoformat(),
                 "last_updated": state.last_updated.isoformat(),

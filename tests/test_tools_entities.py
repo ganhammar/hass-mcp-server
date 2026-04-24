@@ -1085,6 +1085,73 @@ class TestToolsEntities:
             "Frühlingsblüten",
         ]
 
+    async def test_post_tools_call_batch_get_state_with_fields(self, view, mock_hass):
+        """Test batch_get_state filters attributes per entity when fields is provided (#26)."""
+        mock_state1 = Mock()
+        mock_state1.entity_id = "light.living_room"
+        mock_state1.state = "on"
+        mock_state1.attributes = {
+            "brightness": 255,
+            "color_temp": 300,
+            "friendly_name": "Living Room",
+        }
+        mock_state1.last_changed = datetime(2024, 1, 1, 12, 0, 0)
+        mock_state1.last_updated = datetime(2024, 1, 1, 12, 0, 0)
+
+        mock_state2 = Mock()
+        mock_state2.entity_id = "light.bedroom"
+        mock_state2.state = "off"
+        mock_state2.attributes = {
+            "brightness": 0,
+            "color_temp": 0,
+            "friendly_name": "Bedroom",
+        }
+        mock_state2.last_changed = datetime(2024, 1, 1, 10, 0, 0)
+        mock_state2.last_updated = datetime(2024, 1, 1, 10, 0, 0)
+
+        mock_hass.states.get = lambda entity_id: {
+            "light.living_room": mock_state1,
+            "light.bedroom": mock_state2,
+        }.get(entity_id)
+
+        mock_entry = Mock()
+        mock_entry.aliases = []
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "batch_get_state",
+                    "arguments": {
+                        "entity_ids": ["light.living_room", "light.bedroom"],
+                        "fields": ["brightness"],
+                    },
+                },
+                "id": 220,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 2
+        assert data[0]["attributes"] == {"brightness": 255}
+        assert data[1]["attributes"] == {"brightness": 0}
+
     async def test_post_tools_call_batch_get_state_exceeds_limit(self, view, mock_hass):
         """Test POST with tools/call for batch_get_state exceeding 50 limit."""
         entity_ids = [f"light.light_{i}" for i in range(51)]

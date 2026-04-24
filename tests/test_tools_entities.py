@@ -1026,6 +1026,65 @@ class TestToolsEntities:
         assert data[1]["entity_id"] == "light.nonexistent"
         assert data[1]["error"] == "not found"
 
+    async def test_post_tools_call_batch_get_state_with_set_attribute(self, view, mock_hass):
+        """Regression for PR #38: batch_get_state must serialize set attributes.
+
+        Hue Bridge Pro groups expose `hue_scenes` as a Python set. Before the
+        encoder handled sets, this path raised TypeError and returned HTTP 500.
+        """
+        mock_state = Mock()
+        mock_state.entity_id = "light.hue_group"
+        mock_state.state = "on"
+        mock_state.attributes = {
+            "is_hue_group": True,
+            "hue_scenes": {"Entspannen", "Energie tanken", "Frühlingsblüten"},
+        }
+        mock_state.last_changed = datetime(2024, 1, 1, 12, 0, 0)
+        mock_state.last_updated = datetime(2024, 1, 1, 12, 0, 0)
+
+        mock_hass.states.get = lambda entity_id: (
+            mock_state if entity_id == "light.hue_group" else None
+        )
+
+        mock_entry = Mock()
+        mock_entry.aliases = []
+        mock_er = Mock()
+        mock_er.async_get.return_value = mock_entry
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "batch_get_state",
+                    "arguments": {"entity_ids": ["light.hue_group"]},
+                },
+                "id": 219,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "light.hue_group"
+        assert data[0]["attributes"]["hue_scenes"] == [
+            "Energie tanken",
+            "Entspannen",
+            "Frühlingsblüten",
+        ]
+
     async def test_post_tools_call_batch_get_state_exceeds_limit(self, view, mock_hass):
         """Test POST with tools/call for batch_get_state exceeding 50 limit."""
         entity_ids = [f"light.light_{i}" for i in range(51)]

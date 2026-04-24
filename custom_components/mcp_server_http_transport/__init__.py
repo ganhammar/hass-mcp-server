@@ -35,9 +35,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     server = Server("home-assistant-mcp-server")
     hass.data[DOMAIN]["server"] = server
 
-    # Register HTTP endpoints
-    hass.http.register_view(MCPProtectedResourceMetadataView())
-    hass.http.register_view(MCPSubpathProtectedResourceMetadataView())
+    # Register HTTP endpoints. The views are gated on hass.data[DOMAIN] so
+    # requests stop being served the moment async_unload_entry clears it
+    # (HA has no public register_view reverse — see #37).
+    hass.http.register_view(MCPProtectedResourceMetadataView(hass))
+    hass.http.register_view(MCPSubpathProtectedResourceMetadataView(hass))
     hass.http.register_view(MCPEndpointView(hass, server, native_auth_enabled))
 
     _LOGGER.info("MCP Server initialized at /api/mcp (native_auth=%s)", native_auth_enabled)

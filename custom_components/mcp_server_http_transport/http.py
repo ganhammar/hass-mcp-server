@@ -9,11 +9,35 @@ from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
 from .completions import complete
+from .const import DOMAIN
 from .prompts import get_prompt, get_prompts
 from .resources import get_resources, read_resource
 from .tools import call_tool, get_tool_schemas
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _integration_loaded(hass: HomeAssistant) -> bool:
+    """Return True when the config entry is active.
+
+    HA's HTTP stack has no public way to unregister a view, so registered
+    views survive `async_unload_entry`. async_unload_entry clears
+    `hass.data[DOMAIN]`, so we gate requests on it being populated — when
+    the user disables the integration, requests return 503 immediately
+    instead of continuing to succeed until the next HA restart (#37).
+    """
+    return bool(hass.data.get(DOMAIN))
+
+
+def _service_unavailable() -> web.Response:
+    """Build a 503 response for requests made while the integration is disabled."""
+    return web.json_response(
+        {
+            "error": "service_unavailable",
+            "error_description": "MCP Server integration is disabled",
+        },
+        status=503,
+    )
 
 
 def _get_issuer(request: web.Request) -> str | None:
@@ -46,8 +70,14 @@ class MCPProtectedResourceMetadataView(HomeAssistantView):
     name = "api:mcp:metadata:root"
     requires_auth = False
 
+    def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize the metadata view."""
+        self.hass = hass
+
     async def get(self, request: web.Request) -> web.Response:
         """Return protected resource metadata."""
+        if not _integration_loaded(self.hass):
+            return _service_unavailable()
         base_url = _get_issuer(request)
         if base_url is None:
             return web.json_response({"error": "OIDC provider not available"}, status=404)
@@ -62,8 +92,14 @@ class MCPSubpathProtectedResourceMetadataView(HomeAssistantView):
     name = "api:mcp:metadata:mcp"
     requires_auth = False
 
+    def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize the metadata view."""
+        self.hass = hass
+
     async def get(self, request: web.Request) -> web.Response:
         """Return protected resource metadata with /mcp suffix."""
+        if not _integration_loaded(self.hass):
+            return _service_unavailable()
         base_url = _get_issuer(request)
         if base_url is None:
             return web.json_response({"error": "OIDC provider not available"}, status=404)
@@ -118,6 +154,9 @@ class MCPEndpointView(HomeAssistantView):
 
     async def post(self, request: web.Request) -> web.Response:
         """Handle POST requests for MCP messages."""
+        if not _integration_loaded(self.hass):
+            return _service_unavailable()
+
         # Validate token
         token_payload = await self._validate_token(request)
         if not token_payload:

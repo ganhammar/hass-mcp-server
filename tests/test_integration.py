@@ -1182,7 +1182,10 @@ class TestMCPClientSession:
 
         lovelace_data = Mock()
         lovelace_data.dashboards = {"energy": mock_dashboard}
-        populated_hass.data = {"lovelace": lovelace_data}
+        populated_hass.data = {
+            "lovelace": lovelace_data,
+            "mcp_server_http_transport": {"server": Mock()},
+        }
 
         # Get (empty)
         result = await self._call(

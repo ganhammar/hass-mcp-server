@@ -96,7 +96,7 @@ class TestMCPProtectedResourceMetadataView:
         request.headers = {}
         request.url.origin.return_value = "https://homeassistant.local"
 
-        view = MCPProtectedResourceMetadataView()
+        view = MCPProtectedResourceMetadataView(Mock())
         response = await view.get(request)
 
         assert response.status == 200
@@ -114,7 +114,7 @@ class TestMCPProtectedResourceMetadataView:
             "X-Forwarded-Host": "example.com",
         }
 
-        view = MCPProtectedResourceMetadataView()
+        view = MCPProtectedResourceMetadataView(Mock())
         response = await view.get(request)
 
         body = json.loads(response.body)
@@ -124,7 +124,7 @@ class TestMCPProtectedResourceMetadataView:
         """Test GET returns 404 when OIDC provider is not installed."""
         request = Mock()
 
-        view = MCPProtectedResourceMetadataView()
+        view = MCPProtectedResourceMetadataView(Mock())
         with patch(
             "custom_components.mcp_server_http_transport.http._get_issuer",
             return_value=None,
@@ -143,7 +143,7 @@ class TestMCPSubpathProtectedResourceMetadataView:
         request.headers = {}
         request.url.origin.return_value = "https://homeassistant.local"
 
-        view = MCPSubpathProtectedResourceMetadataView()
+        view = MCPSubpathProtectedResourceMetadataView(Mock())
         response = await view.get(request)
 
         assert response.status == 200
@@ -154,7 +154,7 @@ class TestMCPSubpathProtectedResourceMetadataView:
         """Test GET returns 404 when OIDC provider is not installed."""
         request = Mock()
 
-        view = MCPSubpathProtectedResourceMetadataView()
+        view = MCPSubpathProtectedResourceMetadataView(Mock())
         with patch(
             "custom_components.mcp_server_http_transport.http._get_issuer",
             return_value=None,
@@ -325,6 +325,70 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert "error" in body
         assert "Unknown tool" in body["error"]["message"]
+
+
+class TestIntegrationDisabledGate:
+    """Regression for #37: views return 503 when the integration is unloaded.
+
+    HA's HTTP stack keeps registered views alive across config entry unloads,
+    so we gate on `hass.data[DOMAIN]` — which async_unload_entry clears.
+    """
+
+    async def test_endpoint_view_returns_503_when_domain_missing(self):
+        hass = Mock()
+        hass.data = {}
+        view = MCPEndpointView(hass, Mock())
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+
+        response = await view.post(request)
+
+        assert response.status == 503
+        body = json.loads(response.body)
+        assert body["error"] == "service_unavailable"
+
+    async def test_endpoint_view_returns_503_when_domain_cleared(self):
+        hass = Mock()
+        hass.data = {"mcp_server_http_transport": {}}  # matches async_unload_entry.clear()
+        view = MCPEndpointView(hass, Mock())
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+
+        response = await view.post(request)
+
+        assert response.status == 503
+
+    async def test_metadata_view_returns_503_when_unloaded(self):
+        hass = Mock()
+        hass.data = {}
+        view = MCPProtectedResourceMetadataView(hass)
+
+        response = await view.get(Mock())
+
+        assert response.status == 503
+
+    async def test_subpath_metadata_view_returns_503_when_unloaded(self):
+        hass = Mock()
+        hass.data = {}
+        view = MCPSubpathProtectedResourceMetadataView(hass)
+
+        response = await view.get(Mock())
+
+        assert response.status == 503
+
+    async def test_endpoint_view_serves_when_domain_populated(self):
+        hass = Mock()
+        hass.data = {"mcp_server_http_transport": {"server": Mock()}}
+        view = MCPEndpointView(hass, Mock())
+
+        request = Mock()
+        request.headers = {}  # no token → 401, not 503
+
+        response = await view.post(request)
+
+        assert response.status == 401
 
 
 class TestNativeAuth:

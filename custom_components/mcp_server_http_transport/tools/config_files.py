@@ -165,7 +165,8 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         "Write or replace a YAML configuration file in the Home Assistant config directory. "
         "First-level files only; secrets.yaml is blocked. "
         "Creates the file if it does not exist. "
-        "Automatically backs up all YAML files before writing and runs a config check after"
+        "Automatically backs up all YAML files before writing and runs a config check after. "
+        "When editing multiple files prefer batch_edit_config_files to avoid redundant backups"
     ),
     input_schema={
         "type": "object",
@@ -223,7 +224,8 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     description=(
         "Delete a YAML configuration file from the Home Assistant config directory. "
         "First-level files only; secrets.yaml is blocked. "
-        "Automatically backs up all YAML files before deleting"
+        "Automatically backs up all YAML files before deleting. "
+        "When deleting multiple files prefer batch_edit_config_files to avoid redundant backups"
     ),
     input_schema={
         "type": "object",
@@ -256,6 +258,132 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error deleting config file: {e}"}]}
+
+
+@register_tool(
+    name="batch_edit_config_files",
+    description=(
+        "Write and/or delete multiple YAML config files in one operation. "
+        "Creates one backup before any changes and runs one config check after all changes. "
+        "Prefer this over repeated save_config_file or delete_config_file calls "
+        "when touching more than one file — avoids redundant backups"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "saves": {
+                "type": "array",
+                "description": "Files to write or create. Each entry needs 'filename' and 'content'.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "e.g. 'templates.yaml'"},
+                        "content": {"type": "string", "description": "Full YAML content to write"},
+                    },
+                    "required": ["filename", "content"],
+                },
+            },
+            "deletes": {
+                "type": "array",
+                "description": "File names to delete.",
+                "items": {"type": "string"},
+            },
+            "run_check": {
+                "type": "boolean",
+                "description": "Run HA config validation after all changes (default: true)",
+            },
+        },
+    },
+)
+async def batch_edit_config_files(
+    hass: HomeAssistant, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """One backup → apply all saves → apply all deletes → one config check."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
+
+    saves: list[dict] = arguments.get("saves") or []
+    deletes: list[str] = arguments.get("deletes") or []
+
+    if not saves and not deletes:
+        return {
+            "content": [
+                {"type": "text", "text": "Error: provide at least one entry in 'saves' or 'deletes'"}
+            ]
+        }
+
+    # Phase 1: validate all filenames before touching anything
+    try:
+        save_paths = [
+            (entry["filename"], _resolve_safe(hass, entry["filename"]), entry["content"])
+            for entry in saves
+        ]
+    except (ValueError, KeyError) as e:
+        return {"content": [{"type": "text", "text": f"Error in saves: {e}"}]}
+
+    try:
+        delete_paths = [(fn, _resolve_safe(hass, fn)) for fn in deletes]
+    except ValueError as e:
+        return {"content": [{"type": "text", "text": f"Error in deletes: {e}"}]}
+
+    missing = [fn for fn, path in delete_paths if not path.exists()]
+    if missing:
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Error: file(s) to delete do not exist: {', '.join(missing)}",
+                }
+            ]
+        }
+
+    # Phase 2: one backup
+    backup_path = _create_backup(hass)
+
+    # Phase 3: apply saves
+    saved: list[str] = []
+    errors: list[str] = []
+    for filename, path, content in save_paths:
+        try:
+            path.write_text(content, encoding="utf-8")
+            saved.append(filename)
+        except Exception as e:
+            errors.append(f"save '{filename}': {e}")
+
+    # Phase 4: apply deletes
+    deleted: list[str] = []
+    for filename, path in delete_paths:
+        try:
+            path.unlink()
+            deleted.append(filename)
+        except Exception as e:
+            errors.append(f"delete '{filename}': {e}")
+
+    # Phase 5: build response
+    lines: list[str] = []
+    if saved:
+        lines.append(f"Saved ({len(saved)}): " + ", ".join(saved))
+    if deleted:
+        lines.append(f"Deleted ({len(deleted)}): " + ", ".join(deleted))
+    if backup_path:
+        lines.append(f"Backup: {backup_path}")
+    if errors:
+        lines.append("Errors:")
+        lines.extend(f"  - {e}" for e in errors)
+
+    if arguments.get("run_check", True):
+        try:
+            check = await _run_config_check(hass)
+            if check["valid"]:
+                lines.append("Config check: OK")
+            else:
+                lines.append("Config check: ERRORS FOUND")
+                for err in check["errors"]:
+                    lines.append(f"  - {err}")
+        except Exception as check_err:
+            lines.append(f"Config check failed to run: {check_err}")
+
+    return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
 
 @register_tool(

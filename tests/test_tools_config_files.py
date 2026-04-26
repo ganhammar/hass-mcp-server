@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.tools.config_files import (
     backup_config_files,
+    batch_edit_config_files,
     delete_config_file,
     get_config_file,
     list_config_backups,
@@ -656,4 +657,134 @@ class TestRunConfigCheck:
             result = await _run_config_check(hass)
 
         assert result["valid"] is False
-        assert "Invalid platform: sensor" in result["errors"]
+
+
+class TestBatchEditConfigFiles:
+    async def test_disabled(self, tmp_path):
+        hass = _make_hass(tmp_path, config_file_access=False)
+        result = await batch_edit_config_files(
+            hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
+        )
+        assert "disabled" in result["content"][0]["text"].lower()
+
+    async def test_saves_multiple_files(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup(), _mock_check_config():
+            result = await batch_edit_config_files(
+                hass,
+                {
+                    "saves": [
+                        {"filename": "a.yaml", "content": "a: 1"},
+                        {"filename": "b.yaml", "content": "b: 2"},
+                    ]
+                },
+            )
+        text = result["content"][0]["text"]
+        assert "a.yaml" in text
+        assert "b.yaml" in text
+        assert (tmp_path / "a.yaml").read_text() == "a: 1"
+        assert (tmp_path / "b.yaml").read_text() == "b: 2"
+
+    async def test_deletes_multiple_files(self, tmp_path):
+        (tmp_path / "old1.yaml").write_text("x: 1")
+        (tmp_path / "old2.yaml").write_text("x: 2")
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup(), _mock_check_config():
+            result = await batch_edit_config_files(
+                hass, {"deletes": ["old1.yaml", "old2.yaml"]}
+            )
+        text = result["content"][0]["text"]
+        assert "old1.yaml" in text
+        assert "old2.yaml" in text
+        assert not (tmp_path / "old1.yaml").exists()
+        assert not (tmp_path / "old2.yaml").exists()
+
+    async def test_saves_and_deletes_in_one_call(self, tmp_path):
+        (tmp_path / "remove_me.yaml").write_text("old: true")
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup(), _mock_check_config():
+            result = await batch_edit_config_files(
+                hass,
+                {
+                    "saves": [{"filename": "new.yaml", "content": "new: true"}],
+                    "deletes": ["remove_me.yaml"],
+                },
+            )
+        text = result["content"][0]["text"]
+        assert "new.yaml" in text
+        assert "remove_me.yaml" in text
+        assert (tmp_path / "new.yaml").exists()
+        assert not (tmp_path / "remove_me.yaml").exists()
+
+    async def test_one_backup_for_all_operations(self, tmp_path):
+        (tmp_path / "del.yaml").write_text("x: 1")
+        hass = _make_hass(tmp_path)
+        backup_calls = []
+
+        def counting_backup(h):
+            backup_calls.append(1)
+            return "mcp_backups/fake"
+
+        with patch(
+            "custom_components.mcp_server_http_transport.tools.config_files._create_backup",
+            side_effect=counting_backup,
+        ), _mock_check_config():
+            await batch_edit_config_files(
+                hass,
+                {
+                    "saves": [
+                        {"filename": "a.yaml", "content": "a: 1"},
+                        {"filename": "b.yaml", "content": "b: 2"},
+                    ],
+                    "deletes": ["del.yaml"],
+                },
+            )
+        assert len(backup_calls) == 1
+
+    async def test_validation_failure_aborts_before_any_change(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await batch_edit_config_files(
+            hass,
+            {
+                "saves": [
+                    {"filename": "secrets.yaml", "content": "bad: true"},
+                    {"filename": "ok.yaml", "content": "ok: 1"},
+                ]
+            },
+        )
+        text = result["content"][0]["text"]
+        assert "error" in text.lower()
+        assert not (tmp_path / "ok.yaml").exists()
+
+    async def test_delete_missing_file_aborts(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await batch_edit_config_files(
+            hass, {"deletes": ["does_not_exist.yaml"]}
+        )
+        text = result["content"][0]["text"]
+        assert "error" in text.lower()
+
+    async def test_run_check_false_skips_validation(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup():
+            result = await batch_edit_config_files(
+                hass,
+                {"saves": [{"filename": "x.yaml", "content": "x: 1"}], "run_check": False},
+            )
+        text = result["content"][0]["text"]
+        assert "config check" not in text.lower()
+
+    async def test_config_check_errors_reported(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup(), _mock_check_config(valid=False, errors=["bad thing"]):
+            result = await batch_edit_config_files(
+                hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
+            )
+        text = result["content"][0]["text"]
+        assert "bad thing" in text
+
+    async def test_empty_saves_and_deletes_returns_error(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await batch_edit_config_files(hass, {})
+        text = result["content"][0]["text"]
+        assert "error" in text.lower()

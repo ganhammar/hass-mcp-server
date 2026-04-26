@@ -143,8 +143,11 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 |------|-------------|
 | `list_config_files` | List all YAML files in the config directory (first level, secrets excluded) |
 | `get_config_file` | Read the contents of a YAML config file (max 1 MB) |
-| `save_config_file` | Write or replace a YAML config file |
+| `save_config_file` | Write or replace a YAML config file; runs config validation automatically after saving |
 | `delete_config_file` | Delete a YAML config file |
+| `backup_config_files` | Snapshot all YAML files into `mcp_backups/<timestamp>/` before bulk edits |
+| `list_config_backups` | List all available backup snapshots, newest first |
+| `restore_config_backup` | Restore files from the latest or a specific backup; runs config validation after restoring |
 
 **Dashboards**
 
@@ -330,13 +333,48 @@ get_config_file(filename="automations.yaml")
 save_config_file(filename="automations.yaml", content="...")
 ```
 
+`save_config_file` automatically runs a full Home Assistant config validation after every save and reports any errors inline. Pass `run_check: false` to skip this.
+
 To remove a custom file:
 
 ```json
 delete_config_file(filename="my_custom.yaml")
 ```
 
-> **Note:** Only first-level `.yaml`/`.yml` files in the config directory are accessible. Subdirectories, `secrets.yaml`, and non-YAML files are blocked. After saving, use `check_config` to validate your changes before restarting.
+> **Note:** Only first-level `.yaml`/`.yml` files in the config directory are accessible. Subdirectories, `secrets.yaml`, and non-YAML files are blocked.
+</details>
+
+<details>
+<summary>How do I back up and restore config files before bulk edits?</summary>
+
+Before letting an AI refactor or restructure your YAML files, create a snapshot:
+
+```
+backup_config_files()
+```
+
+This copies all first-level YAML files (excluding `secrets.yaml`) into a timestamped folder:
+
+```
+config/mcp_backups/2026-04-26_14-30-00-123456/
+```
+
+To see all available snapshots:
+
+```
+list_config_backups()
+```
+
+To restore the latest snapshot (or a specific one by timestamp):
+
+```
+restore_config_backup()
+restore_config_backup(timestamp="2026-04-26_14-30-00-123456")
+```
+
+`restore_config_backup` only overwrites files that exist in the backup — files created after the snapshot are left untouched. A config check runs automatically after restoring.
+
+> **If Home Assistant fails to start** after a bad edit: the backup files are always accessible directly at `config/mcp_backups/<timestamp>/` and can be copied back manually via the filesystem or SSH.
 </details>
 
 <details>

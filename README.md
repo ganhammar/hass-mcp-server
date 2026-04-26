@@ -11,7 +11,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 🔑 **Long-Lived Access Token** authentication (opt-in) for local and custom client setups
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
-- 📝 CRUD management of automations, scenes, and scripts
+- 📝 CRUD management of automations, scenes, scripts, and helper entities
 - 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards)
 - 🩺 System administration tools (error log, config validation, restart, system status)
 - 📊 Resources, prompts, and completions for richer AI interactions
@@ -137,6 +137,11 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `list_integrations` | List installed integrations and their status |
 | `list_labels` | List all labels for cross-domain grouping |
 | `batch_get_state` | Get state for multiple entities in one call (max 50) |
+| `list_helpers` | List all helper entities, optionally filtered by domain |
+| `get_helper_config` | Get the raw stored configuration of a UI-managed helper |
+| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule) |
+| `update_helper` | Update an existing UI-managed helper by entity ID |
+| `delete_helper` | Delete a UI-managed helper by entity ID |
 
 ### Resources
 
@@ -174,7 +179,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 
 ### Completions
 
-Autocompletion is supported for `entity_id`, `entity_ids`, `domain`, `service`, `area_id`, `url_path`, `automation_id`, `scene_id`, script `key`, `trigger_type`, `period`, and `config_type` arguments.
+Autocompletion is supported for `entity_id`, `entity_ids`, `domain`, `service`, `area_id`, `url_path`, `automation_id`, `scene_id`, script `key`, `trigger_type`, `period`, `config_type`, and helper `domain` arguments.
 
 ## FAQ
 
@@ -251,6 +256,36 @@ save_dashboard_config(url_path="default", config={"views": [{"title": "Home", "c
 ```
 
 To create or delete dashboards themselves, use the experimental `create_dashboard` and `delete_dashboard` tools. These use internal HA APIs and may break with future HA updates.
+</details>
+
+<details>
+<summary>How do I manage helper entities (input_boolean, counter, timer, etc.)?</summary>
+
+Use `list_helpers` to see all helpers, optionally filtered by type:
+
+```
+list_helpers()                          // all helper types
+list_helpers(domain="input_boolean")    // only toggles
+```
+
+To create a helper, specify the domain and a config with at least a `name`:
+
+```json
+create_helper(domain="input_boolean", config={"name": "Vacation Mode", "icon": "mdi:palm-tree"})
+create_helper(domain="input_number", config={"name": "Target Temperature", "min": 15, "max": 30, "step": 0.5, "unit_of_measurement": "°C"})
+create_helper(domain="input_select", config={"name": "House Mode", "options": ["Home", "Away", "Sleep"]})
+create_helper(domain="counter", config={"name": "Motion Events", "initial": 0, "step": 1})
+create_helper(domain="timer", config={"name": "Cooking Timer", "duration": "00:30:00"})
+```
+
+To update or delete, use the entity ID:
+
+```json
+update_helper(entity_id="input_boolean.vacation_mode", config={"name": "Vacation Mode", "icon": "mdi:airplane"})
+delete_helper(entity_id="counter.motion_events")
+```
+
+> **Note:** These tools only manage UI-created helpers stored in Home Assistant's `.storage/` files. Helpers defined in YAML configuration are read-only from the perspective of these tools.
 </details>
 
 <details>

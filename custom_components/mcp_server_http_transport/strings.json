@@ -10,7 +10,7 @@
         },
         "data_description": {
           "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required.",
-          "config_file_access_enabled": "Allow AI assistants to list, read, write, and delete YAML configuration files. Only first-level files are accessible; secrets.yaml is always blocked. Every save is automatically validated against the full Home Assistant configuration. Use the backup_config_files tool before bulk edits — snapshots are stored in mcp_backups/ inside your config directory and can be restored manually if Home Assistant fails to start. Make sure all sensitive values (API keys, tokens, passwords) are stored in secrets.yaml before enabling this — any inline values in other YAML files will be readable by the AI."
+          "config_file_access_enabled": "Allow AI assistants to list, read, write, and delete first-level YAML files in the config directory. **`secrets.yaml`** is always blocked.\n\nEvery save and delete automatically creates a full backup first (stored in `mcp_backups/` in your config directory). Every save also runs a config validation automatically. Backups can be restored manually via the filesystem if Home Assistant fails to start.\n\n**Before enabling:** move all sensitive values (API keys, tokens, passwords) into **`secrets.yaml`** — any inline values in other YAML files will be readable by the AI."
         }
       }
     },
@@ -30,7 +30,7 @@
         },
         "data_description": {
           "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required.",
-          "config_file_access_enabled": "Allow AI assistants to list, read, write, and delete YAML configuration files. Only first-level files are accessible; secrets.yaml is always blocked. Every save is automatically validated against the full Home Assistant configuration. Use the backup_config_files tool before bulk edits — snapshots are stored in mcp_backups/ inside your config directory and can be restored manually if Home Assistant fails to start. Make sure all sensitive values (API keys, tokens, passwords) are stored in secrets.yaml before enabling this — any inline values in other YAML files will be readable by the AI."
+          "config_file_access_enabled": "Allow AI assistants to list, read, write, and delete first-level YAML files in the config directory. **`secrets.yaml`** is always blocked.\n\nEvery save and delete automatically creates a full backup first (stored in `mcp_backups/` in your config directory). Every save also runs a config validation automatically. Backups can be restored manually via the filesystem if Home Assistant fails to start.\n\n**Before enabling:** move all sensitive values (API keys, tokens, passwords) into **`secrets.yaml`** — any inline values in other YAML files will be readable by the AI."
         }
       }
     },

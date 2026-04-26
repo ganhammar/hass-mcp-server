@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -457,6 +457,68 @@ async def list_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) ->
         return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing backups: {e}"}]}
+
+
+@register_tool(
+    name="cleanup_config_backups",
+    description=(
+        "Delete backup snapshots older than a given number of days. "
+        "Defaults to 30 days. Use this to keep the mcp_backups folder from growing indefinitely. "
+        "Returns the number of snapshots deleted and how many remain"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "older_than_days": {
+                "type": "integer",
+                "description": "Delete backups older than this many days (default: 30, minimum: 1)",
+            }
+        },
+    },
+)
+async def cleanup_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Delete backup snapshots older than older_than_days days."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
+
+    older_than_days = arguments.get("older_than_days", 30)
+    if not isinstance(older_than_days, int) or older_than_days < 1:
+        return {
+            "content": [{"type": "text", "text": "Error: older_than_days must be an integer >= 1"}]
+        }
+
+    try:
+        backup_root = _config_dir(hass) / _BACKUP_DIR_NAME
+        if not backup_root.exists():
+            return {"content": [{"type": "text", "text": "No backups found"}]}
+
+        cutoff = datetime.now() - timedelta(days=older_than_days)
+        deleted: list[str] = []
+        kept: list[str] = []
+
+        for d in backup_root.iterdir():
+            if not d.is_dir() or not _BACKUP_TS_RE.match(d.name):
+                continue
+            try:
+                ts = datetime.strptime(d.name, "%Y-%m-%d_%H-%M-%S-%f")
+            except ValueError:
+                continue
+            if ts < cutoff:
+                shutil.rmtree(d)
+                deleted.append(d.name)
+            else:
+                kept.append(d.name)
+
+        if not deleted and not kept:
+            return {"content": [{"type": "text", "text": "No backups found"}]}
+
+        lines = [f"Deleted {len(deleted)} backup(s) older than {older_than_days} day(s)."]
+        if deleted:
+            lines.extend(f"  - {name}" for name in sorted(deleted))
+        lines.append(f"{len(kept)} backup(s) remaining.")
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error cleaning up backups: {e}"}]}
 
 
 @register_tool(

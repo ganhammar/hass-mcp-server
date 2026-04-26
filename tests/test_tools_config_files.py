@@ -8,6 +8,7 @@ from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.tools.config_files import (
     backup_config_files,
     batch_edit_config_files,
+    cleanup_config_backups,
     delete_config_file,
     get_config_file,
     list_config_backups,
@@ -804,3 +805,82 @@ class TestBatchEditConfigFiles:
         result = await batch_edit_config_files(hass, {})
         text = result["content"][0]["text"]
         assert "error" in text.lower()
+
+
+class TestCleanupConfigBackups:
+    def _make_backup(self, backup_root: Path, timestamp: str, filename: str = "automations.yaml"):
+        d = backup_root / timestamp
+        d.mkdir(parents=True)
+        (d / filename).write_text("[]")
+        return d
+
+    async def test_deletes_old_backups(self, tmp_path):
+        backup_root = tmp_path / "mcp_backups"
+        self._make_backup(backup_root, "2026-01-01_10-00-00-000000")
+        self._make_backup(backup_root, "2026-01-02_10-00-00-000000")
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {"older_than_days": 1})
+        text = result["content"][0]["text"]
+        assert "Deleted 2" in text
+        assert "0 backup(s) remaining" in text
+        assert not (backup_root / "2026-01-01_10-00-00-000000").exists()
+
+    async def test_keeps_recent_backups(self, tmp_path):
+        from datetime import timezone
+        backup_root = tmp_path / "mcp_backups"
+        # old backup
+        self._make_backup(backup_root, "2026-01-01_10-00-00-000000")
+        # recent backup using today's date
+        from datetime import date
+        today = date.today().strftime("%Y-%m-%d")
+        self._make_backup(backup_root, f"{today}_10-00-00-000000")
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {"older_than_days": 30})
+        text = result["content"][0]["text"]
+        assert "Deleted 1" in text
+        assert "1 backup(s) remaining" in text
+        assert (backup_root / f"{today}_10-00-00-000000").exists()
+
+    async def test_no_backups_found(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {})
+        assert "No backups found" in result["content"][0]["text"]
+
+    async def test_no_old_backups_to_delete(self, tmp_path):
+        from datetime import date
+        backup_root = tmp_path / "mcp_backups"
+        today = date.today().strftime("%Y-%m-%d")
+        self._make_backup(backup_root, f"{today}_10-00-00-000000")
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {"older_than_days": 30})
+        text = result["content"][0]["text"]
+        assert "Deleted 0" in text
+        assert "1 backup(s) remaining" in text
+
+    async def test_ignores_non_timestamp_dirs(self, tmp_path):
+        backup_root = tmp_path / "mcp_backups"
+        self._make_backup(backup_root, "2026-01-01_10-00-00-000000")
+        (backup_root / "@eaDir").mkdir()
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {"older_than_days": 1})
+        text = result["content"][0]["text"]
+        assert "Deleted 1" in text
+        assert (backup_root / "@eaDir").exists()
+
+    async def test_default_older_than_days_is_30(self, tmp_path):
+        backup_root = tmp_path / "mcp_backups"
+        self._make_backup(backup_root, "2026-01-01_10-00-00-000000")
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {})
+        text = result["content"][0]["text"]
+        assert "Deleted 1" in text
+
+    async def test_rejects_zero_days(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {"older_than_days": 0})
+        assert "error" in result["content"][0]["text"].lower()
+
+    async def test_disabled(self, tmp_path):
+        hass = _make_hass(tmp_path, config_file_access=False)
+        result = await cleanup_config_backups(hass, {})
+        assert "disabled" in result["content"][0]["text"].lower()

@@ -149,6 +149,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `backup_config_files` | Manually snapshot all YAML files into `mcp_backups/<timestamp>/` |
 | `list_config_backups` | List all available backup snapshots, newest first |
 | `restore_config_backup` | Restore files from the latest or a specific backup; runs config validation after restoring |
+| `cleanup_config_backups` | Delete backup snapshots older than N days (default 30); keeps the folder from growing indefinitely |
 
 **Dashboards**
 
@@ -395,7 +396,14 @@ restore_config_backup(timestamp="2026-04-26_14-30-00-123456")
 
 **Restoring a single file:** `restore_config_backup` always restores all files from a snapshot at once — there is no tool to restore a single file. If you only need one file back, either restore the full snapshot and re-apply your other changes, or copy the file manually from `config/mcp_backups/<timestamp>/<filename>` via SSH, Samba, or the File Editor add-on.
 
-**Cleaning up old backups:** Snapshots accumulate with every edit — there is no automatic cleanup and no delete-backup tool. The files are small (YAML only), but the folder will grow over time if you edit frequently. Delete old entries from `config/mcp_backups/` manually via SSH, the Samba share, or the File Editor add-on when you no longer need them.
+**Cleaning up old backups:** Snapshots accumulate with every edit. Use `cleanup_config_backups` to remove old ones:
+
+```
+cleanup_config_backups()                    // delete backups older than 30 days (default)
+cleanup_config_backups(older_than_days=7)   // delete backups older than 7 days
+```
+
+You can also delete entries from `config/mcp_backups/` manually via SSH, the Samba share, or the File Editor add-on.
 </details>
 
 <details>

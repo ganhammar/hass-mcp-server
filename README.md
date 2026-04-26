@@ -11,9 +11,10 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 🔑 **Long-Lived Access Token** authentication (opt-in) for local and custom client setups
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
-- 📝 CRUD management of automations, scenes, scripts, and helper entities
+- 📝 CRUD management of automations, scenes, scripts, and helper entities (input_boolean, counter, timer, schedule, and more)
 - 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards)
 - 🩺 System administration tools (error log, config validation, restart, system status)
+- 📁 YAML config file management — read, write, delete files with automatic backup before every change and built-in config validation (opt-in)
 - 📊 Resources, prompts, and completions for richer AI interactions
 - 🧹 Optimization prompts for auditing automations, naming conventions, and scheduling
 

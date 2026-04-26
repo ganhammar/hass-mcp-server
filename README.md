@@ -392,6 +392,10 @@ restore_config_backup(timestamp="2026-04-26_14-30-00-123456")
 `restore_config_backup` only overwrites files present in the backup — files created after the snapshot are left untouched. A config check runs automatically after restoring.
 
 > **If Home Assistant fails to start** after a bad edit: backup files are always accessible at `config/mcp_backups/<timestamp>/` and can be copied back manually via the filesystem or SSH.
+
+**Restoring a single file:** `restore_config_backup` always restores all files from a snapshot at once — there is no tool to restore a single file. If you only need one file back, either restore the full snapshot and re-apply your other changes, or copy the file manually from `config/mcp_backups/<timestamp>/<filename>` via SSH, Samba, or the File Editor add-on.
+
+**Cleaning up old backups:** Snapshots accumulate with every edit — there is no automatic cleanup and no delete-backup tool. The files are small (YAML only), but the folder will grow over time if you edit frequently. Delete old entries from `config/mcp_backups/` manually via SSH, the Samba share, or the File Editor add-on when you no longer need them.
 </details>
 
 <details>

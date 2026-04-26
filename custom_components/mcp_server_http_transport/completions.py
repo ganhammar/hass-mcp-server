@@ -44,6 +44,9 @@ async def complete(
 
     ref_name = ref.get("name", "")
 
+    if arg_name == "domain" and ref_name == "create_helper":
+        return _complete_helper_domain(arg_value)
+
     if arg_name == "automation_id" and ref_name in (
         "get_automation_config",
         "create_automation",
@@ -207,4 +210,23 @@ _CONFIG_TYPES = ["automation", "scene", "script"]
 def _complete_config_type(prefix: str) -> dict[str, Any]:
     """Complete configuration types."""
     matches = [c for c in _CONFIG_TYPES if c.startswith(prefix)]
+    return {"values": matches, "hasMore": False}
+
+
+_HELPER_DOMAINS = [
+    "counter",
+    "input_boolean",
+    "input_button",
+    "input_datetime",
+    "input_number",
+    "input_select",
+    "input_text",
+    "schedule",
+    "timer",
+]
+
+
+def _complete_helper_domain(prefix: str) -> dict[str, Any]:
+    """Complete helper domain names."""
+    matches = [d for d in _HELPER_DOMAINS if d.startswith(prefix)]
     return {"values": matches, "hasMore": False}

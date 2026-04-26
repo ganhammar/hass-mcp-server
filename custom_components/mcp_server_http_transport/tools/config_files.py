@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 _ALLOWED_SUFFIXES = {".yaml", ".yml"}
 _BLOCKED_NAMES = {"secrets.yaml", "secrets.yml"}
 _BACKUP_DIR_NAME = "mcp_backups"
+_BACKUP_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d+$")
 
 _DISABLED_RESPONSE = {
     "content": [
@@ -439,7 +441,7 @@ async def list_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) ->
             return {"content": [{"type": "text", "text": "No backups found"}]}
 
         backups = sorted(
-            (d for d in backup_root.iterdir() if d.is_dir()),
+            (d for d in backup_root.iterdir() if d.is_dir() and _BACKUP_TS_RE.match(d.name)),
             key=lambda d: d.name,
             reverse=True,
         )
@@ -501,7 +503,8 @@ async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) 
                 }
         else:
             candidates = sorted(
-                (d for d in backup_root.iterdir() if d.is_dir()), key=lambda d: d.name
+                (d for d in backup_root.iterdir() if d.is_dir() and _BACKUP_TS_RE.match(d.name)),
+                key=lambda d: d.name,
             )
             if not candidates:
                 return {"content": [{"type": "text", "text": "No backups found"}]}

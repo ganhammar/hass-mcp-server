@@ -485,6 +485,22 @@ class TestListConfigBackups:
         assert "automations.yaml" in backups[0]["files"]
         assert "scripts.yaml" in backups[0]["files"]
 
+    async def test_list_ignores_non_timestamp_dirs(self, tmp_path):
+        # Synology NAS creates @eaDir metadata folders; they must not appear as backups.
+        backup_root = tmp_path / "mcp_backups"
+        real = backup_root / "2026-01-01_10-00-00-000000"
+        real.mkdir(parents=True)
+        (real / "automations.yaml").write_text("[]")
+        (backup_root / "@eaDir").mkdir()
+        (backup_root / "not-a-timestamp").mkdir()
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_backups(hass, {})
+        backups = json.loads(result["content"][0]["text"])
+
+        assert len(backups) == 1
+        assert backups[0]["timestamp"] == "2026-01-01_10-00-00-000000"
+
     async def test_list_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await list_config_backups(hass, {})

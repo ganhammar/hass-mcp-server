@@ -41,4 +41,12 @@ async def call_tool(hass: HomeAssistant, name: str, arguments: dict[str, Any]) -
 
 
 # Import submodules so tools auto-register via @register_tool
-from . import config, dashboards, entities, helpers, statistics, system, system_admin  # noqa: F401, E402
+from . import (  # noqa: E402
+    config,  # noqa: F401
+    dashboards,  # noqa: F401
+    entities,  # noqa: F401
+    helpers,  # noqa: F401
+    statistics,  # noqa: F401
+    system,  # noqa: F401
+    system_admin,  # noqa: F401
+)

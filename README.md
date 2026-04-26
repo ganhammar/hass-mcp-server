@@ -137,6 +137,15 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `update_helper` | Update an existing UI-managed helper by entity ID |
 | `delete_helper` | Delete a UI-managed helper by entity ID |
 
+**Config Files**
+
+| Tool | Description |
+|------|-------------|
+| `list_config_files` | List all YAML files in the config directory (first level, secrets excluded) |
+| `get_config_file` | Read the contents of a YAML config file (max 1 MB) |
+| `save_config_file` | Write or replace a YAML config file |
+| `delete_config_file` | Delete a YAML config file |
+
 **Dashboards**
 
 | Tool | Description |
@@ -308,6 +317,26 @@ delete_helper(entity_id="counter.motion_events")
 ```
 
 > **Note:** These tools only manage UI-created helpers stored in Home Assistant's `.storage/` files. Helpers defined in YAML configuration are read-only from the perspective of these tools.
+</details>
+
+<details>
+<summary>How do I read or edit YAML configuration files?</summary>
+
+Use `list_config_files` to see all editable YAML files, then `get_config_file` and `save_config_file` to read and modify them:
+
+```
+list_config_files()
+get_config_file(filename="automations.yaml")
+save_config_file(filename="automations.yaml", content="...")
+```
+
+To remove a custom file:
+
+```json
+delete_config_file(filename="my_custom.yaml")
+```
+
+> **Note:** Only first-level `.yaml`/`.yml` files in the config directory are accessible. Subdirectories, `secrets.yaml`, and non-YAML files are blocked. After saving, use `check_config` to validate your changes before restarting.
 </details>
 
 <details>

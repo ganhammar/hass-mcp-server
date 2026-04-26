@@ -27,14 +27,32 @@ HELPER_DOMAINS = frozenset(
 
 
 def _get_collection(hass: HomeAssistant, domain: str):
-    """Return the storage collection for a helper domain, or raise."""
-    collection = hass.data.get(domain)
-    if collection is None or not hasattr(collection, "async_create_item"):
+    """Return the storage collection for a helper domain, or raise.
+
+    HA does not expose helper storage collections directly via hass.data[domain].
+    Instead, they are held inside StorageCollectionWebsocket instances whose
+    handlers are registered in hass.data["websocket_api"].  The list handler
+    is stored unwrapped, so we can reach the collection via its __self__.
+    """
+    ws_handlers = hass.data.get("websocket_api")
+    if ws_handlers is None:
+        raise ValueError("WebSocket API is not loaded")
+
+    entry = ws_handlers.get(f"{domain}/list")
+    if entry is None:
         raise ValueError(
-            f"Helper domain '{domain}' is not available. "
-            "Ensure the domain is loaded and is a UI-managed helper."
+            f"Helper domain '{domain}' is not available or not UI-managed. "
+            "Ensure the integration is loaded in Home Assistant."
         )
-    return collection
+
+    list_handler = entry[0]
+    ws_obj = getattr(list_handler, "__self__", None)
+    if ws_obj is None or not hasattr(ws_obj, "storage_collection"):
+        raise ValueError(
+            f"Cannot access storage collection for '{domain}' " "(unexpected handler structure)"
+        )
+
+    return ws_obj.storage_collection
 
 
 async def _entity_id_to_item_id(hass: HomeAssistant, entity_id: str) -> tuple[str, str]:

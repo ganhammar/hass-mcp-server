@@ -145,6 +145,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `get_config_file` | Read the contents of a YAML config file (max 1 MB) |
 | `save_config_file` | Write or replace a YAML config file; auto-backs up all files first, then validates config |
 | `delete_config_file` | Delete a YAML config file; auto-backs up all files first |
+| `batch_edit_config_files` | Write and/or delete multiple YAML files in one call; one backup and one config check for the whole batch |
 | `backup_config_files` | Manually snapshot all YAML files into `mcp_backups/<timestamp>/` |
 | `list_config_backups` | List all available backup snapshots, newest first |
 | `restore_config_backup` | Restore files from the latest or a specific backup; runs config validation after restoring |
@@ -337,9 +338,23 @@ save_config_file(filename="automations.yaml", content="...")
 
 To remove a custom file:
 
-```json
+```
 delete_config_file(filename="my_custom.yaml")
 ```
+
+When editing multiple files in one session use `batch_edit_config_files` instead — it creates one backup snapshot before all changes and runs one config check at the end:
+
+```
+batch_edit_config_files(
+    saves=[
+        {"filename": "templates.yaml", "content": "..."},
+        {"filename": "sensors.yaml",   "content": "..."},
+    ],
+    deletes=["binary_sensor.yaml", "scenes.yaml"],
+)
+```
+
+Both `saves` and `deletes` are optional — you can use either or both in the same call.
 
 > **Note:** Only first-level `.yaml`/`.yml` files in the config directory are accessible. Subdirectories, `secrets.yaml`, and non-YAML files are blocked.
 </details>
@@ -347,7 +362,7 @@ delete_config_file(filename="my_custom.yaml")
 <details>
 <summary>How does the automatic backup work?</summary>
 
-Every call to `save_config_file` and `delete_config_file` automatically creates a full snapshot of all first-level YAML files (excluding `secrets.yaml`) before making any change. Snapshots are stored in:
+Every call to `save_config_file` and `delete_config_file` automatically creates a full snapshot of all first-level YAML files (excluding `secrets.yaml`) before making any change. When using `batch_edit_config_files`, only one backup is created for the entire batch — regardless of how many files are saved or deleted. Snapshots are stored in:
 
 ```
 config/mcp_backups/2026-04-26_14-30-00-123456/

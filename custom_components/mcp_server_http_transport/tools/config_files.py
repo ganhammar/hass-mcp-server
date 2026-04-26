@@ -1,4 +1,4 @@
-"""Config file access tools (list, read, write, delete YAML files in config dir)."""
+"""Config file access tools (list, read, write, delete, backup, restore YAML files)."""
 
 import json
 import logging
@@ -17,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _ALLOWED_SUFFIXES = {".yaml", ".yml"}
 _BLOCKED_NAMES = {"secrets.yaml", "secrets.yml"}
+_BACKUP_DIR_NAME = "mcp_backups"
 
 _DISABLED_RESPONSE = {
     "content": [
@@ -56,6 +57,26 @@ def _resolve_safe(hass: HomeAssistant, filename: str) -> Path:
     return path
 
 
+def _yaml_files_in(directory: Path) -> list[Path]:
+    """Return sorted first-level YAML files excluding secrets."""
+    return sorted(
+        entry
+        for entry in directory.iterdir()
+        if entry.is_file()
+        and entry.suffix.lower() in _ALLOWED_SUFFIXES
+        and entry.name.lower() not in _BLOCKED_NAMES
+    )
+
+
+async def _run_config_check(hass: HomeAssistant) -> dict[str, Any]:
+    """Run HA config validation and return a result dict."""
+    from homeassistant.helpers.check_config import async_check_ha_config_file
+
+    res = await async_check_ha_config_file(hass)
+    errors = [str(err) for err in res.errors] if res.errors else []
+    return {"valid": len(errors) == 0, "errors": errors}
+
+
 @register_tool(
     name="list_config_files",
     description=(
@@ -70,13 +91,7 @@ async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return _DISABLED_RESPONSE
     config_dir = _config_dir(hass)
     try:
-        files = sorted(
-            entry.name
-            for entry in config_dir.iterdir()
-            if entry.is_file()
-            and entry.suffix.lower() in _ALLOWED_SUFFIXES
-            and entry.name.lower() not in _BLOCKED_NAMES
-        )
+        files = [f.name for f in _yaml_files_in(config_dir)]
         return {"content": [{"type": "text", "text": json.dumps(files, indent=2)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing config files: {e}"}]}
@@ -135,7 +150,8 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
     description=(
         "Write or replace a YAML configuration file in the Home Assistant config directory. "
         "First-level files only; secrets.yaml is blocked. "
-        "Creates the file if it does not exist"
+        "Creates the file if it does not exist. "
+        "Automatically runs a config check after saving unless run_check is set to false"
     ),
     input_schema={
         "type": "object",
@@ -148,20 +164,39 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
                 "type": "string",
                 "description": "Full YAML content to write",
             },
+            "run_check": {
+                "type": "boolean",
+                "description": (
+                    "Run Home Assistant config validation after saving (default: true). "
+                    "Reports errors without undoing the save"
+                ),
+            },
         },
         "required": ["filename", "content"],
     },
 )
 async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Write a YAML config file, creating it if necessary."""
+    """Write a YAML config file, then optionally validate the full HA config."""
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
         path.write_text(arguments["content"], encoding="utf-8")
-        return {
-            "content": [{"type": "text", "text": f"Successfully saved '{arguments['filename']}'"}]
-        }
+        lines = [f"Successfully saved '{arguments['filename']}'"]
+
+        if arguments.get("run_check", True):
+            try:
+                check = await _run_config_check(hass)
+                if check["valid"]:
+                    lines.append("Config check: OK")
+                else:
+                    lines.append("Config check: ERRORS FOUND")
+                    for err in check["errors"]:
+                        lines.append(f"  - {err}")
+            except Exception as check_err:
+                lines.append(f"Config check failed to run: {check_err}")
+
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error saving config file: {e}"}]}
 
@@ -203,9 +238,6 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         return {"content": [{"type": "text", "text": f"Error deleting config file: {e}"}]}
 
 
-_BACKUP_DIR_NAME = "mcp_backups"
-
-
 @register_tool(
     name="backup_config_files",
     description=(
@@ -222,14 +254,7 @@ async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) ->
         return _DISABLED_RESPONSE
     try:
         config_dir = _config_dir(hass)
-
-        files_to_back_up = sorted(
-            entry
-            for entry in config_dir.iterdir()
-            if entry.is_file()
-            and entry.suffix.lower() in _ALLOWED_SUFFIXES
-            and entry.name.lower() not in _BLOCKED_NAMES
-        )
+        files_to_back_up = _yaml_files_in(config_dir)
 
         if not files_to_back_up:
             return {"content": [{"type": "text", "text": "No YAML files found to back up"}]}
@@ -257,3 +282,124 @@ async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) ->
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error creating backup: {e}"}]}
+
+
+@register_tool(
+    name="list_config_backups",
+    description=(
+        "List all available config file backups created by backup_config_files, "
+        "newest first. Shows the timestamp and number of files in each backup"
+    ),
+    input_schema={"type": "object", "properties": {}},
+)
+async def list_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """List available backup snapshots, newest first."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
+    try:
+        backup_root = _config_dir(hass) / _BACKUP_DIR_NAME
+        if not backup_root.exists():
+            return {"content": [{"type": "text", "text": "No backups found"}]}
+
+        backups = sorted(
+            (d for d in backup_root.iterdir() if d.is_dir()),
+            key=lambda d: d.name,
+            reverse=True,
+        )
+
+        if not backups:
+            return {"content": [{"type": "text", "text": "No backups found"}]}
+
+        result = []
+        for backup_dir in backups:
+            files = [f.name for f in backup_dir.iterdir() if f.is_file()]
+            result.append({"timestamp": backup_dir.name, "files": sorted(files)})
+
+        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error listing backups: {e}"}]}
+
+
+@register_tool(
+    name="restore_config_backup",
+    description=(
+        "Restore YAML config files from a backup snapshot. "
+        "Restores the latest backup by default, or a specific one by timestamp. "
+        "Only files present in the backup are overwritten; "
+        "files added after the backup are left untouched. "
+        "Automatically runs a config check after restoring"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "timestamp": {
+                "type": "string",
+                "description": (
+                    "Backup timestamp to restore (as shown by list_config_backups). "
+                    "Omit to restore the latest backup"
+                ),
+            }
+        },
+    },
+)
+async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Restore files from a backup snapshot into the config directory."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
+    try:
+        backup_root = _config_dir(hass) / _BACKUP_DIR_NAME
+        if not backup_root.exists():
+            return {"content": [{"type": "text", "text": "No backups found"}]}
+
+        if "timestamp" in arguments:
+            backup_dir = backup_root / arguments["timestamp"]
+            if not backup_dir.is_dir():
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Backup '{arguments['timestamp']}' not found",
+                        }
+                    ]
+                }
+        else:
+            candidates = sorted(
+                (d for d in backup_root.iterdir() if d.is_dir()), key=lambda d: d.name
+            )
+            if not candidates:
+                return {"content": [{"type": "text", "text": "No backups found"}]}
+            backup_dir = candidates[-1]
+
+        config_dir = _config_dir(hass)
+        restored = []
+        for src in sorted(backup_dir.iterdir()):
+            if src.is_file() and src.suffix.lower() in _ALLOWED_SUFFIXES:
+                shutil.copy2(src, config_dir / src.name)
+                restored.append(src.name)
+
+        if not restored:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Backup '{backup_dir.name}' contained no YAML files"}
+                ]
+            }
+
+        lines = [
+            f"Restored {len(restored)} files from backup '{backup_dir.name}':",
+            *[f"  - {f}" for f in restored],
+        ]
+
+        try:
+            check = await _run_config_check(hass)
+            if check["valid"]:
+                lines.append("Config check: OK")
+            else:
+                lines.append("Config check: ERRORS FOUND")
+                for err in check["errors"]:
+                    lines.append(f"  - {err}")
+        except Exception as check_err:
+            lines.append(f"Config check failed to run: {check_err}")
+
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error restoring backup: {e}"}]}

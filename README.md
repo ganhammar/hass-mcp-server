@@ -92,17 +92,25 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 
 ### Tools
 
+**Entities & State**
+
 | Tool | Description |
 |------|-------------|
 | `get_state` | Get the current state of any entity (optional `fields` to limit attributes) |
-| `call_service` | Call any Home Assistant service |
+| `batch_get_state` | Get state for multiple entities in one call (max 50) |
 | `list_entities` | List all entities, with optional `domain`, `detailed`, and `fields` parameters |
-| `get_config` | Get Home Assistant configuration (version, location, units, timezone) |
-| `list_areas` | List all areas |
-| `list_devices` | List devices, optionally filtered by area |
-| `list_services` | List available services, optionally filtered by domain |
-| `render_template` | Evaluate a Jinja2 template |
+| `search_entities` | Search entities by friendly name, device class, domain, or area |
+| `call_service` | Call any Home Assistant service |
+| `fire_event` | Fire a custom event on the Home Assistant event bus |
 | `get_history` | Get state history of an entity over a time range |
+| `get_logbook` | Fetch logbook entries for an entity or time range |
+| `get_statistics` | Fetch long-term statistics (energy, climate) with configurable period |
+| `render_template` | Evaluate a Jinja2 template |
+
+**Automations, Scenes & Scripts**
+
+| Tool | Description |
+|------|-------------|
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
 | `create_automation` | Create a new automation |
@@ -118,6 +126,21 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `create_script` | Create a new script |
 | `update_script` | Update an existing script |
 | `delete_script` | Delete a script |
+
+**Helpers**
+
+| Tool | Description |
+|------|-------------|
+| `list_helpers` | List all helper entities, optionally filtered by domain |
+| `get_helper_config` | Get the raw stored configuration of a UI-managed helper |
+| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule) |
+| `update_helper` | Update an existing UI-managed helper by entity ID |
+| `delete_helper` | Delete a UI-managed helper by entity ID |
+
+**Dashboards**
+
+| Tool | Description |
+|------|-------------|
 | `list_dashboards` | List all Lovelace dashboards with metadata |
 | `get_dashboard_config` | Get full dashboard configuration (views/cards) |
 | `save_dashboard_config` | Save (replace) full dashboard configuration |
@@ -125,23 +148,22 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `create_dashboard` | Create a new Lovelace dashboard (experimental) |
 | `update_dashboard` | Update dashboard metadata (experimental) |
 | `delete_dashboard` | Delete a dashboard and its config (experimental) |
-| `search_entities` | Search entities by friendly name, device class, domain, or area |
-| `fire_event` | Fire a custom event on the Home Assistant event bus |
-| `get_logbook` | Fetch logbook entries for an entity or time range |
-| `get_error_log` | Fetch the Home Assistant error log (last N lines) |
-| `restart_ha` | Restart Home Assistant (requires explicit confirmation) |
+
+**System & Infrastructure**
+
+| Tool | Description |
+|------|-------------|
+| `get_config` | Get Home Assistant configuration (version, location, units, timezone) |
 | `get_system_status` | System overview: version, domain counts, entity totals, problem entities |
 | `get_domain_stats` | Aggregate stats for a single domain (count, state breakdown, examples) |
 | `check_config` | Validate Home Assistant configuration without restarting |
-| `get_statistics` | Fetch long-term statistics (energy, climate) with configurable period |
+| `restart_ha` | Restart Home Assistant (requires explicit confirmation) |
+| `get_error_log` | Fetch the Home Assistant error log (last N lines) |
+| `list_areas` | List all areas |
+| `list_devices` | List devices, optionally filtered by area |
+| `list_services` | List available services, optionally filtered by domain |
 | `list_integrations` | List installed integrations and their status |
 | `list_labels` | List all labels for cross-domain grouping |
-| `batch_get_state` | Get state for multiple entities in one call (max 50) |
-| `list_helpers` | List all helper entities, optionally filtered by domain |
-| `get_helper_config` | Get the raw stored configuration of a UI-managed helper |
-| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule) |
-| `update_helper` | Update an existing UI-managed helper by entity ID |
-| `delete_helper` | Delete a UI-managed helper by entity ID |
 
 ### Resources
 

@@ -806,6 +806,46 @@ class TestBatchEditConfigFiles:
         text = result["content"][0]["text"]
         assert "error" in text.lower()
 
+    async def test_delete_invalid_filename_returns_error(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await batch_edit_config_files(hass, {"deletes": ["secrets.yaml"]})
+        assert "Error in deletes" in result["content"][0]["text"]
+
+    async def test_save_write_failure_reports_error(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup(), _mock_check_config(), patch(
+            "pathlib.Path.write_text", side_effect=OSError("disk full")
+        ):
+            result = await batch_edit_config_files(
+                hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
+            )
+        text = result["content"][0]["text"]
+        assert "Errors:" in text
+        assert "disk full" in text
+
+    async def test_delete_unlink_failure_reports_error(self, tmp_path):
+        (tmp_path / "x.yaml").write_text("x: 1")
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup(), _mock_check_config(), patch(
+            "pathlib.Path.unlink", side_effect=OSError("permission denied")
+        ):
+            result = await batch_edit_config_files(hass, {"deletes": ["x.yaml"]})
+        text = result["content"][0]["text"]
+        assert "Errors:" in text
+        assert "permission denied" in text
+
+    async def test_config_check_exception_reported(self, tmp_path):
+        from unittest.mock import AsyncMock
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup(), patch(
+            "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+            new=AsyncMock(side_effect=Exception("check exploded")),
+        ):
+            result = await batch_edit_config_files(
+                hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
+            )
+        assert "check exploded" in result["content"][0]["text"]
+
 
 class TestCleanupConfigBackups:
     def _make_backup(self, backup_root: Path, timestamp: str, filename: str = "automations.yaml"):
@@ -879,6 +919,31 @@ class TestCleanupConfigBackups:
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {"older_than_days": 0})
         assert "error" in result["content"][0]["text"].lower()
+
+    async def test_skips_dir_matching_regex_but_invalid_date(self, tmp_path):
+        # Regex matches but strptime fails (e.g. month 13) — must be skipped silently.
+        backup_root = tmp_path / "mcp_backups"
+        self._make_backup(backup_root, "2026-01-01_10-00-00-000000")
+        (backup_root / "2026-13-99_99-99-99-000000").mkdir()
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {"older_than_days": 1})
+        text = result["content"][0]["text"]
+        assert "Deleted 1" in text
+
+    async def test_no_valid_dirs_in_existing_backup_root(self, tmp_path):
+        backup_root = tmp_path / "mcp_backups"
+        backup_root.mkdir()
+        (backup_root / "@eaDir").mkdir()
+        hass = _make_hass(tmp_path)
+        result = await cleanup_config_backups(hass, {})
+        assert "No backups found" in result["content"][0]["text"]
+
+    async def test_handles_os_error(self, tmp_path):
+        (tmp_path / "mcp_backups").mkdir()
+        hass = _make_hass(tmp_path)
+        with patch.object(Path, "iterdir", side_effect=OSError("permission denied")):
+            result = await cleanup_config_backups(hass, {})
+        assert "Error cleaning up backups" in result["content"][0]["text"]
 
     async def test_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)

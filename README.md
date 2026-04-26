@@ -143,9 +143,9 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 |------|-------------|
 | `list_config_files` | List all YAML files in the config directory (first level, secrets excluded) |
 | `get_config_file` | Read the contents of a YAML config file (max 1 MB) |
-| `save_config_file` | Write or replace a YAML config file; runs config validation automatically after saving |
-| `delete_config_file` | Delete a YAML config file |
-| `backup_config_files` | Snapshot all YAML files into `mcp_backups/<timestamp>/` before bulk edits |
+| `save_config_file` | Write or replace a YAML config file; auto-backs up all files first, then validates config |
+| `delete_config_file` | Delete a YAML config file; auto-backs up all files first |
+| `backup_config_files` | Manually snapshot all YAML files into `mcp_backups/<timestamp>/` |
 | `list_config_backups` | List all available backup snapshots, newest first |
 | `restore_config_backup` | Restore files from the latest or a specific backup; runs config validation after restoring |
 
@@ -345,18 +345,20 @@ delete_config_file(filename="my_custom.yaml")
 </details>
 
 <details>
-<summary>How do I back up and restore config files before bulk edits?</summary>
+<summary>How does the automatic backup work?</summary>
 
-Before letting an AI refactor or restructure your YAML files, create a snapshot:
-
-```
-backup_config_files()
-```
-
-This copies all first-level YAML files (excluding `secrets.yaml`) into a timestamped folder:
+Every call to `save_config_file` and `delete_config_file` automatically creates a full snapshot of all first-level YAML files (excluding `secrets.yaml`) before making any change. Snapshots are stored in:
 
 ```
 config/mcp_backups/2026-04-26_14-30-00-123456/
+```
+
+The backup path is included in the tool response so you always know where to look. You never need to remember to back up manually before an edit — it happens every time.
+
+To create an additional manual snapshot before a larger operation:
+
+```
+backup_config_files()
 ```
 
 To see all available snapshots:
@@ -372,9 +374,9 @@ restore_config_backup()
 restore_config_backup(timestamp="2026-04-26_14-30-00-123456")
 ```
 
-`restore_config_backup` only overwrites files that exist in the backup — files created after the snapshot are left untouched. A config check runs automatically after restoring.
+`restore_config_backup` only overwrites files present in the backup — files created after the snapshot are left untouched. A config check runs automatically after restoring.
 
-> **If Home Assistant fails to start** after a bad edit: the backup files are always accessible directly at `config/mcp_backups/<timestamp>/` and can be copied back manually via the filesystem or SSH.
+> **If Home Assistant fails to start** after a bad edit: backup files are always accessible at `config/mcp_backups/<timestamp>/` and can be copied back manually via the filesystem or SSH.
 </details>
 
 <details>

@@ -194,7 +194,6 @@ class TestGetConfigFile:
 
 
 def _mock_check_config(valid: bool = True, errors: list[str] | None = None):
-    """Return an async mock for _run_config_check."""
     from unittest.mock import AsyncMock
 
     result = {"valid": valid, "errors": errors or []}
@@ -204,10 +203,17 @@ def _mock_check_config(valid: bool = True, errors: list[str] | None = None):
     )
 
 
+def _mock_create_backup(path: str = "mcp_backups/2026-01-01_10-00-00-000000"):
+    return patch(
+        "custom_components.mcp_server_http_transport.tools.config_files._create_backup",
+        return_value=path,
+    )
+
+
 class TestSaveConfigFile:
     async def test_write_new_file(self, tmp_path):
         hass = _make_hass(tmp_path)
-        with _mock_check_config():
+        with _mock_create_backup(), _mock_check_config():
             result = await save_config_file(
                 hass, {"filename": "new.yaml", "content": "key: value\n"}
             )
@@ -215,24 +221,39 @@ class TestSaveConfigFile:
         assert "Successfully saved" in result["content"][0]["text"]
         assert (tmp_path / "new.yaml").read_text() == "key: value\n"
 
+    async def test_backup_created_automatically(self, tmp_path):
+        (tmp_path / "automations.yaml").write_text("original")
+        hass = _make_hass(tmp_path)
+        with _mock_check_config():
+            result = await save_config_file(
+                hass, {"filename": "automations.yaml", "content": "updated"}
+            )
+        text = result["content"][0]["text"]
+        assert "Backup:" in text
+        assert "mcp_backups/" in text
+        assert (tmp_path / "automations.yaml").read_text() == "updated"
+
     async def test_overwrite_existing_file(self, tmp_path):
         (tmp_path / "automations.yaml").write_text("old content")
         hass = _make_hass(tmp_path)
 
-        with _mock_check_config():
+        with _mock_create_backup(), _mock_check_config():
             await save_config_file(hass, {"filename": "automations.yaml", "content": "new content"})
 
         assert (tmp_path / "automations.yaml").read_text() == "new content"
 
     async def test_config_check_ok_reported(self, tmp_path):
         hass = _make_hass(tmp_path)
-        with _mock_check_config(valid=True):
+        with _mock_create_backup(), _mock_check_config(valid=True):
             result = await save_config_file(hass, {"filename": "test.yaml", "content": "x: 1"})
         assert "Config check: OK" in result["content"][0]["text"]
 
     async def test_config_check_errors_reported(self, tmp_path):
         hass = _make_hass(tmp_path)
-        with _mock_check_config(valid=False, errors=["Invalid entity: light.missing"]):
+        with (
+            _mock_create_backup(),
+            _mock_check_config(valid=False, errors=["Invalid entity: light.missing"]),
+        ):
             result = await save_config_file(hass, {"filename": "test.yaml", "content": "x: 1"})
         text = result["content"][0]["text"]
         assert "Config check: ERRORS FOUND" in text
@@ -240,7 +261,7 @@ class TestSaveConfigFile:
 
     async def test_config_check_skipped_when_run_check_false(self, tmp_path):
         hass = _make_hass(tmp_path)
-        with _mock_check_config() as mock_check:
+        with _mock_create_backup(), _mock_check_config() as mock_check:
             result = await save_config_file(
                 hass, {"filename": "test.yaml", "content": "x: 1", "run_check": False}
             )
@@ -249,9 +270,12 @@ class TestSaveConfigFile:
 
     async def test_config_check_failure_doesnt_hide_save_success(self, tmp_path):
         hass = _make_hass(tmp_path)
-        with patch(
-            "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
-            side_effect=Exception("check unavailable"),
+        with (
+            _mock_create_backup(),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+                side_effect=Exception("check unavailable"),
+            ),
         ):
             result = await save_config_file(hass, {"filename": "test.yaml", "content": "x: 1"})
         text = result["content"][0]["text"]
@@ -285,10 +309,22 @@ class TestDeleteConfigFile:
         (tmp_path / "custom.yaml").write_text("x: 1")
         hass = _make_hass(tmp_path)
 
-        result = await delete_config_file(hass, {"filename": "custom.yaml"})
+        with _mock_create_backup():
+            result = await delete_config_file(hass, {"filename": "custom.yaml"})
 
         assert "Successfully deleted" in result["content"][0]["text"]
         assert not (tmp_path / "custom.yaml").exists()
+
+    async def test_backup_created_automatically_before_delete(self, tmp_path):
+        (tmp_path / "custom.yaml").write_text("x: 1")
+        hass = _make_hass(tmp_path)
+
+        result = await delete_config_file(hass, {"filename": "custom.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "Successfully deleted" in text
+        assert "Backup:" in text
+        assert "mcp_backups/" in text
 
     async def test_delete_nonexistent_file(self, tmp_path):
         hass = _make_hass(tmp_path)

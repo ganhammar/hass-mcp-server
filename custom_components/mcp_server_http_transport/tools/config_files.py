@@ -77,6 +77,20 @@ async def _run_config_check(hass: HomeAssistant) -> dict[str, Any]:
     return {"valid": len(errors) == 0, "errors": errors}
 
 
+def _create_backup(hass: HomeAssistant) -> str | None:
+    """Snapshot all first-level YAML files into mcp_backups/; return relative path or None."""
+    config_dir = _config_dir(hass)
+    files = _yaml_files_in(config_dir)
+    if not files:
+        return None
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+    backup_dir = config_dir / _BACKUP_DIR_NAME / timestamp
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for src in files:
+        shutil.copy2(src, backup_dir / src.name)
+    return f"{_BACKUP_DIR_NAME}/{timestamp}"
+
+
 @register_tool(
     name="list_config_files",
     description=(
@@ -151,7 +165,7 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         "Write or replace a YAML configuration file in the Home Assistant config directory. "
         "First-level files only; secrets.yaml is blocked. "
         "Creates the file if it does not exist. "
-        "Automatically runs a config check after saving unless run_check is set to false"
+        "Automatically backs up all YAML files before writing and runs a config check after"
     ),
     input_schema={
         "type": "object",
@@ -176,13 +190,16 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
     },
 )
 async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Write a YAML config file, then optionally validate the full HA config."""
+    """Back up all YAML files, write the new content, then optionally validate."""
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
+        backup_path = _create_backup(hass)
         path.write_text(arguments["content"], encoding="utf-8")
         lines = [f"Successfully saved '{arguments['filename']}'"]
+        if backup_path:
+            lines.append(f"Backup: {backup_path}")
 
         if arguments.get("run_check", True):
             try:
@@ -205,7 +222,8 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     name="delete_config_file",
     description=(
         "Delete a YAML configuration file from the Home Assistant config directory. "
-        "First-level files only; secrets.yaml is blocked"
+        "First-level files only; secrets.yaml is blocked. "
+        "Automatically backs up all YAML files before deleting"
     ),
     input_schema={
         "type": "object",
@@ -219,7 +237,7 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     },
 )
 async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Delete a YAML config file."""
+    """Back up all YAML files, then delete the target file."""
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
@@ -230,10 +248,12 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
                     {"type": "text", "text": f"File '{arguments['filename']}' does not exist"}
                 ]
             }
+        backup_path = _create_backup(hass)
         path.unlink()
-        return {
-            "content": [{"type": "text", "text": f"Successfully deleted '{arguments['filename']}'"}]
-        }
+        lines = [f"Successfully deleted '{arguments['filename']}'"]
+        if backup_path:
+            lines.append(f"Backup: {backup_path}")
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error deleting config file: {e}"}]}
 
@@ -253,28 +273,17 @@ async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) ->
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
-        config_dir = _config_dir(hass)
-        files_to_back_up = _yaml_files_in(config_dir)
-
-        if not files_to_back_up:
+        backup_path = _create_backup(hass)
+        if backup_path is None:
             return {"content": [{"type": "text", "text": "No YAML files found to back up"}]}
-
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-        backup_dir = config_dir / _BACKUP_DIR_NAME / timestamp
-        backup_dir.mkdir(parents=True, exist_ok=True)
-
-        backed_up = []
-        for entry in files_to_back_up:
-            shutil.copy2(entry, backup_dir / entry.name)
-            backed_up.append(entry.name)
-
-        relative_path = f"{_BACKUP_DIR_NAME}/{timestamp}"
+        backup_dir = _config_dir(hass) / backup_path
+        backed_up = sorted(f.name for f in backup_dir.iterdir() if f.is_file())
         return {
             "content": [
                 {
                     "type": "text",
                     "text": (
-                        f"Backup created at '{relative_path}' "
+                        f"Backup created at '{backup_path}' "
                         f"({len(backed_up)} files):\n" + "\n".join(f"  - {f}" for f in backed_up)
                     ),
                 }

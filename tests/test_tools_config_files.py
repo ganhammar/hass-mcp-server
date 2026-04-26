@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.tools.config_files import (
+    backup_config_files,
     delete_config_file,
     get_config_file,
     list_config_files,
@@ -43,6 +44,11 @@ class TestDisabledByDefault:
         result = await delete_config_file(hass, {"filename": "custom.yaml"})
         assert "disabled" in result["content"][0]["text"].lower()
         assert (tmp_path / "custom.yaml").exists()
+
+    async def test_backup_disabled(self, tmp_path):
+        hass = _make_hass(tmp_path, config_file_access=False)
+        result = await backup_config_files(hass, {})
+        assert "disabled" in result["content"][0]["text"].lower()
 
 
 class TestListConfigFiles:
@@ -262,3 +268,89 @@ class TestDeleteConfigFile:
         hass = _make_hass(tmp_path)
         result = await delete_config_file(hass, {"filename": "subdir/file.yaml"})
         assert "Subdirectories are not allowed" in result["content"][0]["text"]
+
+
+class TestBackupConfigFiles:
+    async def test_backup_creates_timestamped_folder(self, tmp_path):
+        (tmp_path / "automations.yaml").write_text("[]")
+        (tmp_path / "scripts.yaml").write_text("{}")
+        hass = _make_hass(tmp_path)
+
+        result = await backup_config_files(hass, {})
+        text = result["content"][0]["text"]
+
+        assert "mcp_backups/" in text
+        backup_dirs = list((tmp_path / "mcp_backups").iterdir())
+        assert len(backup_dirs) == 1
+        assert (backup_dirs[0] / "automations.yaml").exists()
+        assert (backup_dirs[0] / "scripts.yaml").exists()
+
+    async def test_backup_excludes_secrets(self, tmp_path):
+        (tmp_path / "configuration.yaml").write_text("homeassistant:")
+        (tmp_path / "secrets.yaml").write_text("token: abc")
+        hass = _make_hass(tmp_path)
+
+        await backup_config_files(hass, {})
+        backup_dir = next((tmp_path / "mcp_backups").iterdir())
+
+        assert (backup_dir / "configuration.yaml").exists()
+        assert not (backup_dir / "secrets.yaml").exists()
+
+    async def test_backup_excludes_non_yaml(self, tmp_path):
+        (tmp_path / "automations.yaml").write_text("[]")
+        (tmp_path / "readme.txt").write_text("ignored")
+        hass = _make_hass(tmp_path)
+
+        await backup_config_files(hass, {})
+        backup_dir = next((tmp_path / "mcp_backups").iterdir())
+
+        assert not (backup_dir / "readme.txt").exists()
+
+    async def test_backup_excludes_mcp_backups_folder(self, tmp_path):
+        (tmp_path / "automations.yaml").write_text("[]")
+        (tmp_path / "mcp_backups").mkdir()
+        hass = _make_hass(tmp_path)
+
+        await backup_config_files(hass, {})
+        backup_dir = next((tmp_path / "mcp_backups").iterdir())
+
+        assert not (backup_dir / "mcp_backups").exists()
+
+    async def test_backup_reports_file_count(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("")
+        (tmp_path / "b.yaml").write_text("")
+        (tmp_path / "c.yml").write_text("")
+        hass = _make_hass(tmp_path)
+
+        result = await backup_config_files(hass, {})
+        text = result["content"][0]["text"]
+
+        assert "3 files" in text
+        assert "a.yaml" in text
+        assert "b.yaml" in text
+        assert "c.yml" in text
+
+    async def test_backup_empty_dir_no_folder_created(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await backup_config_files(hass, {})
+        assert "No YAML files" in result["content"][0]["text"]
+        assert not (tmp_path / "mcp_backups").exists()
+
+    async def test_multiple_backups_create_separate_folders(self, tmp_path):
+        (tmp_path / "automations.yaml").write_text("[]")
+        hass = _make_hass(tmp_path)
+
+        await backup_config_files(hass, {})
+        await backup_config_files(hass, {})
+
+        backup_dirs = list((tmp_path / "mcp_backups").iterdir())
+        assert len(backup_dirs) == 2
+
+    async def test_backup_handles_os_error(self, tmp_path):
+        (tmp_path / "automations.yaml").write_text("[]")
+        hass = _make_hass(tmp_path)
+
+        with patch("shutil.copy2", side_effect=OSError("disk full")):
+            result = await backup_config_files(hass, {})
+
+        assert "Error creating backup" in result["content"][0]["text"]

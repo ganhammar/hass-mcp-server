@@ -3,6 +3,8 @@
 import json
 import logging
 import os
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -199,3 +201,59 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error deleting config file: {e}"}]}
+
+
+_BACKUP_DIR_NAME = "mcp_backups"
+
+
+@register_tool(
+    name="backup_config_files",
+    description=(
+        "Create a timestamped backup of all first-level YAML configuration files "
+        "into a 'mcp_backups/<timestamp>' subfolder inside the config directory. "
+        "secrets.yaml is never included. "
+        "Call this before bulk edits to preserve a rollback snapshot"
+    ),
+    input_schema={"type": "object", "properties": {}},
+)
+async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Copy all first-level YAML files (except secrets) into a timestamped backup folder."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
+    try:
+        config_dir = _config_dir(hass)
+
+        files_to_back_up = sorted(
+            entry
+            for entry in config_dir.iterdir()
+            if entry.is_file()
+            and entry.suffix.lower() in _ALLOWED_SUFFIXES
+            and entry.name.lower() not in _BLOCKED_NAMES
+        )
+
+        if not files_to_back_up:
+            return {"content": [{"type": "text", "text": "No YAML files found to back up"}]}
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+        backup_dir = config_dir / _BACKUP_DIR_NAME / timestamp
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        backed_up = []
+        for entry in files_to_back_up:
+            shutil.copy2(entry, backup_dir / entry.name)
+            backed_up.append(entry.name)
+
+        relative_path = f"{_BACKUP_DIR_NAME}/{timestamp}"
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"Backup created at '{relative_path}' "
+                        f"({len(backed_up)} files):\n" + "\n".join(f"  - {f}" for f in backed_up)
+                    ),
+                }
+            ]
+        }
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error creating backup: {e}"}]}

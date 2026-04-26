@@ -8,12 +8,30 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ..const import DOMAIN
 from . import register_tool
 
 _LOGGER = logging.getLogger(__name__)
 
 _ALLOWED_SUFFIXES = {".yaml", ".yml"}
 _BLOCKED_NAMES = {"secrets.yaml", "secrets.yml"}
+
+_DISABLED_RESPONSE = {
+    "content": [
+        {
+            "type": "text",
+            "text": (
+                "Config file access is disabled. Enable it in the MCP Server integration "
+                "settings: Settings → Devices & Services → MCP Server → Configure → "
+                "Enable config file access."
+            ),
+        }
+    ]
+}
+
+
+def _is_enabled(hass: HomeAssistant) -> bool:
+    return hass.data.get(DOMAIN, {}).get("config_file_access", False)
 
 
 def _config_dir(hass: HomeAssistant) -> Path:
@@ -46,6 +64,8 @@ def _resolve_safe(hass: HomeAssistant, filename: str) -> Path:
 )
 async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List first-level YAML files in the config directory."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
     config_dir = _config_dir(hass)
     try:
         files = sorted(
@@ -79,6 +99,8 @@ async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> d
 )
 async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read a YAML config file."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
         if not path.exists():
@@ -130,6 +152,8 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
 )
 async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Write a YAML config file, creating it if necessary."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
         path.write_text(arguments["content"], encoding="utf-8")
@@ -159,6 +183,8 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
 )
 async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete a YAML config file."""
+    if not _is_enabled(hass):
+        return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
         if not path.exists():

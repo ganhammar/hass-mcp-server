@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.tools.config_files import (
     delete_config_file,
     get_config_file,
@@ -12,10 +13,36 @@ from custom_components.mcp_server_http_transport.tools.config_files import (
 )
 
 
-def _make_hass(config_dir: Path) -> Mock:
+def _make_hass(config_dir: Path, *, config_file_access: bool = True) -> Mock:
     hass = Mock()
     hass.config.config_dir = str(config_dir)
+    hass.data = {DOMAIN: {"config_file_access": config_file_access}}
     return hass
+
+
+class TestDisabledByDefault:
+    async def test_list_disabled(self, tmp_path):
+        hass = _make_hass(tmp_path, config_file_access=False)
+        result = await list_config_files(hass, {})
+        assert "disabled" in result["content"][0]["text"].lower()
+
+    async def test_get_disabled(self, tmp_path):
+        hass = _make_hass(tmp_path, config_file_access=False)
+        result = await get_config_file(hass, {"filename": "automations.yaml"})
+        assert "disabled" in result["content"][0]["text"].lower()
+
+    async def test_save_disabled(self, tmp_path):
+        hass = _make_hass(tmp_path, config_file_access=False)
+        result = await save_config_file(hass, {"filename": "test.yaml", "content": "x: 1"})
+        assert "disabled" in result["content"][0]["text"].lower()
+        assert not (tmp_path / "test.yaml").exists()
+
+    async def test_delete_disabled(self, tmp_path):
+        (tmp_path / "custom.yaml").write_text("x: 1")
+        hass = _make_hass(tmp_path, config_file_access=False)
+        result = await delete_config_file(hass, {"filename": "custom.yaml"})
+        assert "disabled" in result["content"][0]["text"].lower()
+        assert (tmp_path / "custom.yaml").exists()
 
 
 class TestListConfigFiles:

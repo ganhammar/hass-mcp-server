@@ -707,9 +707,7 @@ class TestBatchEditConfigFiles:
         (tmp_path / "old2.yaml").write_text("x: 2")
         hass = _make_hass(tmp_path)
         with _mock_create_backup(), _mock_check_config():
-            result = await batch_edit_config_files(
-                hass, {"deletes": ["old1.yaml", "old2.yaml"]}
-            )
+            result = await batch_edit_config_files(hass, {"deletes": ["old1.yaml", "old2.yaml"]})
         text = result["content"][0]["text"]
         assert "old1.yaml" in text
         assert "old2.yaml" in text
@@ -742,10 +740,13 @@ class TestBatchEditConfigFiles:
             backup_calls.append(1)
             return "mcp_backups/fake"
 
-        with patch(
-            "custom_components.mcp_server_http_transport.tools.config_files._create_backup",
-            side_effect=counting_backup,
-        ), _mock_check_config():
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.config_files._create_backup",
+                side_effect=counting_backup,
+            ),
+            _mock_check_config(),
+        ):
             await batch_edit_config_files(
                 hass,
                 {
@@ -775,9 +776,7 @@ class TestBatchEditConfigFiles:
 
     async def test_delete_missing_file_aborts(self, tmp_path):
         hass = _make_hass(tmp_path)
-        result = await batch_edit_config_files(
-            hass, {"deletes": ["does_not_exist.yaml"]}
-        )
+        result = await batch_edit_config_files(hass, {"deletes": ["does_not_exist.yaml"]})
         text = result["content"][0]["text"]
         assert "error" in text.lower()
 
@@ -813,8 +812,10 @@ class TestBatchEditConfigFiles:
 
     async def test_save_write_failure_reports_error(self, tmp_path):
         hass = _make_hass(tmp_path)
-        with _mock_create_backup(), _mock_check_config(), patch(
-            "pathlib.Path.write_text", side_effect=OSError("disk full")
+        with (
+            _mock_create_backup(),
+            _mock_check_config(),
+            patch("pathlib.Path.write_text", side_effect=OSError("disk full")),
         ):
             result = await batch_edit_config_files(
                 hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
@@ -826,8 +827,10 @@ class TestBatchEditConfigFiles:
     async def test_delete_unlink_failure_reports_error(self, tmp_path):
         (tmp_path / "x.yaml").write_text("x: 1")
         hass = _make_hass(tmp_path)
-        with _mock_create_backup(), _mock_check_config(), patch(
-            "pathlib.Path.unlink", side_effect=OSError("permission denied")
+        with (
+            _mock_create_backup(),
+            _mock_check_config(),
+            patch("pathlib.Path.unlink", side_effect=OSError("permission denied")),
         ):
             result = await batch_edit_config_files(hass, {"deletes": ["x.yaml"]})
         text = result["content"][0]["text"]
@@ -836,10 +839,14 @@ class TestBatchEditConfigFiles:
 
     async def test_config_check_exception_reported(self, tmp_path):
         from unittest.mock import AsyncMock
+
         hass = _make_hass(tmp_path)
-        with _mock_create_backup(), patch(
-            "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
-            new=AsyncMock(side_effect=Exception("check exploded")),
+        with (
+            _mock_create_backup(),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+                new=AsyncMock(side_effect=Exception("check exploded")),
+            ),
         ):
             result = await batch_edit_config_files(
                 hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
@@ -867,11 +874,13 @@ class TestCleanupConfigBackups:
 
     async def test_keeps_recent_backups(self, tmp_path):
         from datetime import timezone
+
         backup_root = tmp_path / "mcp_backups"
         # old backup
         self._make_backup(backup_root, "2026-01-01_10-00-00-000000")
         # recent backup using today's date
         from datetime import date
+
         today = date.today().strftime("%Y-%m-%d")
         self._make_backup(backup_root, f"{today}_10-00-00-000000")
         hass = _make_hass(tmp_path)
@@ -888,6 +897,7 @@ class TestCleanupConfigBackups:
 
     async def test_no_old_backups_to_delete(self, tmp_path):
         from datetime import date
+
         backup_root = tmp_path / "mcp_backups"
         today = date.today().strftime("%Y-%m-%d")
         self._make_backup(backup_root, f"{today}_10-00-00-000000")

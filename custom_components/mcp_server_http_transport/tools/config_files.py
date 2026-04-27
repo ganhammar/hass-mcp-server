@@ -297,9 +297,7 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         },
     },
 )
-async def batch_edit_config_files(
-    hass: HomeAssistant, arguments: dict[str, Any]
-) -> dict[str, Any]:
+async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """One backup → apply all saves → apply all deletes → one config check."""
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
@@ -310,7 +308,10 @@ async def batch_edit_config_files(
     if not saves and not deletes:
         return {
             "content": [
-                {"type": "text", "text": "Error: provide at least one entry in 'saves' or 'deletes'"}
+                {
+                    "type": "text",
+                    "text": "Error: provide at least one entry in 'saves' or 'deletes'",
+                }
             ]
         }
 

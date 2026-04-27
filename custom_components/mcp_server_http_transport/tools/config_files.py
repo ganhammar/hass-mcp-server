@@ -79,9 +79,8 @@ async def _run_config_check(hass: HomeAssistant) -> dict[str, Any]:
     return {"valid": len(errors) == 0, "errors": errors}
 
 
-def _create_backup(hass: HomeAssistant) -> str | None:
+def _create_backup_sync(config_dir: Path) -> str | None:
     """Snapshot all first-level YAML files into mcp_backups/; return relative path or None."""
-    config_dir = _config_dir(hass)
     files = _yaml_files_in(config_dir)
     if not files:
         return None
@@ -91,6 +90,29 @@ def _create_backup(hass: HomeAssistant) -> str | None:
     for src in files:
         shutil.copy2(src, backup_dir / src.name)
     return f"{_BACKUP_DIR_NAME}/{timestamp}"
+
+
+async def _create_backup(hass: HomeAssistant) -> str | None:
+    """Async wrapper around _create_backup_sync — runs filesystem I/O off the event loop."""
+    return await hass.async_add_executor_job(_create_backup_sync, _config_dir(hass))
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content to path atomically via temp file + os.replace.
+
+    Avoids leaving the target half-written if the process dies mid-write.
+    """
+    tmp = path.with_name(f".{path.name}.mcp_tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
 
 
 @register_tool(
@@ -198,8 +220,8 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
-        backup_path = _create_backup(hass)
-        path.write_text(arguments["content"], encoding="utf-8")
+        backup_path = await _create_backup(hass)
+        _atomic_write(path, arguments["content"])
         lines = [f"Successfully saved '{arguments['filename']}'"]
         if backup_path:
             lines.append(f"Backup: {backup_path}")
@@ -252,7 +274,7 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
                     {"type": "text", "text": f"File '{arguments['filename']}' does not exist"}
                 ]
             }
-        backup_path = _create_backup(hass)
+        backup_path = await _create_backup(hass)
         path.unlink()
         lines = [f"Successfully deleted '{arguments['filename']}'"]
         if backup_path:
@@ -341,14 +363,14 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
         }
 
     # Phase 2: one backup
-    backup_path = _create_backup(hass)
+    backup_path = await _create_backup(hass)
 
     # Phase 3: apply saves
     saved: list[str] = []
     errors: list[str] = []
     for filename, path, content in save_paths:
         try:
-            path.write_text(content, encoding="utf-8")
+            _atomic_write(path, content)
             saved.append(filename)
         except Exception as e:
             errors.append(f"save '{filename}': {e}")
@@ -404,7 +426,7 @@ async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) ->
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
-        backup_path = _create_backup(hass)
+        backup_path = await _create_backup(hass)
         if backup_path is None:
             return {"content": [{"type": "text", "text": "No YAML files found to back up"}]}
         backup_dir = _config_dir(hass) / backup_path
@@ -575,7 +597,7 @@ async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) 
             backup_dir = candidates[-1]
 
         # Snapshot current state before overwriting — symmetric to save/delete.
-        pre_restore_backup = _create_backup(hass)
+        pre_restore_backup = await _create_backup(hass)
 
         config_dir = _config_dir(hass)
         restored = []

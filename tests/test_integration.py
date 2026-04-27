@@ -1791,30 +1791,10 @@ class TestMCPClientSession:
 class TestRealHA:
     """Tool tests against a real Home Assistant instance.
 
-    Most tests in this module use a Mock() hass with hand-rolled state. That
-    is fast and convenient but cannot detect runtime changes inside HA, e.g.
-    a renamed data layout or a removed registry method, because the Mock
-    obediently returns whatever the test asks for.
-
-    The tests in this class use the `hass` fixture from
-    pytest-homeassistant-custom-component, which yields a real
-    HomeAssistant instance. The integration-test CI matrix runs this file
-    against multiple HA versions, so anything that exercises an HA-internal
-    structure here will fail in CI when that structure shifts in a future
-    release, instead of breaking silently in production.
-
-    Use this pattern for tests that depend on:
-      - HA component data layouts (e.g. hass.data["websocket_api"])
-      - registry shapes (entity_registry, device_registry)
-      - HA helper APIs whose signatures we cannot mock confidently
-
-    Pattern:
-      1. Decorate the class (or test) with the `enable_custom_integrations`
-         autouse fixture so custom_components/ is importable.
-      2. Inject state with `hass.states.async_set(...)` or load a component
-         with `await async_setup_component(hass, "domain", {...})` followed
-         by `await hass.async_block_till_done()`.
-      3. Call the tool/handler directly with the real hass.
+    Uses pytest-homeassistant-custom-component's `hass` fixture instead of
+    Mock(). Use this pattern for anything that depends on HA-internal
+    structures (data layouts, registry shapes) so the integration-test
+    matrix catches version drift before it reaches users.
     """
 
     @pytest.fixture(autouse=True)

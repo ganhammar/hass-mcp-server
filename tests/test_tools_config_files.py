@@ -626,6 +626,44 @@ class TestRestoreConfigBackup:
 
         assert "Error restoring backup" in result["content"][0]["text"]
 
+    async def test_restore_creates_pre_restore_snapshot(self, tmp_path):
+        """Pre-restore snapshot captures current state so user can roll back from a restore."""
+        backup_dir = tmp_path / "mcp_backups" / "2026-01-01_10-00-00-000000"
+        backup_dir.mkdir(parents=True)
+        (backup_dir / "automations.yaml").write_text("from_backup: true")
+
+        # Current state — should be snapshotted before restore overwrites it
+        (tmp_path / "automations.yaml").write_text("current: state")
+        hass = _make_hass(tmp_path)
+
+        with _mock_check_config():
+            result = await restore_config_backup(hass, {})
+
+        text = result["content"][0]["text"]
+        assert "Restored" in text
+        assert "Pre-restore snapshot" in text
+        # Restored content lands in the config dir
+        assert (tmp_path / "automations.yaml").read_text() == "from_backup: true"
+        # And a new backup folder was created with the prior content
+        snapshots = sorted(d for d in (tmp_path / "mcp_backups").iterdir() if d.is_dir())
+        assert len(snapshots) == 2  # original + pre-restore
+        pre_restore = [d for d in snapshots if d.name != "2026-01-01_10-00-00-000000"][0]
+        assert (pre_restore / "automations.yaml").read_text() == "current: state"
+
+    async def test_restore_skips_pre_snapshot_message_when_no_yaml_files(self, tmp_path):
+        """If there's no current YAML state, no pre-restore snapshot can be created."""
+        backup_dir = tmp_path / "mcp_backups" / "2026-01-01_10-00-00-000000"
+        backup_dir.mkdir(parents=True)
+        (backup_dir / "automations.yaml").write_text("from_backup: true")
+        hass = _make_hass(tmp_path)
+
+        with _mock_check_config():
+            result = await restore_config_backup(hass, {})
+
+        text = result["content"][0]["text"]
+        assert "Restored" in text
+        assert "Pre-restore snapshot" not in text
+
 
 class TestListConfigBackupsErrors:
     async def test_list_handles_os_error(self, tmp_path):

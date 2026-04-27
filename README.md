@@ -149,7 +149,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `batch_edit_config_files` | Write and/or delete multiple YAML files in one call; one backup and one config check for the whole batch |
 | `backup_config_files` | Manually snapshot all YAML files into `mcp_backups/<timestamp>/` |
 | `list_config_backups` | List all available backup snapshots, newest first |
-| `restore_config_backup` | Restore files from the latest or a specific backup; runs config validation after restoring |
+| `restore_config_backup` | Restore files from the latest or a specific backup; creates a pre-restore snapshot of the current state and runs config validation after restoring |
 | `cleanup_config_backups` | Delete backup snapshots older than N days (default 30); keeps the folder from growing indefinitely |
 
 **Dashboards**
@@ -391,7 +391,7 @@ restore_config_backup()
 restore_config_backup(timestamp="2026-04-26_14-30-00-123456")
 ```
 
-`restore_config_backup` only overwrites files present in the backup — files created after the snapshot are left untouched. A config check runs automatically after restoring.
+`restore_config_backup` only overwrites files present in the backup — files created after the snapshot are left untouched. Before any files are overwritten it creates a **pre-restore snapshot** of the current state, so you can always roll back from a restore (the snapshot path is included in the response). A config check runs automatically after restoring.
 
 > **If Home Assistant fails to start** after a bad edit: backup files are always accessible at `config/mcp_backups/<timestamp>/` and can be copied back manually via the filesystem or SSH.
 

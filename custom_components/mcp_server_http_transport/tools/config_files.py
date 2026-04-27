@@ -529,7 +529,8 @@ async def cleanup_config_backups(hass: HomeAssistant, arguments: dict[str, Any])
         "Restores the latest backup by default, or a specific one by timestamp. "
         "Only files present in the backup are overwritten; "
         "files added after the backup are left untouched. "
-        "Automatically runs a config check after restoring"
+        "Automatically creates a pre-restore snapshot of the current state "
+        "and runs a config check after restoring"
     ),
     input_schema={
         "type": "object",
@@ -573,6 +574,9 @@ async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) 
                 return {"content": [{"type": "text", "text": "No backups found"}]}
             backup_dir = candidates[-1]
 
+        # Snapshot current state before overwriting — symmetric to save/delete.
+        pre_restore_backup = _create_backup(hass)
+
         config_dir = _config_dir(hass)
         restored = []
         for src in sorted(backup_dir.iterdir()):
@@ -591,6 +595,8 @@ async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) 
             f"Restored {len(restored)} files from backup '{backup_dir.name}':",
             *[f"  - {f}" for f in restored],
         ]
+        if pre_restore_backup:
+            lines.append(f"Pre-restore snapshot: {pre_restore_backup}")
 
         try:
             check = await _run_config_check(hass)

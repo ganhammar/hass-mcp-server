@@ -873,7 +873,6 @@ class TestCleanupConfigBackups:
         assert not (backup_root / "2026-01-01_10-00-00-000000").exists()
 
     async def test_keeps_recent_backups(self, tmp_path):
-        from datetime import timezone
 
         backup_root = tmp_path / "mcp_backups"
         # old backup

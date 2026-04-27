@@ -275,7 +275,7 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         "properties": {
             "saves": {
                 "type": "array",
-                "description": "Files to write or create. Each entry needs 'filename' and 'content'.",
+                "description": "Files to write or create. Each needs 'filename' and 'content'.",
                 "items": {
                     "type": "object",
                     "properties": {

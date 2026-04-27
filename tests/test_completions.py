@@ -342,3 +342,37 @@ class TestCompletions:
         completion = body["result"]["completion"]
         assert "abc-123" in completion["values"]
         assert "def-456" not in completion["values"]
+
+    async def test_post_completion_domain_create_helper(self, view, mock_hass):
+        """Test domain completion for create_helper returns helper domains, not entity domains."""
+        mock_state1 = Mock()
+        mock_state1.entity_id = "light.living_room"
+        mock_state2 = Mock()
+        mock_state2.entity_id = "switch.kitchen"
+        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "completion/complete",
+                "params": {
+                    "ref": {"type": "ref/tool", "name": "create_helper"},
+                    "argument": {"name": "domain", "value": ""},
+                },
+                "id": 242,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        completion = body["result"]["completion"]
+        assert "input_boolean" in completion["values"]
+        assert "counter" in completion["values"]
+        assert "timer" in completion["values"]
+        assert "light" not in completion["values"]
+        assert "switch" not in completion["values"]

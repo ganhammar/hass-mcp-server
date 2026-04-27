@@ -11,7 +11,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 🔑 **Long-Lived Access Token** authentication (opt-in) for local and custom client setups
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
-- 📝 CRUD management of automations, scenes, and scripts
+- 📝 CRUD management of automations, scenes, scripts, and helper entities (input_boolean, counter, timer, schedule, and more)
 - 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards)
 - 🩺 System administration tools (error log, config validation, restart, system status)
 - 📊 Resources, prompts, and completions for richer AI interactions
@@ -92,17 +92,25 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 
 ### Tools
 
+**Entities & State**
+
 | Tool | Description |
 |------|-------------|
 | `get_state` | Get the current state of any entity (optional `fields` to limit attributes) |
-| `call_service` | Call any Home Assistant service |
+| `batch_get_state` | Get state for multiple entities in one call (max 50) |
 | `list_entities` | List all entities, with optional `domain`, `detailed`, and `fields` parameters |
-| `get_config` | Get Home Assistant configuration (version, location, units, timezone) |
-| `list_areas` | List all areas |
-| `list_devices` | List devices, optionally filtered by area |
-| `list_services` | List available services, optionally filtered by domain |
-| `render_template` | Evaluate a Jinja2 template |
+| `search_entities` | Search entities by friendly name, device class, domain, or area |
+| `call_service` | Call any Home Assistant service |
+| `fire_event` | Fire a custom event on the Home Assistant event bus |
 | `get_history` | Get state history of an entity over a time range |
+| `get_logbook` | Fetch logbook entries for an entity or time range |
+| `get_statistics` | Fetch long-term statistics (energy, climate) with configurable period |
+| `render_template` | Evaluate a Jinja2 template |
+
+**Automations, Scenes & Scripts**
+
+| Tool | Description |
+|------|-------------|
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
 | `create_automation` | Create a new automation |
@@ -118,6 +126,21 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `create_script` | Create a new script |
 | `update_script` | Update an existing script |
 | `delete_script` | Delete a script |
+
+**Helpers**
+
+| Tool | Description |
+|------|-------------|
+| `list_helpers` | List all helper entities, optionally filtered by domain |
+| `get_helper_config` | Get the raw stored configuration of a UI-managed helper (experimental) |
+| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule) (experimental) |
+| `update_helper` | Update an existing UI-managed helper by entity ID (experimental) |
+| `delete_helper` | Delete a UI-managed helper by entity ID (experimental) |
+
+**Dashboards**
+
+| Tool | Description |
+|------|-------------|
 | `list_dashboards` | List all Lovelace dashboards with metadata |
 | `get_dashboard_config` | Get full dashboard configuration (views/cards) |
 | `save_dashboard_config` | Save (replace) full dashboard configuration |
@@ -125,18 +148,22 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `create_dashboard` | Create a new Lovelace dashboard (experimental) |
 | `update_dashboard` | Update dashboard metadata (experimental) |
 | `delete_dashboard` | Delete a dashboard and its config (experimental) |
-| `search_entities` | Search entities by friendly name, device class, domain, or area |
-| `fire_event` | Fire a custom event on the Home Assistant event bus |
-| `get_logbook` | Fetch logbook entries for an entity or time range |
-| `get_error_log` | Fetch the Home Assistant error log (last N lines) |
-| `restart_ha` | Restart Home Assistant (requires explicit confirmation) |
+
+**System & Infrastructure**
+
+| Tool | Description |
+|------|-------------|
+| `get_config` | Get Home Assistant configuration (version, location, units, timezone) |
 | `get_system_status` | System overview: version, domain counts, entity totals, problem entities |
 | `get_domain_stats` | Aggregate stats for a single domain (count, state breakdown, examples) |
 | `check_config` | Validate Home Assistant configuration without restarting |
-| `get_statistics` | Fetch long-term statistics (energy, climate) with configurable period |
+| `restart_ha` | Restart Home Assistant (requires explicit confirmation) |
+| `get_error_log` | Fetch the Home Assistant error log (last N lines) |
+| `list_areas` | List all areas |
+| `list_devices` | List devices, optionally filtered by area |
+| `list_services` | List available services, optionally filtered by domain |
 | `list_integrations` | List installed integrations and their status |
 | `list_labels` | List all labels for cross-domain grouping |
-| `batch_get_state` | Get state for multiple entities in one call (max 50) |
 
 ### Resources
 
@@ -174,7 +201,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 
 ### Completions
 
-Autocompletion is supported for `entity_id`, `entity_ids`, `domain`, `service`, `area_id`, `url_path`, `automation_id`, `scene_id`, script `key`, `trigger_type`, `period`, and `config_type` arguments.
+Autocompletion is supported for `entity_id`, `entity_ids`, `domain`, `service`, `area_id`, `url_path`, `automation_id`, `scene_id`, script `key`, `trigger_type`, `period`, `config_type`, and helper `domain` arguments.
 
 ## FAQ
 
@@ -254,9 +281,43 @@ To create or delete dashboards themselves, use the experimental `create_dashboar
 </details>
 
 <details>
-<summary>What does "experimental" mean for dashboard tools?</summary>
+<summary>How do I manage helper entities (input_boolean, counter, timer, etc.)?</summary>
 
-The `create_dashboard`, `update_dashboard`, and `delete_dashboard` tools use internal Home Assistant APIs (`DashboardsCollection`) that are not publicly exposed. They replicate side effects (panel registration, dashboards dict updates) that HA normally handles internally. These may break with HA updates that change internal behavior. The config-level tools (`list_dashboards`, `get/save/delete_dashboard_config`) use stable public APIs.
+Use `list_helpers` to see all helpers, optionally filtered by type:
+
+```
+list_helpers()                          // all helper types
+list_helpers(domain="input_boolean")    // only toggles
+```
+
+To create a helper, specify the domain and a config with at least a `name`:
+
+```json
+create_helper(domain="input_boolean", config={"name": "Vacation Mode", "icon": "mdi:palm-tree"})
+create_helper(domain="input_number", config={"name": "Target Temperature", "min": 15, "max": 30, "step": 0.5, "unit_of_measurement": "°C"})
+create_helper(domain="input_select", config={"name": "House Mode", "options": ["Home", "Away", "Sleep"]})
+create_helper(domain="counter", config={"name": "Motion Events", "initial": 0, "step": 1})
+create_helper(domain="timer", config={"name": "Cooking Timer", "duration": "00:30:00"})
+```
+
+To update or delete, use the entity ID:
+
+```json
+update_helper(entity_id="input_boolean.vacation_mode", config={"name": "Vacation Mode", "icon": "mdi:airplane"})
+delete_helper(entity_id="counter.motion_events")
+```
+
+> **Note:** These tools only manage UI-created helpers stored in Home Assistant's `.storage/` files. Helpers defined in YAML configuration are read-only from the perspective of these tools.
+</details>
+
+<details>
+<summary>What does "experimental" mean for some tools?</summary>
+
+Some tools use internal Home Assistant APIs that are not publicly exposed and may break with future HA updates.
+
+**Dashboard tools:** `create_dashboard`, `update_dashboard`, and `delete_dashboard` use `DashboardsCollection` and replicate side effects (panel registration, dashboards dict updates) that HA normally handles internally. The config-level tools (`list_dashboards`, `get/save/delete_dashboard_config`) use stable public APIs and are not experimental.
+
+**Helper tools:** `get_helper_config`, `create_helper`, `update_helper`, and `delete_helper` use `StorageCollection` internals to manage UI-created helpers. They only affect helpers stored in `.storage/` — helpers defined in YAML are read-only from the perspective of these tools. `list_helpers` uses public APIs and is not experimental.
 </details>
 
 ## License

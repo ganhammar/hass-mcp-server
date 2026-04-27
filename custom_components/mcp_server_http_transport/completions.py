@@ -22,6 +22,8 @@ async def complete(
         return _complete_entity_id(hass, arg_value)
 
     if arg_name == "domain":
+        if ref.get("name") == "create_helper":
+            return _complete_helper_domain(arg_value)
         return _complete_domain(hass, arg_value)
 
     if arg_name == "service":
@@ -207,4 +209,23 @@ _CONFIG_TYPES = ["automation", "scene", "script"]
 def _complete_config_type(prefix: str) -> dict[str, Any]:
     """Complete configuration types."""
     matches = [c for c in _CONFIG_TYPES if c.startswith(prefix)]
+    return {"values": matches, "hasMore": False}
+
+
+_HELPER_DOMAINS = [
+    "counter",
+    "input_boolean",
+    "input_button",
+    "input_datetime",
+    "input_number",
+    "input_select",
+    "input_text",
+    "schedule",
+    "timer",
+]
+
+
+def _complete_helper_domain(prefix: str) -> dict[str, Any]:
+    """Complete helper domain names."""
+    matches = [d for d in _HELPER_DOMAINS if d.startswith(prefix)]
     return {"values": matches, "hasMore": False}

@@ -22,6 +22,8 @@ async def complete(
         return _complete_entity_id(hass, arg_value)
 
     if arg_name == "domain":
+        if ref.get("name") == "create_helper":
+            return _complete_helper_domain(arg_value)
         return _complete_domain(hass, arg_value)
 
     if arg_name == "service":
@@ -43,9 +45,6 @@ async def complete(
         return _complete_config_type(arg_value)
 
     ref_name = ref.get("name", "")
-
-    if arg_name == "domain" and ref_name == "create_helper":
-        return _complete_helper_domain(arg_value)
 
     if arg_name == "automation_id" and ref_name in (
         "get_automation_config",

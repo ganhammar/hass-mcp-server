@@ -132,10 +132,10 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | Tool | Description |
 |------|-------------|
 | `list_helpers` | List all helper entities, optionally filtered by domain |
-| `get_helper_config` | Get the raw stored configuration of a UI-managed helper |
-| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule) |
-| `update_helper` | Update an existing UI-managed helper by entity ID |
-| `delete_helper` | Delete a UI-managed helper by entity ID |
+| `get_helper_config` | Get the raw stored configuration of a UI-managed helper (experimental) |
+| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule) (experimental) |
+| `update_helper` | Update an existing UI-managed helper by entity ID (experimental) |
+| `delete_helper` | Delete a UI-managed helper by entity ID (experimental) |
 
 **Dashboards**
 
@@ -311,9 +311,13 @@ delete_helper(entity_id="counter.motion_events")
 </details>
 
 <details>
-<summary>What does "experimental" mean for dashboard tools?</summary>
+<summary>What does "experimental" mean for some tools?</summary>
 
-The `create_dashboard`, `update_dashboard`, and `delete_dashboard` tools use internal Home Assistant APIs (`DashboardsCollection`) that are not publicly exposed. They replicate side effects (panel registration, dashboards dict updates) that HA normally handles internally. These may break with HA updates that change internal behavior. The config-level tools (`list_dashboards`, `get/save/delete_dashboard_config`) use stable public APIs.
+Some tools use internal Home Assistant APIs that are not publicly exposed and may break with future HA updates.
+
+**Dashboard tools:** `create_dashboard`, `update_dashboard`, and `delete_dashboard` use `DashboardsCollection` and replicate side effects (panel registration, dashboards dict updates) that HA normally handles internally. The config-level tools (`list_dashboards`, `get/save/delete_dashboard_config`) use stable public APIs and are not experimental.
+
+**Helper tools:** `get_helper_config`, `create_helper`, `update_helper`, and `delete_helper` use `StorageCollection` internals to manage UI-created helpers. They only affect helpers stored in `.storage/` — helpers defined in YAML are read-only from the perspective of these tools. `list_helpers` uses public APIs and is not experimental.
 </details>
 
 ## License

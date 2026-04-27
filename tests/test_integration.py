@@ -1786,3 +1786,55 @@ class TestMCPClientSession:
             )
         text = result["result"]["messages"][0]["content"]["text"]
         assert "energy" in text.lower()
+
+
+class TestRealHA:
+    """Tool tests against a real Home Assistant instance.
+
+    Most tests in this module use a Mock() hass with hand-rolled state. That
+    is fast and convenient but cannot detect runtime changes inside HA, e.g.
+    a renamed data layout or a removed registry method, because the Mock
+    obediently returns whatever the test asks for.
+
+    The tests in this class use the `hass` fixture from
+    pytest-homeassistant-custom-component, which yields a real
+    HomeAssistant instance. The integration-test CI matrix runs this file
+    against multiple HA versions, so anything that exercises an HA-internal
+    structure here will fail in CI when that structure shifts in a future
+    release, instead of breaking silently in production.
+
+    Use this pattern for tests that depend on:
+      - HA component data layouts (e.g. hass.data["websocket_api"])
+      - registry shapes (entity_registry, device_registry)
+      - HA helper APIs whose signatures we cannot mock confidently
+
+    Pattern:
+      1. Decorate the class (or test) with the `enable_custom_integrations`
+         autouse fixture so custom_components/ is importable.
+      2. Inject state with `hass.states.async_set(...)` or load a component
+         with `await async_setup_component(hass, "domain", {...})` followed
+         by `await hass.async_block_till_done()`.
+      3. Call the tool/handler directly with the real hass.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _auto_enable_custom_integrations(self, enable_custom_integrations):
+        """Allow custom_components/ to be importable in real-HA tests."""
+        yield
+
+    async def test_get_state_against_real_hass(self, hass):
+        """get_state reads from a real HA states bucket."""
+        from custom_components.mcp_server_http_transport.tools.entities import get_state
+
+        hass.states.async_set(
+            "input_boolean.my_flag",
+            "on",
+            {"friendly_name": "My Flag"},
+        )
+
+        result = await get_state(hass, {"entity_id": "input_boolean.my_flag"})
+        data = json.loads(result["content"][0]["text"])
+
+        assert data["entity_id"] == "input_boolean.my_flag"
+        assert data["state"] == "on"
+        assert data["attributes"]["friendly_name"] == "My Flag"

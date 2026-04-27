@@ -228,9 +228,7 @@ class TestGetHelperConfig:
         mock_hass.data = {}  # no websocket_api at all
 
         mock_registry = Mock()
-        mock_registry.async_get.return_value = _make_registry_entry(
-            "input_boolean.flag", "uid-1"
-        )
+        mock_registry.async_get.return_value = _make_registry_entry("input_boolean.flag", "uid-1")
 
         with patch(
             "custom_components.mcp_server_http_transport.tools.helpers.er.async_get",
@@ -251,9 +249,7 @@ class TestGetHelperConfig:
         mock_hass.data = {"websocket_api": {"input_boolean/list": (plain_handler, None)}}
 
         mock_registry = Mock()
-        mock_registry.async_get.return_value = _make_registry_entry(
-            "input_boolean.flag", "uid-1"
-        )
+        mock_registry.async_get.return_value = _make_registry_entry("input_boolean.flag", "uid-1")
 
         with patch(
             "custom_components.mcp_server_http_transport.tools.helpers.er.async_get",

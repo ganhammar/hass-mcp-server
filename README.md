@@ -352,13 +352,16 @@ batch_edit_config_files(
         {"filename": "templates.yaml", "content": "..."},
         {"filename": "sensors.yaml",   "content": "..."},
     ],
-    deletes=["binary_sensor.yaml", "scenes.yaml"],
+    deletes=["binary_sensor.yaml", "old_lights.yaml"],
 )
 ```
 
 Both `saves` and `deletes` are optional — you can use either or both in the same call.
 
-> **Note:** Only first-level `.yaml`/`.yml` files in the config directory are accessible. Subdirectories, `secrets.yaml`, and non-YAML files are blocked.
+> **Note:** Only first-level `.yaml`/`.yml` files in the config directory are accessible. Subdirectories and non-YAML files are blocked. The following files are also blocked from direct edits — use the dedicated tools instead:
+>
+> - **`secrets.yaml`** — never readable, contains credentials
+> - **`automations.yaml`**, **`scenes.yaml`**, **`scripts.yaml`** — owned by Home Assistant's storage layer; use `create_automation` / `update_automation` / `delete_automation` (and the equivalents for scenes and scripts) so UI-managed entries stay consistent. These files are still included in backups, so a restore never drops them.
 </details>
 
 <details>

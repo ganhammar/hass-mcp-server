@@ -130,10 +130,10 @@ class TestListConfigFiles:
 
 class TestGetConfigFile:
     async def test_read_existing_file(self, tmp_path):
-        (tmp_path / "automations.yaml").write_text("- alias: test\n")
+        (tmp_path / "templates.yaml").write_text("- alias: test\n")
         hass = _make_hass(tmp_path)
 
-        result = await get_config_file(hass, {"filename": "automations.yaml"})
+        result = await get_config_file(hass, {"filename": "templates.yaml"})
 
         assert result["content"][0]["text"] == "- alias: test\n"
 
@@ -148,7 +148,42 @@ class TestGetConfigFile:
 
         result = await get_config_file(hass, {"filename": "secrets.yaml"})
 
-        assert "blocked" in result["content"][0]["text"]
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        # Reason should be exposed so the AI knows why.
+        assert "sensitive credentials" in text
+
+    async def test_read_blocks_automations_yaml_with_tool_hint(self, tmp_path):
+        """Registry-owned files are blocked; the error names the dedicated tool."""
+        (tmp_path / "automations.yaml").write_text("- alias: test")
+        hass = _make_hass(tmp_path)
+
+        result = await get_config_file(hass, {"filename": "automations.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        # The error must point at the right CRUD tool so the AI can recover.
+        assert "update_automation" in text or "create_automation" in text
+
+    async def test_read_blocks_scenes_yaml_with_tool_hint(self, tmp_path):
+        (tmp_path / "scenes.yaml").write_text("- name: evening")
+        hass = _make_hass(tmp_path)
+
+        result = await get_config_file(hass, {"filename": "scenes.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_scene" in text or "create_scene" in text
+
+    async def test_read_blocks_scripts_yaml_with_tool_hint(self, tmp_path):
+        (tmp_path / "scripts.yaml").write_text("morning: {}")
+        hass = _make_hass(tmp_path)
+
+        result = await get_config_file(hass, {"filename": "scripts.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_script" in text or "create_script" in text
 
     async def test_read_blocks_non_yaml(self, tmp_path):
         (tmp_path / "script.py").write_text("import os")
@@ -229,25 +264,25 @@ class TestSaveConfigFile:
         assert (tmp_path / "new.yaml").read_text() == "key: value\n"
 
     async def test_backup_created_automatically(self, tmp_path):
-        (tmp_path / "automations.yaml").write_text("original")
+        (tmp_path / "templates.yaml").write_text("original")
         hass = _make_hass(tmp_path)
         with _mock_check_config():
             result = await save_config_file(
-                hass, {"filename": "automations.yaml", "content": "updated"}
+                hass, {"filename": "templates.yaml", "content": "updated"}
             )
         text = result["content"][0]["text"]
         assert "Backup:" in text
         assert "mcp_backups/" in text
-        assert (tmp_path / "automations.yaml").read_text() == "updated"
+        assert (tmp_path / "templates.yaml").read_text() == "updated"
 
     async def test_overwrite_existing_file(self, tmp_path):
-        (tmp_path / "automations.yaml").write_text("old content")
+        (tmp_path / "templates.yaml").write_text("old content")
         hass = _make_hass(tmp_path)
 
         with _mock_create_backup(), _mock_check_config():
-            await save_config_file(hass, {"filename": "automations.yaml", "content": "new content"})
+            await save_config_file(hass, {"filename": "templates.yaml", "content": "new content"})
 
-        assert (tmp_path / "automations.yaml").read_text() == "new content"
+        assert (tmp_path / "templates.yaml").read_text() == "new content"
 
     async def test_config_check_ok_reported(self, tmp_path):
         hass = _make_hass(tmp_path)
@@ -296,6 +331,35 @@ class TestSaveConfigFile:
         )
         assert "blocked" in result["content"][0]["text"]
         assert not (tmp_path / "secrets.yaml").exists()
+
+    async def test_write_blocks_automations_yaml(self, tmp_path):
+        """Direct writes to automations.yaml are blocked; the error names the dedicated tool."""
+        hass = _make_hass(tmp_path)
+        result = await save_config_file(
+            hass, {"filename": "automations.yaml", "content": "- alias: hijacked"}
+        )
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_automation" in text or "create_automation" in text
+        assert not (tmp_path / "automations.yaml").exists()
+
+    async def test_write_blocks_scenes_yaml(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await save_config_file(
+            hass, {"filename": "scenes.yaml", "content": "- name: hijacked"}
+        )
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_scene" in text or "create_scene" in text
+
+    async def test_write_blocks_scripts_yaml(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await save_config_file(
+            hass, {"filename": "scripts.yaml", "content": "hijacked: {}"}
+        )
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_script" in text or "create_script" in text
 
     async def test_write_blocks_non_yaml(self, tmp_path):
         hass = _make_hass(tmp_path)
@@ -347,6 +411,19 @@ class TestDeleteConfigFile:
         assert "blocked" in result["content"][0]["text"]
         assert (tmp_path / "secrets.yaml").exists()
 
+    async def test_delete_blocks_automations_yaml(self, tmp_path):
+        """Even on delete the error names the dedicated tool."""
+        (tmp_path / "automations.yaml").write_text("- alias: keep")
+        hass = _make_hass(tmp_path)
+
+        result = await delete_config_file(hass, {"filename": "automations.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "delete_automation" in text
+        # File must remain on disk.
+        assert (tmp_path / "automations.yaml").exists()
+
     async def test_delete_blocks_non_yaml(self, tmp_path):
         (tmp_path / "script.py").write_text("")
         hass = _make_hass(tmp_path)
@@ -389,6 +466,22 @@ class TestBackupConfigFiles:
 
         assert (backup_dir / "configuration.yaml").exists()
         assert not (backup_dir / "secrets.yaml").exists()
+
+    async def test_backup_includes_registry_owned_files(self, tmp_path):
+        """Files blocked from direct edits (automations/scenes/scripts) MUST still be
+        backed up — otherwise a restore would silently drop them.
+        """
+        (tmp_path / "automations.yaml").write_text("- alias: morning")
+        (tmp_path / "scenes.yaml").write_text("- name: evening")
+        (tmp_path / "scripts.yaml").write_text("morning: {}")
+        hass = _make_hass(tmp_path)
+
+        await backup_config_files(hass, {})
+        backup_dir = next((tmp_path / "mcp_backups").iterdir())
+
+        assert (backup_dir / "automations.yaml").exists()
+        assert (backup_dir / "scenes.yaml").exists()
+        assert (backup_dir / "scripts.yaml").exists()
 
     async def test_backup_excludes_non_yaml(self, tmp_path):
         (tmp_path / "automations.yaml").write_text("[]")

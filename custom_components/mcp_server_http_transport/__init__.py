@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from mcp.server import Server
 
-from .const import CONF_NATIVE_AUTH, DOMAIN
+from .const import CONF_CONFIG_FILE_ACCESS, CONF_NATIVE_AUTH, DOMAIN
 from .http import (
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
@@ -30,6 +30,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     native_auth_enabled = entry.data.get(CONF_NATIVE_AUTH, False)
+    config_file_access_enabled = entry.data.get(CONF_CONFIG_FILE_ACCESS, False)
+
+    hass.data[DOMAIN]["config_file_access"] = config_file_access_enabled
 
     # Create MCP server
     server = Server("home-assistant-mcp-server")

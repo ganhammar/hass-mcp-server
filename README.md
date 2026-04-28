@@ -14,6 +14,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 📝 CRUD management of automations, scenes, scripts, and helper entities (input_boolean, counter, timer, schedule, and more)
 - 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards)
 - 🩺 System administration tools (error log, config validation, restart, system status)
+- 📁 YAML config file management — read, write, delete files with automatic backup before every change and built-in config validation (opt-in)
 - 📊 Resources, prompts, and completions for richer AI interactions
 - 🧹 Optimization prompts for auditing automations, naming conventions, and scheduling
 
@@ -136,6 +137,20 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule) (experimental) |
 | `update_helper` | Update an existing UI-managed helper by entity ID (experimental) |
 | `delete_helper` | Delete a UI-managed helper by entity ID (experimental) |
+
+**Config Files**
+
+| Tool | Description |
+|------|-------------|
+| `list_config_files` | List all YAML files in the config directory (first level, secrets excluded) |
+| `get_config_file` | Read the contents of a YAML config file (max 1 MB) |
+| `save_config_file` | Write or replace a YAML config file; auto-backs up all files first, then validates config |
+| `delete_config_file` | Delete a YAML config file; auto-backs up all files first |
+| `batch_edit_config_files` | Write and/or delete multiple YAML files in one call; one backup and one config check for the whole batch |
+| `backup_config_files` | Manually snapshot all YAML files into `mcp_backups/<timestamp>/` |
+| `list_config_backups` | List all available backup snapshots, newest first |
+| `restore_config_backup` | Restore files from the latest or a specific backup; creates a pre-restore snapshot of the current state and runs config validation after restoring |
+| `cleanup_config_backups` | Delete backup snapshots older than N days (default 30); keeps the folder from growing indefinitely |
 
 **Dashboards**
 
@@ -308,6 +323,88 @@ delete_helper(entity_id="counter.motion_events")
 ```
 
 > **Note:** These tools only manage UI-created helpers stored in Home Assistant's `.storage/` files. Helpers defined in YAML configuration are read-only from the perspective of these tools.
+</details>
+
+<details>
+<summary>How do I read or edit YAML configuration files?</summary>
+
+Use `list_config_files` to see all editable YAML files, then `get_config_file` and `save_config_file` to read and modify them:
+
+```
+list_config_files()
+get_config_file(filename="automations.yaml")
+save_config_file(filename="automations.yaml", content="...")
+```
+
+`save_config_file` automatically runs a full Home Assistant config validation after every save and reports any errors inline. Pass `run_check: false` to skip this.
+
+To remove a custom file:
+
+```
+delete_config_file(filename="my_custom.yaml")
+```
+
+When editing multiple files in one session use `batch_edit_config_files` instead — it creates one backup snapshot before all changes and runs one config check at the end:
+
+```
+batch_edit_config_files(
+    saves=[
+        {"filename": "templates.yaml", "content": "..."},
+        {"filename": "sensors.yaml",   "content": "..."},
+    ],
+    deletes=["binary_sensor.yaml", "scenes.yaml"],
+)
+```
+
+Both `saves` and `deletes` are optional — you can use either or both in the same call.
+
+> **Note:** Only first-level `.yaml`/`.yml` files in the config directory are accessible. Subdirectories, `secrets.yaml`, and non-YAML files are blocked.
+</details>
+
+<details>
+<summary>How does the automatic backup work?</summary>
+
+Every call to `save_config_file` and `delete_config_file` automatically creates a full snapshot of all first-level YAML files (excluding `secrets.yaml`) before making any change. When using `batch_edit_config_files`, only one backup is created for the entire batch — regardless of how many files are saved or deleted. Snapshots are stored in:
+
+```
+config/mcp_backups/2026-04-26_14-30-00-123456/
+```
+
+The backup path is included in the tool response so you always know where to look. You never need to remember to back up manually before an edit — it happens every time.
+
+To create an additional manual snapshot before a larger operation:
+
+```
+backup_config_files()
+```
+
+To see all available snapshots:
+
+```
+list_config_backups()
+```
+
+To restore the latest snapshot (or a specific one by timestamp):
+
+```
+restore_config_backup()
+restore_config_backup(timestamp="2026-04-26_14-30-00-123456")
+```
+
+`restore_config_backup` only overwrites files present in the backup — files created after the snapshot are left untouched. Before any files are overwritten it creates a **pre-restore snapshot** of the current state, so you can always roll back from a restore (the snapshot path is included in the response). A config check runs automatically after restoring.
+
+> **If Home Assistant fails to start** after a bad edit: backup files are always accessible at `config/mcp_backups/<timestamp>/` and can be copied back manually via the filesystem or SSH.
+
+**Restoring a single file:** `restore_config_backup` always restores all files from a snapshot at once — there is no tool to restore a single file. If you only need one file back, either restore the full snapshot and re-apply your other changes, or copy the file manually from `config/mcp_backups/<timestamp>/<filename>` via SSH, Samba, or the File Editor add-on.
+
+**Cleaning up old backups:** Snapshots accumulate with every edit. Use `cleanup_config_backups` to remove old ones:
+
+```
+cleanup_config_backups()                    // delete backups older than 30 days (default)
+cleanup_config_backups(older_than_days=7)   // delete backups older than 7 days
+```
+
+You can also delete entries from `config/mcp_backups/` manually via SSH, the Samba share, or the File Editor add-on.
 </details>
 
 <details>

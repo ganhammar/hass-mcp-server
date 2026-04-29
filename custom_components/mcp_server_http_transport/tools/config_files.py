@@ -17,7 +17,35 @@ from . import register_tool
 _LOGGER = logging.getLogger(__name__)
 
 _ALLOWED_SUFFIXES = {".yaml", ".yml"}
-_BLOCKED_NAMES = {"secrets.yaml", "secrets.yml"}
+
+# Files blocked from direct read/write/delete via the config file tools.
+# Each entry maps the lowercase filename to the reason the AI sees in the error,
+# so when a write is rejected the AI can pick the right alternative tool instead
+# of just seeing "blocked." Two distinct blocking reasons live here:
+#   - sensitive data (secrets must never be exposed to the AI)
+#   - dedicated tool exists (raw YAML edits would bypass HA's storage layer
+#     and clobber UI-managed entries; the tool-specific CRUD goes through HA's
+#     own write path and keeps registries consistent)
+_BLOCKED_FILES = {
+    "secrets.yaml": "contains sensitive credentials and must never be exposed",
+    "secrets.yml": "contains sensitive credentials and must never be exposed",
+    "automations.yaml": (
+        "is owned by Home Assistant's UI and is rewritten on every change. "
+        "Use create_automation / update_automation / delete_automation instead — "
+        "they go through HA's storage layer and keep UI-managed automations consistent"
+    ),
+    "scenes.yaml": (
+        "is owned by Home Assistant's UI and is rewritten on every change. "
+        "Use create_scene / update_scene / delete_scene instead — "
+        "they go through HA's storage layer and keep UI-managed scenes consistent"
+    ),
+    "scripts.yaml": (
+        "is owned by Home Assistant's UI and is rewritten on every change. "
+        "Use create_script / update_script / delete_script instead — "
+        "they go through HA's storage layer and keep UI-managed scripts consistent"
+    ),
+}
+
 _BACKUP_DIR_NAME = "mcp_backups"
 _BACKUP_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d+$")
 
@@ -47,8 +75,9 @@ def _resolve_safe(hass: HomeAssistant, filename: str) -> Path:
     """Return resolved Path inside config dir, or raise ValueError."""
     if os.sep in filename or "/" in filename:
         raise ValueError("Subdirectories are not allowed — only first-level files")
-    if filename.lower() in _BLOCKED_NAMES:
-        raise ValueError(f"Access to '{filename}' is blocked for security reasons")
+    blocked_reason = _BLOCKED_FILES.get(filename.lower())
+    if blocked_reason is not None:
+        raise ValueError(f"Access to '{filename}' is blocked: {blocked_reason}")
     suffix = Path(filename).suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
         raise ValueError(f"Only YAML files are supported (.yaml, .yml), got '{suffix or filename}'")
@@ -59,14 +88,24 @@ def _resolve_safe(hass: HomeAssistant, filename: str) -> Path:
     return path
 
 
+_SECRETS_FILES = {"secrets.yaml", "secrets.yml"}
+
+
 def _yaml_files_in(directory: Path) -> list[Path]:
-    """Return sorted first-level YAML files excluding secrets."""
+    """Return sorted first-level YAML files for backups, excluding only secrets.
+
+    Note: this is intentionally narrower than `_BLOCKED_FILES`. The block list
+    keeps the AI from rewriting registry-owned files via the config tools, but
+    those files MUST still be included in backups — otherwise a restore would
+    silently drop the user's automations, scenes, or scripts. Only secrets are
+    excluded so they never end up in `mcp_backups/`.
+    """
     return sorted(
         entry
         for entry in directory.iterdir()
         if entry.is_file()
         and entry.suffix.lower() in _ALLOWED_SUFFIXES
-        and entry.name.lower() not in _BLOCKED_NAMES
+        and entry.name.lower() not in _SECRETS_FILES
     )
 
 
@@ -79,9 +118,8 @@ async def _run_config_check(hass: HomeAssistant) -> dict[str, Any]:
     return {"valid": len(errors) == 0, "errors": errors}
 
 
-def _create_backup(hass: HomeAssistant) -> str | None:
+def _create_backup_sync(config_dir: Path) -> str | None:
     """Snapshot all first-level YAML files into mcp_backups/; return relative path or None."""
-    config_dir = _config_dir(hass)
     files = _yaml_files_in(config_dir)
     if not files:
         return None
@@ -93,11 +131,36 @@ def _create_backup(hass: HomeAssistant) -> str | None:
     return f"{_BACKUP_DIR_NAME}/{timestamp}"
 
 
+async def _create_backup(hass: HomeAssistant) -> str | None:
+    """Async wrapper around _create_backup_sync — runs filesystem I/O off the event loop."""
+    return await hass.async_add_executor_job(_create_backup_sync, _config_dir(hass))
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content to path atomically via temp file + os.replace.
+
+    Avoids leaving the target half-written if the process dies mid-write.
+    """
+    tmp = path.with_name(f".{path.name}.mcp_tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
+
+
 @register_tool(
     name="list_config_files",
     description=(
         "List YAML configuration files in the Home Assistant config directory "
-        "(first level only; secrets.yaml and .storage are excluded)"
+        "(first level only; secrets.yaml is excluded). "
+        "Some listed files (automations.yaml, scenes.yaml, scripts.yaml) cannot be "
+        "edited directly — use the dedicated CRUD tools for those instead"
     ),
     input_schema={"type": "object", "properties": {}},
 )
@@ -117,7 +180,10 @@ async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     name="get_config_file",
     description=(
         "Read the contents of a YAML configuration file from the Home Assistant config directory. "
-        "First-level files only; secrets.yaml is blocked"
+        "First-level files only. secrets.yaml is blocked, and "
+        "automations.yaml / scenes.yaml / scripts.yaml are blocked from direct access — "
+        "use list_automations / list_scenes / list_scripts (and their get_*_config variants) "
+        "for those"
     ),
     input_schema={
         "type": "object",
@@ -165,7 +231,10 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
     name="save_config_file",
     description=(
         "Write or replace a YAML configuration file in the Home Assistant config directory. "
-        "First-level files only; secrets.yaml is blocked. "
+        "First-level files only. secrets.yaml is blocked, and "
+        "automations.yaml / scenes.yaml / scripts.yaml are blocked from direct edits — "
+        "use create_automation/update_automation, create_scene/update_scene, or "
+        "create_script/update_script for those. "
         "Creates the file if it does not exist. "
         "Automatically backs up all YAML files before writing and runs a config check after. "
         "When editing multiple files prefer batch_edit_config_files to avoid redundant backups"
@@ -175,7 +244,7 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         "properties": {
             "filename": {
                 "type": "string",
-                "description": "File name, e.g. 'automations.yaml'",
+                "description": "File name, e.g. 'configuration.yaml' or 'templates.yaml'",
             },
             "content": {
                 "type": "string",
@@ -198,8 +267,8 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
-        backup_path = _create_backup(hass)
-        path.write_text(arguments["content"], encoding="utf-8")
+        backup_path = await _create_backup(hass)
+        _atomic_write(path, arguments["content"])
         lines = [f"Successfully saved '{arguments['filename']}'"]
         if backup_path:
             lines.append(f"Backup: {backup_path}")
@@ -225,7 +294,9 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     name="delete_config_file",
     description=(
         "Delete a YAML configuration file from the Home Assistant config directory. "
-        "First-level files only; secrets.yaml is blocked. "
+        "First-level files only. secrets.yaml is blocked, and "
+        "automations.yaml / scenes.yaml / scripts.yaml are blocked — "
+        "use delete_automation, delete_scene, or delete_script for those. "
         "Automatically backs up all YAML files before deleting. "
         "When deleting multiple files prefer batch_edit_config_files to avoid redundant backups"
     ),
@@ -252,7 +323,7 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
                     {"type": "text", "text": f"File '{arguments['filename']}' does not exist"}
                 ]
             }
-        backup_path = _create_backup(hass)
+        backup_path = await _create_backup(hass)
         path.unlink()
         lines = [f"Successfully deleted '{arguments['filename']}'"]
         if backup_path:
@@ -341,14 +412,14 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
         }
 
     # Phase 2: one backup
-    backup_path = _create_backup(hass)
+    backup_path = await _create_backup(hass)
 
     # Phase 3: apply saves
     saved: list[str] = []
     errors: list[str] = []
     for filename, path, content in save_paths:
         try:
-            path.write_text(content, encoding="utf-8")
+            _atomic_write(path, content)
             saved.append(filename)
         except Exception as e:
             errors.append(f"save '{filename}': {e}")
@@ -404,7 +475,7 @@ async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) ->
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
-        backup_path = _create_backup(hass)
+        backup_path = await _create_backup(hass)
         if backup_path is None:
             return {"content": [{"type": "text", "text": "No YAML files found to back up"}]}
         backup_dir = _config_dir(hass) / backup_path
@@ -575,7 +646,7 @@ async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) 
             backup_dir = candidates[-1]
 
         # Snapshot current state before overwriting — symmetric to save/delete.
-        pre_restore_backup = _create_backup(hass)
+        pre_restore_backup = await _create_backup(hass)
 
         config_dir = _config_dir(hass)
         restored = []

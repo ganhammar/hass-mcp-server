@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.tools.config_files import (
@@ -22,6 +22,11 @@ def _make_hass(config_dir: Path, *, config_file_access: bool = True) -> Mock:
     hass = Mock()
     hass.config.config_dir = str(config_dir)
     hass.data = {DOMAIN: {"config_file_access": config_file_access}}
+
+    async def _run_in_executor(fn, *args):
+        return fn(*args)
+
+    hass.async_add_executor_job = AsyncMock(side_effect=_run_in_executor)
     return hass
 
 
@@ -125,10 +130,10 @@ class TestListConfigFiles:
 
 class TestGetConfigFile:
     async def test_read_existing_file(self, tmp_path):
-        (tmp_path / "automations.yaml").write_text("- alias: test\n")
+        (tmp_path / "templates.yaml").write_text("- alias: test\n")
         hass = _make_hass(tmp_path)
 
-        result = await get_config_file(hass, {"filename": "automations.yaml"})
+        result = await get_config_file(hass, {"filename": "templates.yaml"})
 
         assert result["content"][0]["text"] == "- alias: test\n"
 
@@ -143,7 +148,42 @@ class TestGetConfigFile:
 
         result = await get_config_file(hass, {"filename": "secrets.yaml"})
 
-        assert "blocked" in result["content"][0]["text"]
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        # Reason should be exposed so the AI knows why.
+        assert "sensitive credentials" in text
+
+    async def test_read_blocks_automations_yaml_with_tool_hint(self, tmp_path):
+        """Registry-owned files are blocked; the error names the dedicated tool."""
+        (tmp_path / "automations.yaml").write_text("- alias: test")
+        hass = _make_hass(tmp_path)
+
+        result = await get_config_file(hass, {"filename": "automations.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        # The error must point at the right CRUD tool so the AI can recover.
+        assert "update_automation" in text or "create_automation" in text
+
+    async def test_read_blocks_scenes_yaml_with_tool_hint(self, tmp_path):
+        (tmp_path / "scenes.yaml").write_text("- name: evening")
+        hass = _make_hass(tmp_path)
+
+        result = await get_config_file(hass, {"filename": "scenes.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_scene" in text or "create_scene" in text
+
+    async def test_read_blocks_scripts_yaml_with_tool_hint(self, tmp_path):
+        (tmp_path / "scripts.yaml").write_text("morning: {}")
+        hass = _make_hass(tmp_path)
+
+        result = await get_config_file(hass, {"filename": "scripts.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_script" in text or "create_script" in text
 
     async def test_read_blocks_non_yaml(self, tmp_path):
         (tmp_path / "script.py").write_text("import os")
@@ -208,7 +248,7 @@ def _mock_check_config(valid: bool = True, errors: list[str] | None = None):
 def _mock_create_backup(path: str = "mcp_backups/2026-01-01_10-00-00-000000"):
     return patch(
         "custom_components.mcp_server_http_transport.tools.config_files._create_backup",
-        return_value=path,
+        new=AsyncMock(return_value=path),
     )
 
 
@@ -224,25 +264,25 @@ class TestSaveConfigFile:
         assert (tmp_path / "new.yaml").read_text() == "key: value\n"
 
     async def test_backup_created_automatically(self, tmp_path):
-        (tmp_path / "automations.yaml").write_text("original")
+        (tmp_path / "templates.yaml").write_text("original")
         hass = _make_hass(tmp_path)
         with _mock_check_config():
             result = await save_config_file(
-                hass, {"filename": "automations.yaml", "content": "updated"}
+                hass, {"filename": "templates.yaml", "content": "updated"}
             )
         text = result["content"][0]["text"]
         assert "Backup:" in text
         assert "mcp_backups/" in text
-        assert (tmp_path / "automations.yaml").read_text() == "updated"
+        assert (tmp_path / "templates.yaml").read_text() == "updated"
 
     async def test_overwrite_existing_file(self, tmp_path):
-        (tmp_path / "automations.yaml").write_text("old content")
+        (tmp_path / "templates.yaml").write_text("old content")
         hass = _make_hass(tmp_path)
 
         with _mock_create_backup(), _mock_check_config():
-            await save_config_file(hass, {"filename": "automations.yaml", "content": "new content"})
+            await save_config_file(hass, {"filename": "templates.yaml", "content": "new content"})
 
-        assert (tmp_path / "automations.yaml").read_text() == "new content"
+        assert (tmp_path / "templates.yaml").read_text() == "new content"
 
     async def test_config_check_ok_reported(self, tmp_path):
         hass = _make_hass(tmp_path)
@@ -291,6 +331,35 @@ class TestSaveConfigFile:
         )
         assert "blocked" in result["content"][0]["text"]
         assert not (tmp_path / "secrets.yaml").exists()
+
+    async def test_write_blocks_automations_yaml(self, tmp_path):
+        """Direct writes to automations.yaml are blocked; the error names the dedicated tool."""
+        hass = _make_hass(tmp_path)
+        result = await save_config_file(
+            hass, {"filename": "automations.yaml", "content": "- alias: hijacked"}
+        )
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_automation" in text or "create_automation" in text
+        assert not (tmp_path / "automations.yaml").exists()
+
+    async def test_write_blocks_scenes_yaml(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await save_config_file(
+            hass, {"filename": "scenes.yaml", "content": "- name: hijacked"}
+        )
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_scene" in text or "create_scene" in text
+
+    async def test_write_blocks_scripts_yaml(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await save_config_file(
+            hass, {"filename": "scripts.yaml", "content": "hijacked: {}"}
+        )
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "update_script" in text or "create_script" in text
 
     async def test_write_blocks_non_yaml(self, tmp_path):
         hass = _make_hass(tmp_path)
@@ -342,6 +411,19 @@ class TestDeleteConfigFile:
         assert "blocked" in result["content"][0]["text"]
         assert (tmp_path / "secrets.yaml").exists()
 
+    async def test_delete_blocks_automations_yaml(self, tmp_path):
+        """Even on delete the error names the dedicated tool."""
+        (tmp_path / "automations.yaml").write_text("- alias: keep")
+        hass = _make_hass(tmp_path)
+
+        result = await delete_config_file(hass, {"filename": "automations.yaml"})
+
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "delete_automation" in text
+        # File must remain on disk.
+        assert (tmp_path / "automations.yaml").exists()
+
     async def test_delete_blocks_non_yaml(self, tmp_path):
         (tmp_path / "script.py").write_text("")
         hass = _make_hass(tmp_path)
@@ -384,6 +466,22 @@ class TestBackupConfigFiles:
 
         assert (backup_dir / "configuration.yaml").exists()
         assert not (backup_dir / "secrets.yaml").exists()
+
+    async def test_backup_includes_registry_owned_files(self, tmp_path):
+        """Files blocked from direct edits (automations/scenes/scripts) MUST still be
+        backed up — otherwise a restore would silently drop them.
+        """
+        (tmp_path / "automations.yaml").write_text("- alias: morning")
+        (tmp_path / "scenes.yaml").write_text("- name: evening")
+        (tmp_path / "scripts.yaml").write_text("morning: {}")
+        hass = _make_hass(tmp_path)
+
+        await backup_config_files(hass, {})
+        backup_dir = next((tmp_path / "mcp_backups").iterdir())
+
+        assert (backup_dir / "automations.yaml").exists()
+        assert (backup_dir / "scenes.yaml").exists()
+        assert (backup_dir / "scripts.yaml").exists()
 
     async def test_backup_excludes_non_yaml(self, tmp_path):
         (tmp_path / "automations.yaml").write_text("[]")
@@ -774,14 +872,14 @@ class TestBatchEditConfigFiles:
         hass = _make_hass(tmp_path)
         backup_calls = []
 
-        def counting_backup(h):
+        async def counting_backup(h):
             backup_calls.append(1)
             return "mcp_backups/fake"
 
         with (
             patch(
                 "custom_components.mcp_server_http_transport.tools.config_files._create_backup",
-                side_effect=counting_backup,
+                new=AsyncMock(side_effect=counting_backup),
             ),
             _mock_check_config(),
         ):
@@ -996,3 +1094,93 @@ class TestCleanupConfigBackups:
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await cleanup_config_backups(hass, {})
         assert "disabled" in result["content"][0]["text"].lower()
+
+
+class TestAtomicWrite:
+    """Save path uses temp file + os.replace so a crash can't leave a half-written file."""
+
+    async def test_save_does_not_leave_temp_file_on_success(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        with _mock_create_backup(), _mock_check_config():
+            await save_config_file(hass, {"filename": "ok.yaml", "content": "key: value\n"})
+        # No leftover .ok.yaml.mcp_tmp anywhere
+        assert not (tmp_path / ".ok.yaml.mcp_tmp").exists()
+        assert (tmp_path / "ok.yaml").read_text() == "key: value\n"
+
+    async def test_save_cleans_up_temp_file_on_write_failure(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        original = Path.write_text
+
+        def fail_on_tmp(self, *args, **kwargs):
+            if self.name.startswith(".") and self.name.endswith(".mcp_tmp"):
+                # Create the temp file, then raise — simulates a partial write.
+                original(self, "partial", encoding="utf-8")
+                raise OSError("disk full")
+            return original(self, *args, **kwargs)
+
+        with (
+            _mock_create_backup(),
+            _mock_check_config(),
+            patch.object(Path, "write_text", fail_on_tmp),
+        ):
+            result = await save_config_file(hass, {"filename": "boom.yaml", "content": "x: 1"})
+
+        assert "Error saving config file" in result["content"][0]["text"]
+        # The original target was never touched, and the temp file was cleaned up.
+        assert not (tmp_path / "boom.yaml").exists()
+        assert not (tmp_path / ".boom.yaml.mcp_tmp").exists()
+
+    async def test_save_swallows_unlink_failure_during_cleanup(self, tmp_path):
+        """If temp cleanup itself fails, the original write error still propagates."""
+        hass = _make_hass(tmp_path)
+        original_write = Path.write_text
+
+        def fail_after_temp_write(self, *args, **kwargs):
+            if self.name.startswith(".") and self.name.endswith(".mcp_tmp"):
+                original_write(self, "partial", encoding="utf-8")
+                raise OSError("disk full")
+            return original_write(self, *args, **kwargs)
+
+        with (
+            _mock_create_backup(),
+            _mock_check_config(),
+            patch.object(Path, "write_text", fail_after_temp_write),
+            patch.object(Path, "unlink", side_effect=OSError("cleanup failed")),
+        ):
+            result = await save_config_file(hass, {"filename": "boom.yaml", "content": "x: 1"})
+
+        # Original write error is what surfaces — not the unlink failure.
+        assert "Error saving config file" in result["content"][0]["text"]
+        assert "disk full" in result["content"][0]["text"]
+
+    async def test_save_leaves_existing_file_untouched_on_failure(self, tmp_path):
+        (tmp_path / "existing.yaml").write_text("original: true\n")
+        hass = _make_hass(tmp_path)
+
+        with (
+            _mock_create_backup(),
+            _mock_check_config(),
+            patch("os.replace", side_effect=OSError("rename failed")),
+        ):
+            result = await save_config_file(
+                hass, {"filename": "existing.yaml", "content": "new: data\n"}
+            )
+
+        assert "Error saving config file" in result["content"][0]["text"]
+        # Original file is intact — atomic write means partial state never reaches the target.
+        assert (tmp_path / "existing.yaml").read_text() == "original: true\n"
+        assert not (tmp_path / ".existing.yaml.mcp_tmp").exists()
+
+
+class TestBackupRunsInExecutor:
+    """_create_backup must run filesystem I/O via hass.async_add_executor_job."""
+
+    async def test_save_uses_executor_for_backup(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("a: 1")
+        hass = _make_hass(tmp_path)
+        with _mock_check_config():
+            result = await save_config_file(hass, {"filename": "a.yaml", "content": "a: 2"})
+
+        assert "Successfully saved" in result["content"][0]["text"]
+        # Executor was actually used — at least one call goes through async_add_executor_job.
+        assert hass.async_add_executor_job.await_count >= 1

@@ -38,7 +38,11 @@ async def get_error_log(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
                 with open(log_path) as f:
                     return "".join(deque(f, maxlen=lines))
             except FileNotFoundError:
-                return "Log file not found"
+                return (
+                    f"Log file not found at {log_path}. "
+                    "Home Assistant may not be configured to write logs to disk; "
+                    "enable file logging via the 'logger:' integration in configuration.yaml."
+                )
 
         log_text = await hass.async_add_executor_job(_read_log)
         return {"content": [{"type": "text", "text": log_text}]}

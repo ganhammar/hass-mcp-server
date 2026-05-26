@@ -47,6 +47,7 @@ from . import (  # noqa: E402
     dashboards,  # noqa: F401
     entities,  # noqa: F401
     helpers,  # noqa: F401
+    images,  # noqa: F401
     statistics,  # noqa: F401
     system,  # noqa: F401
     system_admin,  # noqa: F401

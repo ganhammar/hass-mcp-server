@@ -15,6 +15,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards)
 - 🩺 System administration tools (error log, config validation, restart, system status)
 - 📁 YAML config file management — read, write, delete files with automatic backup before every change and built-in config validation (opt-in)
+- 📷 Camera & image access — capture live camera frames and read saved image files for visual analysis (opt-in)
 - 📊 Resources, prompts, and completions for richer AI interactions
 - 🧹 Optimization prompts for auditing automations, naming conventions, and scheduling
 
@@ -179,6 +180,15 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `list_services` | List available services, optionally filtered by domain |
 | `list_integrations` | List installed integrations and their status |
 | `list_labels` | List all labels for cross-domain grouping |
+
+**Camera & Images**
+
+These tools are disabled by default; enable them per capability via Settings → Devices & Services → MCP Server → Configure. They return images directly to the model for visual analysis.
+
+| Tool | Description |
+|------|-------------|
+| `get_camera_image` | Capture the current frame from a camera entity (optional `width`/`height` to downscale); no snapshot file is written (requires "Enable camera image access") |
+| `get_image_file` | Read an image file (JPEG, PNG, GIF, WebP) from an allowed directory, e.g. a snapshot saved by `camera.snapshot` (requires "Enable image file access") |
 
 ### Resources
 
@@ -362,6 +372,28 @@ Both `saves` and `deletes` are optional — you can use either or both in the sa
 >
 > - **`secrets.yaml`** — never readable, contains credentials
 > - **`automations.yaml`**, **`scenes.yaml`**, **`scripts.yaml`** — owned by Home Assistant's storage layer; use `create_automation` / `update_automation` / `delete_automation` (and the equivalents for scenes and scripts) so UI-managed entries stay consistent. These files are still included in backups, so a restore never drops them.
+</details>
+
+<details>
+<summary>How do I let the AI see a camera or analyze an image?</summary>
+
+Camera and image access are disabled by default. Enable them per capability via Settings → Devices & Services → MCP Server → Configure: "Enable camera image access" for live camera frames, and "Enable image file access" for reading saved image files.
+
+To analyze what a camera sees right now, capture the current frame directly — no snapshot file is needed:
+
+```
+get_camera_image(entity_id="camera.front_door")
+get_camera_image(entity_id="camera.front_door", width=1024)
+```
+
+To analyze a snapshot already saved to disk (for example by the `camera.snapshot` service), read it back by path:
+
+```
+get_image_file(path="www/snapshots/front_door.jpg")
+get_image_file(path="/config/www/snapshots/front_door.jpg")
+```
+
+The image is returned directly to the model for analysis. `get_image_file` supports JPEG, PNG, GIF, and WebP, and can only read from directories Home Assistant is allowed to access (the config directory and configured media dirs) — the same allowlist that governs where `camera.snapshot` can write.
 </details>
 
 <details>

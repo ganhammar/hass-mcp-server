@@ -8,7 +8,11 @@ from custom_components.mcp_server_http_transport.config_flow import (
     MCPServerConfigFlow,
     MCPServerOptionsFlowHandler,
 )
-from custom_components.mcp_server_http_transport.const import CONF_NATIVE_AUTH
+from custom_components.mcp_server_http_transport.const import (
+    CONF_CAMERA_IMAGE_ACCESS,
+    CONF_IMAGE_FILE_ACCESS,
+    CONF_NATIVE_AUTH,
+)
 
 
 class TestMCPServerConfigFlow:
@@ -164,3 +168,40 @@ class TestMCPServerOptionsFlow:
 
         schema_keys = {str(k): k for k in result["data_schema"].schema}
         assert schema_keys[CONF_NATIVE_AUTH].default() is False
+
+    async def test_init_step_image_access_defaults_to_false(self):
+        """Test camera and image file access default to False."""
+        flow = self._create_flow(data={})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_CAMERA_IMAGE_ACCESS].default() is False
+        assert schema_keys[CONF_IMAGE_FILE_ACCESS].default() is False
+
+    async def test_init_step_shows_current_image_access_values(self):
+        """Test init step reflects stored camera and image file access values."""
+        flow = self._create_flow(
+            data={CONF_CAMERA_IMAGE_ACCESS: True, CONF_IMAGE_FILE_ACCESS: True}
+        )
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_CAMERA_IMAGE_ACCESS].default() is True
+        assert schema_keys[CONF_IMAGE_FILE_ACCESS].default() is True
+
+    async def test_init_step_persists_image_access(self):
+        """Test init step merges camera and image file access into entry data."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={
+                CONF_NATIVE_AUTH: True,
+                CONF_CAMERA_IMAGE_ACCESS: True,
+                CONF_IMAGE_FILE_ACCESS: True,
+            }
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_CAMERA_IMAGE_ACCESS] is True
+        assert call_kwargs[1]["data"][CONF_IMAGE_FILE_ACCESS] is True

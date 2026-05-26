@@ -11,3 +11,5 @@ CONF_NATIVE_AUTH = "native_auth_enabled"
 
 # Feature flags
 CONF_CONFIG_FILE_ACCESS = "config_file_access_enabled"
+CONF_CAMERA_IMAGE_ACCESS = "camera_image_access_enabled"
+CONF_IMAGE_FILE_ACCESS = "image_file_access_enabled"

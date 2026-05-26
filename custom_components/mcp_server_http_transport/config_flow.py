@@ -7,7 +7,13 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 
-from .const import CONF_CONFIG_FILE_ACCESS, CONF_NATIVE_AUTH, DOMAIN
+from .const import (
+    CONF_CAMERA_IMAGE_ACCESS,
+    CONF_CONFIG_FILE_ACCESS,
+    CONF_IMAGE_FILE_ACCESS,
+    CONF_NATIVE_AUTH,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -15,6 +21,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_NATIVE_AUTH, default=False): bool,
         vol.Optional(CONF_CONFIG_FILE_ACCESS, default=False): bool,
+        vol.Optional(CONF_CAMERA_IMAGE_ACCESS, default=False): bool,
+        vol.Optional(CONF_IMAGE_FILE_ACCESS, default=False): bool,
     }
 )
 
@@ -80,6 +88,8 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
 
         current_native_auth = self.config_entry.data.get(CONF_NATIVE_AUTH, False)
         current_config_file_access = self.config_entry.data.get(CONF_CONFIG_FILE_ACCESS, False)
+        current_camera_image_access = self.config_entry.data.get(CONF_CAMERA_IMAGE_ACCESS, False)
+        current_image_file_access = self.config_entry.data.get(CONF_IMAGE_FILE_ACCESS, False)
 
         return self.async_show_form(
             step_id="init",
@@ -87,6 +97,10 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                 {
                     vol.Optional(CONF_NATIVE_AUTH, default=current_native_auth): bool,
                     vol.Optional(CONF_CONFIG_FILE_ACCESS, default=current_config_file_access): bool,
+                    vol.Optional(
+                        CONF_CAMERA_IMAGE_ACCESS, default=current_camera_image_access
+                    ): bool,
+                    vol.Optional(CONF_IMAGE_FILE_ACCESS, default=current_image_file_access): bool,
                 }
             ),
             errors=errors,

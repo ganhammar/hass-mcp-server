@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.tools.system_admin import (
+    _format_system_log_entry,
+)
 
 
 class TestToolsSystemAdmin:
@@ -640,3 +643,32 @@ class TestToolsSystemAdmin:
         body = json.loads(response.body)
         text = body["result"]["content"][0]["text"]
         assert "Error checking config" in text
+
+
+class TestFormatSystemLogEntry:
+    """Cover the defensive formatting branches for odd-shaped system_log entries."""
+
+    def test_odd_field_shapes(self):
+        """Non-numeric timestamp, string source, and string message all render."""
+        line = _format_system_log_entry(
+            {
+                "timestamp": "not-an-epoch",
+                "level": "WARNING",
+                "name": "custom.logger",
+                "source": "single-source",
+                "message": "plain string message",
+                "count": 1,
+            }
+        )
+        assert "not-an-epoch" in line  # timestamp parse fell back to str()
+        assert "WARNING" in line
+        assert "(custom.logger)" in line
+        assert "[single-source]" in line  # non-tuple source rendered as-is
+        assert "plain string message" in line
+        assert "(1x)" not in line  # count of 1 adds no suffix
+
+    def test_missing_source_and_message(self):
+        """Absent source and message degrade to a placeholder and empty string."""
+        line = _format_system_log_entry({"timestamp": 1_700_000_000.0, "level": "ERROR"})
+        assert "[?]" in line  # source is None -> "?"
+        assert "ERROR" in line

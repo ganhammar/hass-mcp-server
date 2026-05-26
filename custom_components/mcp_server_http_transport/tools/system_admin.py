@@ -77,12 +77,19 @@ def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
     to_list = getattr(getattr(handler, "records", None), "to_list", None)
     if not callable(to_list):
         return None
-    entries = to_list()
-    if not isinstance(entries, list) or not entries:
+    # The caller invokes this inside `except FileNotFoundError`, where a sibling
+    # `except Exception` can't catch a throw originating here. Guard the buffer
+    # read and formatting so any failure degrades to the not-found message
+    # rather than escaping as an internal error.
+    try:
+        entries = to_list()
+        if not isinstance(entries, list) or not entries:
+            return None
+        shown = entries[: max(1, limit)]
+        formatted = "\n".join(_format_system_log_entry(entry) for entry in shown)
+    except Exception as e:
+        _LOGGER.debug("Could not read system log buffer: %s", e)
         return None
-
-    shown = entries[: max(1, limit)]
-    formatted = "\n".join(_format_system_log_entry(entry) for entry in shown)
     header = (
         f"home-assistant.log not found; showing the {len(shown)} most recent "
         "WARNING/ERROR entries from Home Assistant's in-memory system log buffer "

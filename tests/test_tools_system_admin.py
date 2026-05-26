@@ -562,6 +562,34 @@ class TestToolsSystemAdmin:
         assert "Log file not found" in text
         assert "logger:" in text
 
+    async def test_get_error_log_buffer_read_failure_degrades_to_not_found(self, view, mock_hass):
+        """If the system_log buffer raises, degrade to the not-found message, not a 500."""
+        mock_hass.config.path.return_value = "/nonexistent/home-assistant.log"
+        handler = Mock()
+        handler.records.to_list.side_effect = RuntimeError("buffer exploded")
+        mock_hass.data = {"mcp_server_http_transport": True, "system_log": handler}
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=FileNotFoundError())
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_error_log", "arguments": {}},
+                "id": 258,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "Log file not found" in text
+        assert "logger:" in text
+
     async def test_post_tools_call_restart_ha_error(self, view, mock_hass):
         """Test restart_ha when service call raises."""
         mock_hass.services.async_call = AsyncMock(side_effect=Exception("Service error"))

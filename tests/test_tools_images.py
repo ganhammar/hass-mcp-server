@@ -154,6 +154,19 @@ class TestGetImageFile:
         result = await get_image_file(hass, {"path": "nope.png"})
         assert "does not exist" in result["content"][0]["text"]
 
+    async def test_rejects_directory(self, tmp_path):
+        (tmp_path / "shots.png").mkdir()
+        hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=True)
+        result = await get_image_file(hass, {"path": "shots.png"})
+        assert "is not a file" in result["content"][0]["text"]
+
+    async def test_handles_read_error(self, tmp_path):
+        hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=True)
+        hass.async_add_executor_job = AsyncMock(side_effect=OSError("disk error"))
+        result = await get_image_file(hass, {"path": "snap.png"})
+        assert "Error reading image file" in result["content"][0]["text"]
+        assert "disk error" in result["content"][0]["text"]
+
     async def test_rejects_oversized_file(self, tmp_path, monkeypatch):
         monkeypatch.setattr(images, "_MAX_IMAGE_BYTES", 4)
         (tmp_path / "big.png").write_bytes(b"12345")

@@ -94,10 +94,12 @@ def _text(message: str) -> dict[str, Any]:
             },
             "width": {
                 "type": "integer",
+                "minimum": 1,
                 "description": "Optional target width in pixels to scale the image down to",
             },
             "height": {
                 "type": "integer",
+                "minimum": 1,
                 "description": "Optional target height in pixels to scale the image down to",
             },
         },
@@ -114,6 +116,9 @@ async def get_camera_image(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         return _text(f"'{entity_id}' is not a camera entity (expected a 'camera.' entity ID)")
 
     try:
+        # Imported lazily: the camera component pulls in turbojpeg (a C extension)
+        # at module load, which is absent in some environments. A top-level import
+        # would break tool registration; deferring it keeps the failure local.
         from homeassistant.components.camera import async_get_image
 
         image = await async_get_image(

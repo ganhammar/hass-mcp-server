@@ -140,6 +140,49 @@ class TestAsyncSetupEntry:
 
         mock_endpoint_view_class.assert_called_once_with(mock_hass, mock_server, True)
 
+    @patch("custom_components.mcp_server_http_transport.Server")
+    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
+    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
+    async def test_async_setup_entry_image_access_defaults_off(
+        self,
+        mock_subpath_view,
+        mock_metadata_view,
+        mock_endpoint_view,
+        mock_server_class,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """Test camera and image file access default to disabled in hass.data."""
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["camera_image_access"] is False
+        assert mock_hass.data[DOMAIN]["image_file_access"] is False
+
+    @patch("custom_components.mcp_server_http_transport.Server")
+    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
+    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
+    async def test_async_setup_entry_wires_image_access_flags(
+        self,
+        mock_subpath_view,
+        mock_metadata_view,
+        mock_endpoint_view,
+        mock_server_class,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """Test camera and image file access flags are read into hass.data."""
+        mock_config_entry.data = {
+            "camera_image_access_enabled": True,
+            "image_file_access_enabled": True,
+        }
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["camera_image_access"] is True
+        assert mock_hass.data[DOMAIN]["image_file_access"] is True
+
 
 class TestUpdateListener:
     """Test config entry update listener."""

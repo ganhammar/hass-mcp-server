@@ -84,7 +84,9 @@ class TestToolsSystemAdmin:
     async def test_post_tools_call_get_error_log_file_not_found(self, view, mock_hass):
         """Test POST with tools/call for get_error_log when file is missing."""
         mock_hass.config.path.return_value = "/config/home-assistant.log"
-        mock_hass.async_add_executor_job = AsyncMock(return_value="Log file not found")
+        # Integration loaded, but no system_log buffer available.
+        mock_hass.data = {"mcp_server_http_transport": True}
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=FileNotFoundError())
 
         request = Mock()
         request.headers = {"Authorization": "Bearer valid_token"}
@@ -457,6 +459,8 @@ class TestToolsSystemAdmin:
     async def test_post_tools_call_get_error_log_file_missing(self, view, mock_hass):
         """Test get_error_log when log file does not exist (FileNotFoundError)."""
         mock_hass.config.path.return_value = "/nonexistent/path/home-assistant.log"
+        # Integration loaded, but no system_log buffer available.
+        mock_hass.data = {"mcp_server_http_transport": True}
 
         async def run_fn(fn, *args):
             return fn(*args) if args else fn()
@@ -483,6 +487,79 @@ class TestToolsSystemAdmin:
         assert "Log file not found" in text
         # The checked path is included so users can confirm where we looked (#48).
         assert "/nonexistent/path/home-assistant.log" in text
+        assert "logger:" in text
+
+    async def test_get_error_log_falls_back_to_system_log_buffer(self, view, mock_hass):
+        """When the file is missing, fall back to the in-memory system_log buffer (#48)."""
+        mock_hass.config.path.return_value = "/nonexistent/home-assistant.log"
+
+        # Mimic homeassistant.components.system_log: hass.data["system_log"].records.to_list().
+        handler = Mock()
+        handler.records.to_list.return_value = [
+            {
+                "name": "homeassistant.components.foo",
+                "message": ["Something broke"],
+                "level": "ERROR",
+                "source": ["components/foo/__init__.py", 42],
+                "timestamp": 1_700_000_000.0,
+                "exception": "Traceback (most recent call last):\n  ...\nValueError: boom",
+                "count": 3,
+                "first_occurred": 1_700_000_000.0,
+            }
+        ]
+        mock_hass.data = {"mcp_server_http_transport": True, "system_log": handler}
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=FileNotFoundError())
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_error_log", "arguments": {}},
+                "id": 256,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "in-memory system log buffer" in text
+        assert "Something broke" in text
+        assert "ERROR" in text
+        assert "components/foo/__init__.py:42" in text
+        assert "(3x)" in text
+        assert "ValueError: boom" in text
+
+    async def test_get_error_log_empty_buffer_returns_not_found(self, view, mock_hass):
+        """An empty system_log buffer falls through to the not-found message."""
+        mock_hass.config.path.return_value = "/nonexistent/home-assistant.log"
+        handler = Mock()
+        handler.records.to_list.return_value = []
+        mock_hass.data = {"mcp_server_http_transport": True, "system_log": handler}
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=FileNotFoundError())
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_error_log", "arguments": {}},
+                "id": 257,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        text = body["result"]["content"][0]["text"]
+        assert "Log file not found" in text
         assert "logger:" in text
 
     async def test_post_tools_call_restart_ha_error(self, view, mock_hass):

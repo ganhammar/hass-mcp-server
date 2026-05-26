@@ -3,6 +3,7 @@
 import json
 import logging
 from collections import deque
+from datetime import datetime
 from typing import Any
 
 from homeassistant.const import __version__ as HA_VERSION
@@ -15,7 +16,11 @@ _LOGGER = logging.getLogger(__name__)
 
 @register_tool(
     name="get_error_log",
-    description="Fetch the Home Assistant error log. Returns the last N lines of the log file",
+    description=(
+        "Fetch the Home Assistant error log. Returns the last N lines of the log file. "
+        "If on-disk file logging is disabled, falls back to the recent WARNING/ERROR "
+        "entries Home Assistant keeps in memory"
+    ),
     input_schema={
         "type": "object",
         "properties": {
@@ -27,28 +32,105 @@ _LOGGER = logging.getLogger(__name__)
     },
 )
 async def get_error_log(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Fetch the Home Assistant error log."""
+    """Fetch the Home Assistant error log, falling back to the in-memory buffer."""
     lines = arguments.get("lines", 100)
     log_path = hass.config.path("home-assistant.log")
 
+    def _read_log():
+        with open(log_path) as f:
+            return "".join(deque(f, maxlen=lines))
+
     try:
-
-        def _read_log():
-            try:
-                with open(log_path) as f:
-                    return "".join(deque(f, maxlen=lines))
-            except FileNotFoundError:
-                return (
-                    f"Log file not found at {log_path}. "
-                    "Home Assistant may not be configured to write logs to disk; "
-                    "enable file logging via the 'logger:' integration in configuration.yaml."
-                )
-
         log_text = await hass.async_add_executor_job(_read_log)
         return {"content": [{"type": "text", "text": log_text}]}
+    except FileNotFoundError:
+        fallback = _read_system_log_buffer(hass, lines)
+        if fallback is not None:
+            return {"content": [{"type": "text", "text": fallback}]}
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"Log file not found at {log_path}, and Home Assistant's in-memory "
+                        "system log buffer is empty or unavailable. Home Assistant may not be "
+                        "configured to write logs to disk; enable file logging via the "
+                        "'logger:' integration in configuration.yaml."
+                    ),
+                }
+            ]
+        }
     except Exception as e:
         _LOGGER.error("Error reading error log: %s", e)
         return {"content": [{"type": "text", "text": f"Error reading error log: {str(e)}"}]}
+
+
+def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
+    """Render recent WARNING/ERROR entries from HA's in-memory system log, or None.
+
+    The system_log component keeps a deduplicated buffer of recent warning and
+    error records in memory regardless of whether on-disk file logging is
+    enabled, so it gives useful output on installs where home-assistant.log is
+    absent. Returns None when the component is unavailable or the buffer is empty.
+    """
+    handler = hass.data.get("system_log")
+    to_list = getattr(getattr(handler, "records", None), "to_list", None)
+    if not callable(to_list):
+        return None
+    # The caller invokes this inside `except FileNotFoundError`, where a sibling
+    # `except Exception` can't catch a throw originating here. Guard the buffer
+    # read and formatting so any failure degrades to the not-found message
+    # rather than escaping as an internal error.
+    try:
+        entries = to_list()
+        if not isinstance(entries, list) or not entries:
+            return None
+        shown = entries[: max(1, limit)]
+        formatted = "\n".join(_format_system_log_entry(entry) for entry in shown)
+    except Exception as e:
+        _LOGGER.debug("Could not read system log buffer: %s", e)
+        return None
+    header = (
+        f"home-assistant.log not found; showing the {len(shown)} most recent "
+        "WARNING/ERROR entries from Home Assistant's in-memory system log buffer "
+        "(on-disk file logging appears to be disabled):\n\n"
+    )
+    return header + formatted
+
+
+def _format_system_log_entry(entry: dict[str, Any]) -> str:
+    """Format one system_log entry dict into a readable log-style line."""
+    timestamp = entry.get("timestamp")
+    try:
+        ts = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OSError):
+        ts = str(timestamp)
+
+    source = entry.get("source")
+    if isinstance(source, (list, tuple)) and len(source) == 2:
+        source_str = f"{source[0]}:{source[1]}"
+    elif source is not None:
+        source_str = str(source)
+    else:
+        source_str = "?"
+
+    messages = entry.get("message")
+    if isinstance(messages, (list, tuple)):
+        message = "; ".join(str(m) for m in messages)
+    else:
+        message = str(messages) if messages is not None else ""
+
+    count = entry.get("count", 1)
+    count_str = f" ({count}x)" if isinstance(count, int) and count > 1 else ""
+
+    line = (
+        f"{ts} {entry.get('level', '')} ({entry.get('name', '')}) "
+        f"[{source_str}] {message}{count_str}"
+    )
+    exception = entry.get("exception")
+    if exception:
+        line += f"\n{exception}"
+    return line
 
 
 @register_tool(

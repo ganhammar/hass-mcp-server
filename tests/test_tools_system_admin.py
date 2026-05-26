@@ -481,6 +481,9 @@ class TestToolsSystemAdmin:
         body = json.loads(response.body)
         text = body["result"]["content"][0]["text"]
         assert "Log file not found" in text
+        # The checked path is included so users can confirm where we looked (#48).
+        assert "/nonexistent/path/home-assistant.log" in text
+        assert "logger:" in text
 
     async def test_post_tools_call_restart_ha_error(self, view, mock_hass):
         """Test restart_ha when service call raises."""

@@ -131,11 +131,6 @@ def _create_backup_sync(config_dir: Path) -> str | None:
     return f"{_BACKUP_DIR_NAME}/{timestamp}"
 
 
-async def _create_backup(hass: HomeAssistant) -> str | None:
-    """Async wrapper around _create_backup_sync — runs filesystem I/O off the event loop."""
-    return await hass.async_add_executor_job(_create_backup_sync, _config_dir(hass))
-
-
 def _atomic_write(path: Path, content: str) -> None:
     """Write content to path atomically via temp file + os.replace.
 
@@ -170,10 +165,15 @@ async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return _DISABLED_RESPONSE
     config_dir = _config_dir(hass)
     try:
-        files = [f.name for f in _yaml_files_in(config_dir)]
+        files = await hass.async_add_executor_job(_list_yaml_filenames_sync, config_dir)
         return {"content": [{"type": "text", "text": json.dumps(files, indent=2)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing config files: {e}"}]}
+
+
+def _list_yaml_filenames_sync(config_dir: Path) -> list[str]:
+    """Return the first-level YAML filenames in config_dir, sorted."""
+    return [f.name for f in _yaml_files_in(config_dir)]
 
 
 @register_tool(
@@ -202,29 +202,22 @@ async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
-        if not path.exists():
-            return {
-                "content": [
-                    {"type": "text", "text": f"File '{arguments['filename']}' does not exist"}
-                ]
-            }
-        size = path.stat().st_size
-        if size > 1_048_576:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"File '{arguments['filename']}' is too large ({size} bytes). "
-                            "Maximum allowed size is 1 MB"
-                        ),
-                    }
-                ]
-            }
-        content = path.read_text(encoding="utf-8")
-        return {"content": [{"type": "text", "text": content}]}
+        result = await hass.async_add_executor_job(
+            _read_config_file_sync, path, arguments["filename"]
+        )
+        return {"content": [{"type": "text", "text": result}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error reading config file: {e}"}]}
+
+
+def _read_config_file_sync(path: Path, filename: str) -> str:
+    """Return file contents, or a user-facing error string for missing / oversized files."""
+    if not path.exists():
+        return f"File '{filename}' does not exist"
+    size = path.stat().st_size
+    if size > 1_048_576:
+        return f"File '{filename}' is too large ({size} bytes). Maximum allowed size is 1 MB"
+    return path.read_text(encoding="utf-8")
 
 
 @register_tool(
@@ -267,8 +260,9 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
-        backup_path = await _create_backup(hass)
-        _atomic_write(path, arguments["content"])
+        backup_path = await hass.async_add_executor_job(
+            _backup_and_write_sync, _config_dir(hass), path, arguments["content"]
+        )
         lines = [f"Successfully saved '{arguments['filename']}'"]
         if backup_path:
             lines.append(f"Backup: {backup_path}")
@@ -317,20 +311,73 @@ async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         return _DISABLED_RESPONSE
     try:
         path = _resolve_safe(hass, arguments["filename"])
-        if not path.exists():
+        result = await hass.async_add_executor_job(_backup_and_delete_sync, _config_dir(hass), path)
+        if not result["existed"]:
             return {
                 "content": [
                     {"type": "text", "text": f"File '{arguments['filename']}' does not exist"}
                 ]
             }
-        backup_path = await _create_backup(hass)
-        path.unlink()
         lines = [f"Successfully deleted '{arguments['filename']}'"]
-        if backup_path:
-            lines.append(f"Backup: {backup_path}")
+        if result["backup"]:
+            lines.append(f"Backup: {result['backup']}")
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error deleting config file: {e}"}]}
+
+
+def _backup_and_write_sync(config_dir: Path, path: Path, content: str) -> str | None:
+    """Snapshot YAML files then atomically write content to path. Returns backup path."""
+    backup_path = _create_backup_sync(config_dir)
+    _atomic_write(path, content)
+    return backup_path
+
+
+def _backup_and_delete_sync(config_dir: Path, path: Path) -> dict[str, Any]:
+    """Snapshot YAML files then delete path. Returns {existed, backup}."""
+    if not path.exists():
+        return {"existed": False, "backup": None}
+    backup_path = _create_backup_sync(config_dir)
+    path.unlink()
+    return {"existed": True, "backup": backup_path}
+
+
+def _apply_batch_edit_sync(
+    config_dir: Path,
+    save_paths: list[tuple[str, Path, str]],
+    delete_paths: list[tuple[str, Path]],
+) -> dict[str, Any]:
+    """Run batch_edit_config_files's FS work: missing-check, backup, writes, deletes."""
+    missing = [fn for fn, path in delete_paths if not path.exists()]
+    if missing:
+        return {"missing": missing}
+
+    backup_path = _create_backup_sync(config_dir)
+
+    saved: list[str] = []
+    errors: list[str] = []
+    for filename, path, content in save_paths:
+        try:
+            _atomic_write(path, content)
+            saved.append(filename)
+        except Exception as e:
+            errors.append(f"save '{filename}': {e}")
+
+    deleted: list[str] = []
+    for filename, path in delete_paths:
+        try:
+            path.unlink()
+            deleted.append(filename)
+        except Exception as e:
+            errors.append(f"delete '{filename}': {e}")
+
+    return {
+        "missing": None,
+        "backup": backup_path,
+        "saved": saved,
+        "deleted": deleted,
+        "errors": errors,
+    }
 
 
 @register_tool(
@@ -400,38 +447,29 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
     except ValueError as e:
         return {"content": [{"type": "text", "text": f"Error in deletes: {e}"}]}
 
-    missing = [fn for fn, path in delete_paths if not path.exists()]
-    if missing:
+    # Phases 2-4 (check missing-deletes → backup → write → delete) all touch the
+    # filesystem and must run off the event loop in one executor hop.
+    batch_result = await hass.async_add_executor_job(
+        _apply_batch_edit_sync, _config_dir(hass), save_paths, delete_paths
+    )
+
+    if batch_result.get("missing"):
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": f"Error: file(s) to delete do not exist: {', '.join(missing)}",
+                    "text": (
+                        "Error: file(s) to delete do not exist: "
+                        + ", ".join(batch_result["missing"])
+                    ),
                 }
             ]
         }
 
-    # Phase 2: one backup
-    backup_path = await _create_backup(hass)
-
-    # Phase 3: apply saves
-    saved: list[str] = []
-    errors: list[str] = []
-    for filename, path, content in save_paths:
-        try:
-            _atomic_write(path, content)
-            saved.append(filename)
-        except Exception as e:
-            errors.append(f"save '{filename}': {e}")
-
-    # Phase 4: apply deletes
-    deleted: list[str] = []
-    for filename, path in delete_paths:
-        try:
-            path.unlink()
-            deleted.append(filename)
-        except Exception as e:
-            errors.append(f"delete '{filename}': {e}")
+    backup_path = batch_result["backup"]
+    saved: list[str] = batch_result["saved"]
+    deleted: list[str] = batch_result["deleted"]
+    errors: list[str] = batch_result["errors"]
 
     # Phase 5: build response
     lines: list[str] = []
@@ -475,24 +513,33 @@ async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) ->
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
-        backup_path = await _create_backup(hass)
-        if backup_path is None:
+        result = await hass.async_add_executor_job(_backup_and_list_sync, _config_dir(hass))
+        if result["backup"] is None:
             return {"content": [{"type": "text", "text": "No YAML files found to back up"}]}
-        backup_dir = _config_dir(hass) / backup_path
-        backed_up = sorted(f.name for f in backup_dir.iterdir() if f.is_file())
+        files = result["files"]
         return {
             "content": [
                 {
                     "type": "text",
                     "text": (
-                        f"Backup created at '{backup_path}' "
-                        f"({len(backed_up)} files):\n" + "\n".join(f"  - {f}" for f in backed_up)
+                        f"Backup created at '{result['backup']}' "
+                        f"({len(files)} files):\n" + "\n".join(f"  - {f}" for f in files)
                     ),
                 }
             ]
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error creating backup: {e}"}]}
+
+
+def _backup_and_list_sync(config_dir: Path) -> dict[str, Any]:
+    """Snapshot and list the files placed into the new backup directory."""
+    backup_path = _create_backup_sync(config_dir)
+    if backup_path is None:
+        return {"backup": None, "files": []}
+    backup_dir = config_dir / backup_path
+    files = sorted(f.name for f in backup_dir.iterdir() if f.is_file())
+    return {"backup": backup_path, "files": files}
 
 
 @register_tool(
@@ -508,27 +555,29 @@ async def list_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) ->
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
-        backup_root = _config_dir(hass) / _BACKUP_DIR_NAME
-        if not backup_root.exists():
+        result = await hass.async_add_executor_job(_list_backups_sync, _config_dir(hass))
+        if not result:
             return {"content": [{"type": "text", "text": "No backups found"}]}
-
-        backups = sorted(
-            (d for d in backup_root.iterdir() if d.is_dir() and _BACKUP_TS_RE.match(d.name)),
-            key=lambda d: d.name,
-            reverse=True,
-        )
-
-        if not backups:
-            return {"content": [{"type": "text", "text": "No backups found"}]}
-
-        result = []
-        for backup_dir in backups:
-            files = [f.name for f in backup_dir.iterdir() if f.is_file()]
-            result.append({"timestamp": backup_dir.name, "files": sorted(files)})
-
         return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing backups: {e}"}]}
+
+
+def _list_backups_sync(config_dir: Path) -> list[dict[str, Any]]:
+    """List backup snapshots and their contents, newest first. Empty list if no backups."""
+    backup_root = config_dir / _BACKUP_DIR_NAME
+    if not backup_root.exists():
+        return []
+    backups = sorted(
+        (d for d in backup_root.iterdir() if d.is_dir() and _BACKUP_TS_RE.match(d.name)),
+        key=lambda d: d.name,
+        reverse=True,
+    )
+    result: list[dict[str, Any]] = []
+    for backup_dir in backups:
+        files = [f.name for f in backup_dir.iterdir() if f.is_file()]
+        result.append({"timestamp": backup_dir.name, "files": sorted(files)})
+    return result
 
 
 @register_tool(
@@ -560,30 +609,13 @@ async def cleanup_config_backups(hass: HomeAssistant, arguments: dict[str, Any])
         }
 
     try:
-        backup_root = _config_dir(hass) / _BACKUP_DIR_NAME
-        if not backup_root.exists():
+        result = await hass.async_add_executor_job(
+            _cleanup_backups_sync, _config_dir(hass), older_than_days
+        )
+        if result is None:
             return {"content": [{"type": "text", "text": "No backups found"}]}
-
-        cutoff = datetime.now() - timedelta(days=older_than_days)
-        deleted: list[str] = []
-        kept: list[str] = []
-
-        for d in backup_root.iterdir():
-            if not d.is_dir() or not _BACKUP_TS_RE.match(d.name):
-                continue
-            try:
-                ts = datetime.strptime(d.name, "%Y-%m-%d_%H-%M-%S-%f")
-            except ValueError:
-                continue
-            if ts < cutoff:
-                shutil.rmtree(d)
-                deleted.append(d.name)
-            else:
-                kept.append(d.name)
-
-        if not deleted and not kept:
-            return {"content": [{"type": "text", "text": "No backups found"}]}
-
+        deleted: list[str] = result["deleted"]
+        kept: list[str] = result["kept"]
         lines = [f"Deleted {len(deleted)} backup(s) older than {older_than_days} day(s)."]
         if deleted:
             lines.extend(f"  - {name}" for name in sorted(deleted))
@@ -591,6 +623,31 @@ async def cleanup_config_backups(hass: HomeAssistant, arguments: dict[str, Any])
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error cleaning up backups: {e}"}]}
+
+
+def _cleanup_backups_sync(config_dir: Path, older_than_days: int) -> dict[str, list[str]] | None:
+    """Remove backup snapshots older than older_than_days. Returns None if no backups exist."""
+    backup_root = config_dir / _BACKUP_DIR_NAME
+    if not backup_root.exists():
+        return None
+    cutoff = datetime.now() - timedelta(days=older_than_days)
+    deleted: list[str] = []
+    kept: list[str] = []
+    for d in backup_root.iterdir():
+        if not d.is_dir() or not _BACKUP_TS_RE.match(d.name):
+            continue
+        try:
+            ts = datetime.strptime(d.name, "%Y-%m-%d_%H-%M-%S-%f")
+        except ValueError:
+            continue
+        if ts < cutoff:
+            shutil.rmtree(d)
+            deleted.append(d.name)
+        else:
+            kept.append(d.name)
+    if not deleted and not kept:
+        return None
+    return {"deleted": deleted, "kept": kept}
 
 
 @register_tool(
@@ -621,53 +678,18 @@ async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) 
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     try:
-        backup_root = _config_dir(hass) / _BACKUP_DIR_NAME
-        if not backup_root.exists():
-            return {"content": [{"type": "text", "text": "No backups found"}]}
-
-        if "timestamp" in arguments:
-            backup_dir = backup_root / arguments["timestamp"]
-            if not backup_dir.is_dir():
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"Backup '{arguments['timestamp']}' not found",
-                        }
-                    ]
-                }
-        else:
-            candidates = sorted(
-                (d for d in backup_root.iterdir() if d.is_dir() and _BACKUP_TS_RE.match(d.name)),
-                key=lambda d: d.name,
-            )
-            if not candidates:
-                return {"content": [{"type": "text", "text": "No backups found"}]}
-            backup_dir = candidates[-1]
-
-        # Snapshot current state before overwriting — symmetric to save/delete.
-        pre_restore_backup = await _create_backup(hass)
-
-        config_dir = _config_dir(hass)
-        restored = []
-        for src in sorted(backup_dir.iterdir()):
-            if src.is_file() and src.suffix.lower() in _ALLOWED_SUFFIXES:
-                shutil.copy2(src, config_dir / src.name)
-                restored.append(src.name)
-
-        if not restored:
-            return {
-                "content": [
-                    {"type": "text", "text": f"Backup '{backup_dir.name}' contained no YAML files"}
-                ]
-            }
+        result = await hass.async_add_executor_job(
+            _restore_backup_sync, _config_dir(hass), arguments.get("timestamp")
+        )
+        if "error" in result:
+            return {"content": [{"type": "text", "text": result["error"]}]}
 
         lines = [
-            f"Restored {len(restored)} files from backup '{backup_dir.name}':",
-            *[f"  - {f}" for f in restored],
+            f"Restored {len(result['restored'])} files from backup '{result['backup_name']}':",
+            *[f"  - {f}" for f in result["restored"]],
         ]
-        if pre_restore_backup:
-            lines.append(f"Pre-restore snapshot: {pre_restore_backup}")
+        if result["pre_restore"]:
+            lines.append(f"Pre-restore snapshot: {result['pre_restore']}")
 
         try:
             check = await _run_config_check(hass)
@@ -683,3 +705,40 @@ async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) 
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error restoring backup: {e}"}]}
+
+
+def _restore_backup_sync(config_dir: Path, timestamp: str | None) -> dict[str, Any]:
+    """Pick a backup, snapshot the current state, copy backup files back. Returns a result dict."""
+    backup_root = config_dir / _BACKUP_DIR_NAME
+    if not backup_root.exists():
+        return {"error": "No backups found"}
+
+    if timestamp is not None:
+        backup_dir = backup_root / timestamp
+        if not backup_dir.is_dir():
+            return {"error": f"Backup '{timestamp}' not found"}
+    else:
+        candidates = sorted(
+            (d for d in backup_root.iterdir() if d.is_dir() and _BACKUP_TS_RE.match(d.name)),
+            key=lambda d: d.name,
+        )
+        if not candidates:
+            return {"error": "No backups found"}
+        backup_dir = candidates[-1]
+
+    pre_restore = _create_backup_sync(config_dir)
+
+    restored: list[str] = []
+    for src in sorted(backup_dir.iterdir()):
+        if src.is_file() and src.suffix.lower() in _ALLOWED_SUFFIXES:
+            shutil.copy2(src, config_dir / src.name)
+            restored.append(src.name)
+
+    if not restored:
+        return {"error": f"Backup '{backup_dir.name}' contained no YAML files"}
+
+    return {
+        "backup_name": backup_dir.name,
+        "pre_restore": pre_restore,
+        "restored": restored,
+    }

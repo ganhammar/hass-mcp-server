@@ -247,8 +247,8 @@ def _mock_check_config(valid: bool = True, errors: list[str] | None = None):
 
 def _mock_create_backup(path: str = "mcp_backups/2026-01-01_10-00-00-000000"):
     return patch(
-        "custom_components.mcp_server_http_transport.tools.config_files._create_backup",
-        new=AsyncMock(return_value=path),
+        "custom_components.mcp_server_http_transport.tools.config_files._create_backup_sync",
+        new=Mock(return_value=path),
     )
 
 
@@ -872,14 +872,14 @@ class TestBatchEditConfigFiles:
         hass = _make_hass(tmp_path)
         backup_calls = []
 
-        async def counting_backup(h):
+        def counting_backup(_config_dir):
             backup_calls.append(1)
             return "mcp_backups/fake"
 
         with (
             patch(
-                "custom_components.mcp_server_http_transport.tools.config_files._create_backup",
-                new=AsyncMock(side_effect=counting_backup),
+                "custom_components.mcp_server_http_transport.tools.config_files._create_backup_sync",
+                new=Mock(side_effect=counting_backup),
             ),
             _mock_check_config(),
         ):
@@ -1172,8 +1172,8 @@ class TestAtomicWrite:
         assert not (tmp_path / ".existing.yaml.mcp_tmp").exists()
 
 
-class TestBackupRunsInExecutor:
-    """_create_backup must run filesystem I/O via hass.async_add_executor_job."""
+class TestRunsInExecutor:
+    """Filesystem I/O must run via hass.async_add_executor_job (#48)."""
 
     async def test_save_uses_executor_for_backup(self, tmp_path):
         (tmp_path / "a.yaml").write_text("a: 1")
@@ -1183,4 +1183,51 @@ class TestBackupRunsInExecutor:
 
         assert "Successfully saved" in result["content"][0]["text"]
         # Executor was actually used — at least one call goes through async_add_executor_job.
+        assert hass.async_add_executor_job.await_count >= 1
+
+    async def test_list_uses_executor(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("a: 1")
+        hass = _make_hass(tmp_path)
+        await list_config_files(hass, {})
+        assert hass.async_add_executor_job.await_count >= 1
+
+    async def test_get_uses_executor(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("a: 1")
+        hass = _make_hass(tmp_path)
+        await get_config_file(hass, {"filename": "a.yaml"})
+        assert hass.async_add_executor_job.await_count >= 1
+
+    async def test_delete_uses_executor(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("a: 1")
+        hass = _make_hass(tmp_path)
+        await delete_config_file(hass, {"filename": "a.yaml"})
+        assert hass.async_add_executor_job.await_count >= 1
+
+    async def test_batch_uses_executor(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        with _mock_check_config():
+            await batch_edit_config_files(
+                hass, {"saves": [{"filename": "a.yaml", "content": "a: 1"}]}
+            )
+        assert hass.async_add_executor_job.await_count >= 1
+
+    async def test_backup_uses_executor(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("a: 1")
+        hass = _make_hass(tmp_path)
+        await backup_config_files(hass, {})
+        assert hass.async_add_executor_job.await_count >= 1
+
+    async def test_list_backups_uses_executor(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        await list_config_backups(hass, {})
+        assert hass.async_add_executor_job.await_count >= 1
+
+    async def test_cleanup_uses_executor(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        await cleanup_config_backups(hass, {})
+        assert hass.async_add_executor_job.await_count >= 1
+
+    async def test_restore_uses_executor(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        await restore_config_backup(hass, {})
         assert hass.async_add_executor_job.await_count >= 1

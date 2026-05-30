@@ -186,6 +186,11 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | Tool | Description |
 |------|-------------|
 | `knx_recent_telegrams` | Read Home Assistant's KNX group-monitor telegram history — recent bus telegrams incl. **source device** and decoded value; regex-filter by group address / name, with a result limit. Retrospective (reads the stored buffer), ideal for finding which KNX device wrote a given group address |
+| `knx_get_base_data` | KNX connection + project info: bus connection status, gateway address, xknx version, loaded ETS project metadata, and UI-creatable platforms |
+| `knx_get_entities` | List KNX group addresses and the entities bound to each (the KNX-specific group-address↔entity binding view); optional regex filter on the group address |
+| `knx_create_entity` | Create a KNX entity in the KNX UI config (config_store) from `platform` + `data` (experimental) |
+| `knx_update_entity` | Update a UI-managed KNX entity by `entity_id` (experimental) |
+| `knx_delete_entity` | Delete a UI-managed KNX entity by `entity_id` (experimental) |
 
 **Camera & Images**
 

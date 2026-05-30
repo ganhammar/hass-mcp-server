@@ -255,11 +255,12 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert body["jsonrpc"] == "2.0"
         assert "tools" in body["result"]
-        assert len(body["result"]["tools"]) == 60
+        assert len(body["result"]["tools"]) == 65
         tool_names = [t["name"] for t in body["result"]["tools"]]
         assert "get_state" in tool_names
         assert "call_service" in tool_names
         assert "knx_recent_telegrams" in tool_names
+        assert "knx_create_entity" in tool_names
         assert "list_entities" in tool_names
         assert "get_error_log" in tool_names
         assert "restart_ha" in tool_names

@@ -1,6 +1,6 @@
 """Tests for KNX telegram-history tools."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -110,3 +110,81 @@ class TestKnxRecentTelegrams:
         result = await knx_mod.knx_recent_telegrams(hass, {})
         assert "content" in result
         assert "unavailable" in result["content"][0]["text"]
+
+
+class TestKnxEntityTools:
+    """Test the KNX base-data / entity read+write tools."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_key(self):
+        with patch.object(knx_mod, "KNX_MODULE_KEY", _KEY):
+            yield
+
+    def _hass(self, module):
+        hass = Mock()
+        hass.data = {_KEY: module}
+        return hass
+
+    async def test_get_base_data_fields(self):
+        module = Mock()
+        module.xknx.version = "3.0.0"
+        module.xknx.connection_manager.connected.is_set = Mock(return_value=True)
+        module.xknx.current_address = "1.0.255"
+        module.project.info = {"name": "Haus"}
+        result = await knx_mod.knx_get_base_data(self._hass(module), {})
+        assert result["connection"]["connected"] is True
+        assert result["connection"]["current_address"] == "1.0.255"
+        assert result["xknx_version"] == "3.0.0"
+        assert result["project_info"] == {"name": "Haus"}
+
+    async def test_get_entities_filter(self):
+        module = Mock()
+        module.group_address_entities = {
+            "0/0/249": ["light.gt_taster"],
+            "0/1/1": ["light.wz"],
+        }
+        result = await knx_mod.knx_get_entities(self._hass(module), {"filter_ga": "^0/0/249$"})
+        assert result["count"] == 1
+        assert result["entities_by_group"][0]["group_address"] == "0/0/249"
+        assert result["entities_by_group"][0]["entities"] == ["light.gt_taster"]
+
+    async def test_get_entities_not_setup(self):
+        hass = Mock()
+        hass.data = {}
+        result = await knx_mod.knx_get_entities(hass, {})
+        assert "content" in result
+
+    async def test_create_entity_calls_config_store(self):
+        module = Mock()
+        module.config_store.create_entity = AsyncMock(return_value="light.knx_new")
+        result = await knx_mod.knx_create_entity(
+            self._hass(module), {"platform": "light", "data": {"name": "x"}}
+        )
+        assert result["created"] is True
+        assert result["entity_id"] == "light.knx_new"
+        module.config_store.create_entity.assert_awaited_once_with("light", {"name": "x"})
+
+    async def test_create_entity_requires_args(self):
+        result = await knx_mod.knx_create_entity(self._hass(Mock()), {"platform": "light"})
+        assert "content" in result
+        assert "required" in result["content"][0]["text"]
+
+    async def test_update_entity_calls_config_store(self):
+        module = Mock()
+        module.config_store.update_entity = AsyncMock(return_value=None)
+        result = await knx_mod.knx_update_entity(
+            self._hass(module), {"entity_id": "light.x", "platform": "light", "data": {"a": 1}}
+        )
+        assert result["updated"] is True
+        module.config_store.update_entity.assert_awaited_once_with("light", "light.x", {"a": 1})
+
+    async def test_delete_entity_calls_config_store(self):
+        module = Mock()
+        module.config_store.delete_entity = AsyncMock(return_value=None)
+        result = await knx_mod.knx_delete_entity(self._hass(module), {"entity_id": "light.x"})
+        assert result["deleted"] is True
+        module.config_store.delete_entity.assert_awaited_once_with("light.x")
+
+    async def test_delete_entity_requires_id(self):
+        result = await knx_mod.knx_delete_entity(self._hass(Mock()), {})
+        assert "content" in result

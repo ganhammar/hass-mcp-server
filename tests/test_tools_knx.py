@@ -98,11 +98,13 @@ class TestKnxRecentTelegrams:
         assert "Invalid regex" in result["content"][0]["text"]
 
     async def test_history_unavailable_attribute_error(self):
+        class _NoHistory:
+            @property
+            def recent_telegrams(self):
+                raise AttributeError("no telegram history on this HA version")
+
         module = Mock()
-        # recent_telegrams raises AttributeError on access
-        type(module.telegrams).recent_telegrams = property(
-            lambda self: (_ for _ in ()).throw(AttributeError())
-        )
+        module.telegrams = _NoHistory()
         hass = Mock()
         hass.data = {_KEY: module}
         result = await knx_mod.knx_recent_telegrams(hass, {})

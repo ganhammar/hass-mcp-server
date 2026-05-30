@@ -181,6 +181,12 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `list_integrations` | List installed integrations and their status |
 | `list_labels` | List all labels for cross-domain grouping |
 
+**KNX**
+
+| Tool | Description |
+|------|-------------|
+| `knx_recent_telegrams` | Read Home Assistant's KNX group-monitor telegram history — recent bus telegrams incl. **source device** and decoded value; regex-filter by group address / name, with a result limit. Retrospective (reads the stored buffer), ideal for finding which KNX device wrote a given group address |
+
 **Camera & Images**
 
 These tools are disabled by default; enable them per capability via Settings → Devices & Services → MCP Server → Configure. They return images directly to the model for visual analysis.

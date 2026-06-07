@@ -1,12 +1,13 @@
 """KNX bus tools — read Home Assistant's KNX group-monitor telegram history."""
 
+import json
 import logging
 import re
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from . import register_tool
+from . import _HAJSONEncoder, register_tool
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -109,11 +110,12 @@ async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -
         and (name_re is None or name_re.search(str(t.get("destination_name", ""))))
     ]
 
-    limit = arguments.get("limit") or 200
+    _lim = arguments.get("limit")
+    limit = max(1, int(_lim) if _lim is not None else 200)
     returned = matched[-limit:]
     timestamps = [t.get("timestamp") for t in telegrams if t.get("timestamp")]
 
-    return {
+    result = {
         "buffer_size": len(telegrams),
         "buffer_span": {
             "oldest": min(timestamps) if timestamps else None,
@@ -123,6 +125,7 @@ async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -
         "returned": len(returned),
         "telegrams": returned,
     }
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 def _not_setup() -> dict[str, Any]:
@@ -169,12 +172,13 @@ async def knx_get_base_data(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         project_info = knx.project.info
     except Exception:  # noqa: BLE001
         project_info = None
-    return {
+    result = {
         "connection": connection,
         "xknx_version": xknx_version,
         "project_info": project_info,
         "supported_platforms": _supported_platforms_ui(),
     }
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -230,8 +234,10 @@ async def knx_get_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         ents = list(identifiers) if isinstance(identifiers, (list, tuple, set)) else [identifiers]
         rows.append({"group_address": ga, "entities": [str(e) for e in ents]})
 
-    limit = arguments.get("limit") or 200
-    return {"count": len(rows), "entities_by_group": rows[:limit]}
+    _lim = arguments.get("limit")
+    limit = max(1, int(_lim) if _lim is not None else 200)
+    result = {"count": len(rows), "entities_by_group": rows[:limit]}
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 # --- Write tools (experimental): mutate HA's KNX UI config via config_store ---
@@ -275,7 +281,8 @@ async def knx_create_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         entity_id = await knx.config_store.create_entity(platform, data)
     except Exception as err:  # noqa: BLE001
         return {"content": [{"type": "text", "text": f"create_entity failed: {err}"}]}
-    return {"created": True, "entity_id": entity_id, "platform": platform}
+    result = {"created": True, "entity_id": entity_id, "platform": platform}
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -313,7 +320,8 @@ async def knx_update_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         await knx.config_store.update_entity(platform, entity_id, data)
     except Exception as err:  # noqa: BLE001
         return {"content": [{"type": "text", "text": f"update_entity failed: {err}"}]}
-    return {"updated": True, "entity_id": entity_id, "platform": platform}
+    result = {"updated": True, "entity_id": entity_id, "platform": platform}
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 
 
 @register_tool(
@@ -340,4 +348,5 @@ async def knx_delete_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         await knx.config_store.delete_entity(entity_id)
     except Exception as err:  # noqa: BLE001
         return {"content": [{"type": "text", "text": f"delete_entity failed: {err}"}]}
-    return {"deleted": True, "entity_id": entity_id}
+    result = {"deleted": True, "entity_id": entity_id}
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}

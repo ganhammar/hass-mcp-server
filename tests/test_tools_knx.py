@@ -1,5 +1,6 @@
 """Tests for KNX telegram-history tools."""
 
+import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -48,6 +49,12 @@ def _hass_with_knx(telegrams):
     return hass
 
 
+def _unpack(result: dict) -> dict:
+    """Unpack the MCP content envelope into the payload dict."""
+    assert "content" in result, f"Expected envelope with 'content', got: {result.keys()}"
+    return json.loads(result["content"][0]["text"])
+
+
 class TestKnxRecentTelegrams:
     """Test knx_recent_telegrams."""
 
@@ -66,30 +73,48 @@ class TestKnxRecentTelegrams:
     async def test_returns_all_with_buffer_span(self):
         hass = _hass_with_knx(_TELEGRAMS)
         result = await knx_mod.knx_recent_telegrams(hass, {})
-        assert result["buffer_size"] == 3
-        assert result["matched"] == 3
-        assert result["buffer_span"]["oldest"] == "2026-05-29T21:00:00+02:00"
-        assert result["buffer_span"]["newest"] == "2026-05-29T21:06:00+02:00"
+        data = _unpack(result)
+        assert data["buffer_size"] == 3
+        assert data["matched"] == 3
+        assert data["buffer_span"]["oldest"] == "2026-05-29T21:00:00+02:00"
+        assert data["buffer_span"]["newest"] == "2026-05-29T21:06:00+02:00"
 
     async def test_filter_ga(self):
         hass = _hass_with_knx(_TELEGRAMS)
         result = await knx_mod.knx_recent_telegrams(hass, {"filter_ga": "^0/0/249$"})
-        assert result["matched"] == 2
-        assert all(t["destination"] == "0/0/249" for t in result["telegrams"])
+        data = _unpack(result)
+        assert data["matched"] == 2
+        assert all(t["destination"] == "0/0/249" for t in data["telegrams"])
         # source device of the flapping GA is surfaced
-        assert result["telegrams"][0]["source_name"] == "MDT Logic Module"
+        assert data["telegrams"][0]["source_name"] == "MDT Logic Module"
 
     async def test_filter_name_case_insensitive(self):
         hass = _hass_with_knx(_TELEGRAMS)
         result = await knx_mod.knx_recent_telegrams(hass, {"filter_name": "licht"})
-        assert result["matched"] == 1
-        assert result["telegrams"][0]["destination"] == "0/1/1"
+        data = _unpack(result)
+        assert data["matched"] == 1
+        assert data["telegrams"][0]["destination"] == "0/1/1"
 
     async def test_limit_keeps_most_recent(self):
         hass = _hass_with_knx(_TELEGRAMS)
         result = await knx_mod.knx_recent_telegrams(hass, {"limit": 1})
-        assert result["returned"] == 1
-        assert result["telegrams"][0]["timestamp"] == "2026-05-29T21:06:00+02:00"
+        data = _unpack(result)
+        assert data["returned"] == 1
+        assert data["telegrams"][0]["timestamp"] == "2026-05-29T21:06:00+02:00"
+
+    async def test_limit_zero_is_clamped_to_one(self):
+        """limit=0 must not silently become 200."""
+        hass = _hass_with_knx(_TELEGRAMS)
+        result = await knx_mod.knx_recent_telegrams(hass, {"limit": 0})
+        data = _unpack(result)
+        assert data["returned"] == 1
+
+    async def test_limit_negative_is_clamped_to_one(self):
+        """Negative limit must not slice from the wrong end."""
+        hass = _hass_with_knx(_TELEGRAMS)
+        result = await knx_mod.knx_recent_telegrams(hass, {"limit": -5})
+        data = _unpack(result)
+        assert data["returned"] == 1
 
     async def test_invalid_regex_returns_error(self):
         hass = _hass_with_knx(_TELEGRAMS)
@@ -132,10 +157,11 @@ class TestKnxEntityTools:
         module.xknx.current_address = "1.0.255"
         module.project.info = {"name": "Haus"}
         result = await knx_mod.knx_get_base_data(self._hass(module), {})
-        assert result["connection"]["connected"] is True
-        assert result["connection"]["current_address"] == "1.0.255"
-        assert result["xknx_version"] == "3.0.0"
-        assert result["project_info"] == {"name": "Haus"}
+        data = _unpack(result)
+        assert data["connection"]["connected"] is True
+        assert data["connection"]["current_address"] == "1.0.255"
+        assert data["xknx_version"] == "3.0.0"
+        assert data["project_info"] == {"name": "Haus"}
 
     async def test_get_entities_filter(self):
         module = Mock()
@@ -144,9 +170,18 @@ class TestKnxEntityTools:
             "0/1/1": ["light.wz"],
         }
         result = await knx_mod.knx_get_entities(self._hass(module), {"filter_ga": "^0/0/249$"})
-        assert result["count"] == 1
-        assert result["entities_by_group"][0]["group_address"] == "0/0/249"
-        assert result["entities_by_group"][0]["entities"] == ["light.gt_taster"]
+        data = _unpack(result)
+        assert data["count"] == 1
+        assert data["entities_by_group"][0]["group_address"] == "0/0/249"
+        assert data["entities_by_group"][0]["entities"] == ["light.gt_taster"]
+
+    async def test_get_entities_limit_zero_clamped(self):
+        """limit=0 on knx_get_entities must not silently become 200."""
+        module = Mock()
+        module.group_address_entities = {f"0/0/{i}": [f"light.x{i}"] for i in range(5)}
+        result = await knx_mod.knx_get_entities(self._hass(module), {"limit": 0})
+        data = _unpack(result)
+        assert len(data["entities_by_group"]) == 1
 
     async def test_get_entities_not_setup(self):
         hass = Mock()
@@ -160,8 +195,9 @@ class TestKnxEntityTools:
         result = await knx_mod.knx_create_entity(
             self._hass(module), {"platform": "light", "data": {"name": "x"}}
         )
-        assert result["created"] is True
-        assert result["entity_id"] == "light.knx_new"
+        data = _unpack(result)
+        assert data["created"] is True
+        assert data["entity_id"] == "light.knx_new"
         module.config_store.create_entity.assert_awaited_once_with("light", {"name": "x"})
 
     async def test_create_entity_requires_args(self):
@@ -175,14 +211,16 @@ class TestKnxEntityTools:
         result = await knx_mod.knx_update_entity(
             self._hass(module), {"entity_id": "light.x", "platform": "light", "data": {"a": 1}}
         )
-        assert result["updated"] is True
+        data = _unpack(result)
+        assert data["updated"] is True
         module.config_store.update_entity.assert_awaited_once_with("light", "light.x", {"a": 1})
 
     async def test_delete_entity_calls_config_store(self):
         module = Mock()
         module.config_store.delete_entity = AsyncMock(return_value=None)
         result = await knx_mod.knx_delete_entity(self._hass(module), {"entity_id": "light.x"})
-        assert result["deleted"] is True
+        data = _unpack(result)
+        assert data["deleted"] is True
         module.config_store.delete_entity.assert_awaited_once_with("light.x")
 
     async def test_delete_entity_requires_id(self):

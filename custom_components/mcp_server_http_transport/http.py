@@ -138,7 +138,18 @@ class MCPEndpointView(HomeAssistantView):
             )
 
             expected_issuer = get_issuer_from_request(request)
-            result = validate_access_token(self.hass, token, expected_issuer)
+            # This MCP server is the protected resource (RFC 8707); its canonical
+            # URI is the resource a compliant client (e.g. Claude) binds the token
+            # to. Require the token's aud to match it.
+            expected_audience = f"{expected_issuer}/api/mcp"
+            try:
+                result = validate_access_token(
+                    self.hass, token, expected_issuer, expected_audience=expected_audience
+                )
+            except TypeError:
+                # OIDC provider predates resource-aware validation; fall back to
+                # the legacy signature so an un-upgraded provider still works.
+                result = validate_access_token(self.hass, token, expected_issuer)
             if result is not None:
                 return result
         except ImportError as e:

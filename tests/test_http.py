@@ -539,3 +539,63 @@ class TestNativeAuth:
         assert response.status == 200
         body = json.loads(response.body)
         assert body["result"]["protocolVersion"] == "2024-11-05"
+
+
+class TestOidcAudienceBinding:
+    """Test that OIDC validation binds the token audience to this resource."""
+
+    @pytest.fixture
+    def view(self):
+        """Create an MCPEndpointView (native auth disabled)."""
+        hass = Mock()
+        return MCPEndpointView(hass, Mock(), native_auth_enabled=False)
+
+    async def test_passes_expected_audience_to_validator(self, view):
+        """_validate_token derives the resource URI and passes it as audience."""
+        import sys
+
+        request = Mock()
+        request.headers = {
+            "Authorization": "Bearer t",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "ha.example.com",
+        }
+
+        mv = sys.modules["custom_components.oidc_provider.token_validator"]
+        mv.validate_access_token.reset_mock()
+        mv.validate_access_token.return_value = {"sub": "u"}
+        try:
+            result = await view._validate_token(request)
+        finally:
+            mv.validate_access_token.return_value = None
+
+        assert result == {"sub": "u"}
+        _, kwargs = mv.validate_access_token.call_args
+        assert kwargs.get("expected_audience") == "https://ha.example.com/api/mcp"
+
+    async def test_falls_back_to_legacy_signature_on_type_error(self, view):
+        """An older OIDC provider without expected_audience still works."""
+        import sys
+
+        request = Mock()
+        request.headers = {
+            "Authorization": "Bearer t",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "ha.example.com",
+        }
+
+        def side_effect(*args, **kwargs):
+            if "expected_audience" in kwargs:
+                raise TypeError("unexpected keyword argument 'expected_audience'")
+            return {"sub": "legacy"}
+
+        mv = sys.modules["custom_components.oidc_provider.token_validator"]
+        mv.validate_access_token.reset_mock()
+        mv.validate_access_token.side_effect = side_effect
+        try:
+            result = await view._validate_token(request)
+        finally:
+            mv.validate_access_token.side_effect = None
+            mv.validate_access_token.return_value = None
+
+        assert result == {"sub": "legacy"}

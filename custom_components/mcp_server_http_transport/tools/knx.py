@@ -7,7 +7,13 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_IDEMPOTENT,
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,6 +73,7 @@ def _destination(telegram: dict[str, Any]) -> str:
             },
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Return filtered recent KNX telegrams from the group-monitor buffer."""
@@ -151,6 +158,7 @@ def _supported_platforms_ui():
         "KNX UI. Useful context before inspecting or creating KNX entities."
     ),
     input_schema={"type": "object", "properties": {}},
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def knx_get_base_data(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Return KNX connection + project base data."""
@@ -204,6 +212,7 @@ async def knx_get_base_data(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             },
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def knx_get_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List KNX group-address -> entity bindings."""
@@ -267,6 +276,7 @@ async def knx_get_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         },
         "required": ["platform", "data"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def knx_create_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a KNX UI entity via the config_store."""
@@ -301,6 +311,7 @@ async def knx_create_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         },
         "required": ["entity_id", "platform", "data"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def knx_update_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Update a KNX UI entity via the config_store."""
@@ -335,6 +346,7 @@ async def knx_update_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         "properties": {"entity_id": {"type": "string"}},
         "required": ["entity_id"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def knx_delete_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete a KNX UI entity via the config_store."""

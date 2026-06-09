@@ -8,7 +8,10 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from ..const import DOMAIN
-from . import register_tool
+from . import (
+    ANNOTATION_READ_ONLY,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,6 +108,7 @@ def _text(message: str) -> dict[str, Any]:
         },
         "required": ["entity_id"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_camera_image(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Capture a camera entity's current frame and return it as image content."""
@@ -160,6 +164,7 @@ async def get_camera_image(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         },
         "required": ["path"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_image_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read an allowed image file from disk and return it as image content."""

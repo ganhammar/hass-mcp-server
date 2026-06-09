@@ -9,17 +9,46 @@ from ..json_utils import _HAJSONEncoder  # noqa: F401
 # Tool registry: name -> {"schema": {...}, "handler": callable}
 TOOLS: dict[str, dict[str, Any]] = {}
 
+# Reusable MCP ToolAnnotations (see spec §ToolAnnotations).
+ANNOTATION_READ_ONLY: dict[str, Any] = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": False,
+}
+ANNOTATION_IDEMPOTENT: dict[str, Any] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": False,
+}
+ANNOTATION_DESTRUCTIVE: dict[str, Any] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": False,
+    "openWorldHint": False,
+}
 
-def register_tool(name: str, description: str, input_schema: dict[str, Any]):
+
+def register_tool(
+    name: str, 
+    description: str, 
+    input_schema: dict[str, Any],
+    annotations: dict[str, Any] | None = None,
+):
     """Decorator to register a tool with its schema and handler."""
 
     def decorator(func):
+        schema = {
+            "name": name,
+            "description": description,
+            "inputSchema": input_schema,
+        }
+        if annotations is not None:
+            schema["annotations"] = annotations
+
         TOOLS[name] = {
-            "schema": {
-                "name": name,
-                "description": description,
-                "inputSchema": input_schema,
-            },
+            "schema": schema,
             "handler": func,
         }
         return func

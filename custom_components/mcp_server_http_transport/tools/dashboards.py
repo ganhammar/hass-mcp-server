@@ -6,7 +6,13 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_IDEMPOTENT,
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,6 +24,7 @@ _LOGGER = logging.getLogger(__name__)
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List all dashboards."""
@@ -53,6 +60,7 @@ async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -
         },
         "required": ["url_path"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_dashboard_config_tool(
     hass: HomeAssistant, arguments: dict[str, Any]
@@ -92,6 +100,7 @@ async def get_dashboard_config_tool(
         },
         "required": ["url_path", "config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def save_dashboard_config_tool(
     hass: HomeAssistant, arguments: dict[str, Any]
@@ -132,6 +141,7 @@ async def save_dashboard_config_tool(
         },
         "required": ["url_path"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def delete_dashboard_config_tool(
     hass: HomeAssistant, arguments: dict[str, Any]
@@ -185,6 +195,7 @@ async def delete_dashboard_config_tool(
         },
         "required": ["url_path", "title"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def create_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a new dashboard."""
@@ -246,6 +257,7 @@ async def create_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
         },
         "required": ["url_path"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def update_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Update dashboard metadata."""
@@ -288,6 +300,7 @@ async def update_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
         },
         "required": ["url_path"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def delete_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete a dashboard."""

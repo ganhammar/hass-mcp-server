@@ -9,16 +9,25 @@ from homeassistant.core import HomeAssistant
 PROMPTS: dict[str, dict[str, Any]] = {}
 
 
-def register_prompt(name: str, description: str, arguments: list[dict[str, Any]] | None = None):
+def register_prompt(
+    name: str, 
+    description: str, 
+    arguments: list[dict[str, Any]] | None = None,
+    annotations: dict[str, Any] | None = None,
+):
     """Decorator to register a prompt with its definition and handler."""
 
     def decorator(func):
+        definition = {
+            "name": name,
+            "description": description,
+            "arguments": arguments or [],
+        }
+        if annotations is not None:
+            definition["annotations"] = annotations
+
         PROMPTS[name] = {
-            "definition": {
-                "name": name,
-                "description": description,
-                "arguments": arguments or [],
-            },
+            "definition": definition,
             "handler": func,
         }
         return func

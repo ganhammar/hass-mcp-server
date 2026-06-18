@@ -668,3 +668,48 @@ class TestHelperToolsViaHTTP:
         assert "create_helper" in tool_names
         assert "update_helper" in tool_names
         assert "delete_helper" in tool_names
+
+
+class TestHelperCategoryAssignment:
+    """Tests for the optional category argument on helper CRUD tools."""
+
+    async def test_create_helper_with_category(self):
+        """create_helper resolves the name and writes the entity category."""
+        from custom_components.mcp_server_http_transport.tools.helpers import create_helper
+
+        collection = _make_collection()
+        collection.async_create_item.return_value = {"id": "item1", "name": "Flag"}
+        mock_hass = _make_hass_with_collection("input_boolean", collection)
+
+        cat = Mock(category_id="c1")
+        cat.name = "Lighting"
+        cr_reg = Mock()
+        cr_reg.async_list_categories.return_value = [cat]
+
+        # `er` is the entity_registry module; tools.helpers.er and tools.categories.er
+        # are the same object, so one patch of entity_registry.async_get covers both.
+        ent_reg = Mock()
+        ent_reg.async_get_entity_id.return_value = "input_boolean.flag"
+        ent_reg.async_get.return_value = Mock(categories={})
+
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.tools.categories.cr.async_get",
+                return_value=cr_reg,
+            ),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=ent_reg,
+            ),
+        ):
+            result = await create_helper(
+                mock_hass,
+                {"domain": "input_boolean", "config": {"name": "Flag"}, "category": "Lighting"},
+            )
+
+        ent_reg.async_get_entity_id.assert_called_once_with(
+            "input_boolean", "input_boolean", "item1"
+        )
+        _, kwargs = ent_reg.async_update_entity.call_args
+        assert kwargs["categories"] == {"entity": "c1"}
+        assert "in category 'Lighting'" in result["content"][0]["text"]

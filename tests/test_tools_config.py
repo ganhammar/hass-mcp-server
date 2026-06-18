@@ -748,3 +748,88 @@ class TestToolsConfig:
         assert response.status == 200
         body = json.loads(response.body)
         assert "Error deleting script" in body["result"]["content"][0]["text"]
+
+
+CM = "custom_components.mcp_server_http_transport.config_manager"
+CR_GET = "custom_components.mcp_server_http_transport.tools.categories.cr.async_get"
+# `er` is the entity_registry module; tools.config.er and tools.categories.er are
+# the same object, so one patch of entity_registry.async_get covers both.
+ER_GET = "homeassistant.helpers.entity_registry.async_get"
+
+
+def _make_category(category_id: str = "c1", name: str = "Lighting") -> Mock:
+    """Create a mock CategoryEntry whose .name is a real string."""
+    entry = Mock(category_id=category_id)
+    entry.name = name
+    return entry
+
+
+class TestConfigCategoryAssignment:
+    """Tests for the optional category argument on config CRUD tools."""
+
+    async def test_create_automation_with_category(self):
+        """create_automation resolves the name and writes the entity category."""
+        from custom_components.mcp_server_http_transport.tools.config import create_automation
+
+        cr_reg = Mock()
+        cr_reg.async_list_categories.return_value = [_make_category()]
+
+        ent_reg = Mock()
+        ent_reg.async_get_entity_id.return_value = "automation.foo"
+        ent_reg.async_get.return_value = Mock(categories={})
+
+        with (
+            patch(
+                f"{CM}.create_list_entry",
+                new=AsyncMock(return_value="entry-id"),
+            ) as create_mock,
+            patch(CR_GET, return_value=cr_reg),
+            patch(ER_GET, return_value=ent_reg),
+        ):
+            result = await create_automation(
+                Mock(), {"config": {"alias": "X"}, "category": "Lighting"}
+            )
+
+        create_mock.assert_called_once()
+        ent_reg.async_get_entity_id.assert_called_once_with("automation", "automation", "entry-id")
+        _, kwargs = ent_reg.async_update_entity.call_args
+        assert kwargs["categories"]["automation"] == "c1"
+        assert "in category 'Lighting'" in result["content"][0]["text"]
+
+    async def test_create_automation_unknown_category_aborts_write(self):
+        """A missing category name errors out before any YAML write."""
+        from custom_components.mcp_server_http_transport.tools.config import create_automation
+
+        cr_reg = Mock()
+        cr_reg.async_list_categories.return_value = []
+
+        with (
+            patch(f"{CM}.create_list_entry", new=AsyncMock()) as create_mock,
+            patch(CR_GET, return_value=cr_reg),
+        ):
+            result = await create_automation(Mock(), {"config": {"alias": "X"}, "category": "Nope"})
+
+        assert "Error creating automation" in result["content"][0]["text"]
+        assert "No category named 'Nope'" in result["content"][0]["text"]
+        create_mock.assert_not_called()
+
+    async def test_update_automation_empty_category_clears_scope(self):
+        """Passing an empty category clears the automation scope on the entity."""
+        from custom_components.mcp_server_http_transport.tools.config import update_automation
+
+        ent_reg = Mock()
+        ent_reg.async_get_entity_id.return_value = "automation.foo"
+        ent_reg.async_get.return_value = Mock(categories={"automation": "c1"})
+
+        with (
+            patch(f"{CM}.update_list_entry", new=AsyncMock()),
+            patch(ER_GET, return_value=ent_reg),
+        ):
+            result = await update_automation(
+                Mock(),
+                {"automation_id": "entry-id", "config": {"alias": "X"}, "category": ""},
+            )
+
+        _, kwargs = ent_reg.async_update_entity.call_args
+        assert "automation" not in kwargs["categories"]
+        assert "Successfully updated automation" in result["content"][0]["text"]

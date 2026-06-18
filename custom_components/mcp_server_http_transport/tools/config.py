@@ -5,8 +5,10 @@ import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from . import _HAJSONEncoder, register_tool
+from .categories import resolve_category_id, write_entity_category
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,7 +27,15 @@ _LOGGER = logging.getLogger(__name__)
                 "description": (
                     "Automation configuration (alias, trigger, action, condition, mode, etc.)"
                 ),
-            }
+            },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Category name to assign this automation to (scope: automation). "
+                    "The category must already exist (use create_category). "
+                    "On update, pass null/empty to remove the category."
+                ),
+            },
         },
         "required": ["config"],
     },
@@ -35,12 +45,31 @@ async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     from ..config_manager import create_list_entry
 
     try:
+        category = arguments.get("category")
+        category_id = resolve_category_id(hass, "automation", category) if category else None
         entry_id = await create_list_entry(
             hass, "automations.yaml", arguments["config"], "automation"
         )
+        if category_id is not None:
+            entity_id = er.async_get(hass).async_get_entity_id("automation", "automation", entry_id)
+            if entity_id is None:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Created automation with id: {entry_id}, but its entity "
+                            "is not registered yet; category not applied.",
+                        }
+                    ]
+                }
+            write_entity_category(hass, entity_id, "automation", category_id)
+        suffix = f" in category '{category}'" if category else ""
         return {
             "content": [
-                {"type": "text", "text": f"Successfully created automation with id: {entry_id}"}
+                {
+                    "type": "text",
+                    "text": f"Successfully created automation with id: {entry_id}{suffix}",
+                }
             ]
         }
     except Exception as e:
@@ -62,6 +91,14 @@ async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 "description": "Updated automation config"
                 " (alias, trigger, action, condition, mode, etc.)",
             },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Category name to assign this automation to (scope: automation). "
+                    "The category must already exist (use create_category). "
+                    "On update, pass null/empty to remove the category."
+                ),
+            },
         },
         "required": ["automation_id", "config"],
     },
@@ -71,6 +108,11 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     from ..config_manager import update_list_entry
 
     try:
+        has_cat = "category" in arguments
+        category = arguments.get("category")
+        category_id = (
+            resolve_category_id(hass, "automation", category) if (has_cat and category) else None
+        )
         await update_list_entry(
             hass,
             "automations.yaml",
@@ -78,6 +120,21 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             arguments["config"],
             "automation",
         )
+        if has_cat:
+            entity_id = er.async_get(hass).async_get_entity_id(
+                "automation", "automation", arguments["automation_id"]
+            )
+            if entity_id is None:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Updated automation, but entity not registered; "
+                            "category not changed.",
+                        }
+                    ]
+                }
+            write_entity_category(hass, entity_id, "automation", category_id)
         return {"content": [{"type": "text", "text": "Successfully updated automation"}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error updating automation: {str(e)}"}]}
@@ -168,7 +225,15 @@ async def get_automation_config(hass: HomeAssistant, arguments: dict[str, Any]) 
             "config": {
                 "type": "object",
                 "description": "Scene configuration (name, entities, etc.)",
-            }
+            },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Category name to assign this scene to (scope: scene). "
+                    "The category must already exist (use create_category). "
+                    "On update, pass null/empty to remove the category."
+                ),
+            },
         },
         "required": ["config"],
     },
@@ -178,9 +243,27 @@ async def create_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     from ..config_manager import create_list_entry
 
     try:
+        category = arguments.get("category")
+        category_id = resolve_category_id(hass, "scene", category) if category else None
         entry_id = await create_list_entry(hass, "scenes.yaml", arguments["config"], "scene")
+        if category_id is not None:
+            entity_id = er.async_get(hass).async_get_entity_id("scene", "homeassistant", entry_id)
+            if entity_id is None:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Created scene with id: {entry_id}, but its entity "
+                            "is not registered yet; category not applied.",
+                        }
+                    ]
+                }
+            write_entity_category(hass, entity_id, "scene", category_id)
+        suffix = f" in category '{category}'" if category else ""
         return {
-            "content": [{"type": "text", "text": f"Successfully created scene with id: {entry_id}"}]
+            "content": [
+                {"type": "text", "text": f"Successfully created scene with id: {entry_id}{suffix}"}
+            ]
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error creating scene: {str(e)}"}]}
@@ -200,6 +283,14 @@ async def create_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
                 "type": "object",
                 "description": "Updated scene configuration (name, entities, etc.)",
             },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Category name to assign this scene to (scope: scene). "
+                    "The category must already exist (use create_category). "
+                    "On update, pass null/empty to remove the category."
+                ),
+            },
         },
         "required": ["scene_id", "config"],
     },
@@ -209,9 +300,29 @@ async def update_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     from ..config_manager import update_list_entry
 
     try:
+        has_cat = "category" in arguments
+        category = arguments.get("category")
+        category_id = (
+            resolve_category_id(hass, "scene", category) if (has_cat and category) else None
+        )
         await update_list_entry(
             hass, "scenes.yaml", arguments["scene_id"], arguments["config"], "scene"
         )
+        if has_cat:
+            entity_id = er.async_get(hass).async_get_entity_id(
+                "scene", "homeassistant", arguments["scene_id"]
+            )
+            if entity_id is None:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Updated scene, but entity not registered; "
+                            "category not changed.",
+                        }
+                    ]
+                }
+            write_entity_category(hass, entity_id, "scene", category_id)
         return {"content": [{"type": "text", "text": "Successfully updated scene"}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error updating scene: {str(e)}"}]}
@@ -307,6 +418,14 @@ async def get_scene_config(hass: HomeAssistant, arguments: dict[str, Any]) -> di
                 "type": "object",
                 "description": "Script configuration (alias, sequence, mode, etc.)",
             },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Category name to assign this script to (scope: script). "
+                    "The category must already exist (use create_category). "
+                    "On update, pass null/empty to remove the category."
+                ),
+            },
         },
         "required": ["key", "config"],
     },
@@ -316,11 +435,18 @@ async def create_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     from ..config_manager import create_dict_entry
 
     try:
+        category = arguments.get("category")
+        category_id = resolve_category_id(hass, "script", category) if category else None
         key = await create_dict_entry(
             hass, "scripts.yaml", arguments["key"], arguments["config"], "script"
         )
+        if category_id is not None:
+            write_entity_category(hass, f"script.{key}", "script", category_id)
+        suffix = f" in category '{category}'" if category else ""
         return {
-            "content": [{"type": "text", "text": f"Successfully created script with key: {key}"}]
+            "content": [
+                {"type": "text", "text": f"Successfully created script with key: {key}{suffix}"}
+            ]
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error creating script: {str(e)}"}]}
@@ -340,6 +466,14 @@ async def create_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
                 "type": "object",
                 "description": "Updated script configuration (alias, sequence, mode, etc.)",
             },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Category name to assign this script to (scope: script). "
+                    "The category must already exist (use create_category). "
+                    "On update, pass null/empty to remove the category."
+                ),
+            },
         },
         "required": ["key", "config"],
     },
@@ -349,9 +483,16 @@ async def update_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     from ..config_manager import update_dict_entry
 
     try:
+        has_cat = "category" in arguments
+        category = arguments.get("category")
+        category_id = (
+            resolve_category_id(hass, "script", category) if (has_cat and category) else None
+        )
         await update_dict_entry(
             hass, "scripts.yaml", arguments["key"], arguments["config"], "script"
         )
+        if has_cat:
+            write_entity_category(hass, f"script.{arguments['key']}", "script", category_id)
         return {"content": [{"type": "text", "text": "Successfully updated script"}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error updating script: {str(e)}"}]}

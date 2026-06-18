@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from . import _HAJSONEncoder, register_tool
+from .categories import resolve_category_id, write_entity_category
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -188,6 +189,13 @@ async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                     "Optional for most types: icon, initial, restore"
                 ),
             },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Category name to assign this helper to. "
+                    "Must already exist (use create_category)."
+                ),
+            },
         },
         "required": ["domain", "config"],
     },
@@ -211,13 +219,31 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         }
 
     try:
+        category = arguments.get("category")
+        category_id = resolve_category_id(hass, "entity", category) if category else None
         collection = _get_collection(hass, domain)
         item = await collection.async_create_item(config)
+        if category_id is not None:
+            entity_id = er.async_get(hass).async_get_entity_id(domain, domain, item["id"])
+            if entity_id is None:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully created {domain} helper with id: "
+                            f"{item['id']}, but its entity is not registered yet; "
+                            "category not applied.",
+                        }
+                    ]
+                }
+            write_entity_category(hass, entity_id, "entity", category_id)
+        suffix = f" in category '{category}'" if category else ""
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": f"Successfully created {domain} helper with id: {item['id']}",
+                    "text": f"Successfully created {domain} helper with id: "
+                    f"{item['id']}{suffix}",
                 }
             ]
         }
@@ -241,6 +267,14 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
                     "Updated helper configuration. Include all fields, not just changed ones"
                 ),
             },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Category name to assign this helper to. "
+                    "Must already exist (use create_category). "
+                    "Pass null/empty to remove the category."
+                ),
+            },
         },
         "required": ["entity_id", "config"],
     },
@@ -248,9 +282,17 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
 async def update_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Update an existing helper."""
     try:
-        domain, item_id = await _entity_id_to_item_id(hass, arguments["entity_id"])
+        has_cat = "category" in arguments
+        category = arguments.get("category")
+        category_id = (
+            resolve_category_id(hass, "entity", category) if (has_cat and category) else None
+        )
+        entity_id = arguments["entity_id"]
+        domain, item_id = await _entity_id_to_item_id(hass, entity_id)
         collection = _get_collection(hass, domain)
         await collection.async_update_item(item_id, arguments["config"])
+        if has_cat:
+            write_entity_category(hass, entity_id, "entity", category_id)
         return {"content": [{"type": "text", "text": "Successfully updated helper"}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error updating helper: {str(e)}"}]}

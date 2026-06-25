@@ -421,6 +421,230 @@ class TestToolsEntities:
         assert len(devices) == 1
         assert devices[0]["name"] == "Living Room Lamp"
 
+    async def test_post_tools_call_get_device_details_multi_domain(self, view, mock_hass):
+        """Test get_device_details returns entities across domains with states."""
+        mock_device = Mock()
+        mock_device.id = "device1"
+        mock_device.name = "Xiaomi Robot Vacuum X10"
+        mock_device.manufacturer = "Xiaomi"
+        mock_device.model = "X10"
+        mock_device.area_id = "living_room"
+        mock_device.name_by_user = None
+        mock_dr = Mock()
+        mock_dr.async_get.return_value = mock_device
+
+        vacuum_entry = Mock()
+        vacuum_entry.entity_id = "vacuum.xiaomi_robot_vacuum_x10"
+        vacuum_entry.name = None
+        vacuum_entry.original_name = "Xiaomi Robot Vacuum X10"
+        vacuum_entry.disabled_by = None
+
+        sensor_entry = Mock()
+        sensor_entry.entity_id = "sensor.xiaomi_robot_vacuum_x10_current_room"
+        sensor_entry.name = None
+        sensor_entry.original_name = "Current Room"
+        sensor_entry.disabled_by = None
+
+        mock_er = Mock()
+
+        vacuum_state = Mock()
+        vacuum_state.state = "docked"
+        vacuum_state.attributes = {"friendly_name": "Xiaomi Robot Vacuum X10"}
+        sensor_state = Mock()
+        sensor_state.state = "Dining Room"
+        sensor_state.attributes = {"friendly_name": "Current Room"}
+        mock_hass.states.get.side_effect = lambda eid: {
+            "vacuum.xiaomi_robot_vacuum_x10": vacuum_state,
+            "sensor.xiaomi_robot_vacuum_x10_current_room": sensor_state,
+        }.get(eid)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_device_details", "arguments": {"device_id": "device1"}},
+                "id": 101,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_dr,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=mock_er,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities."
+                "er.async_entries_for_device",
+                return_value=[vacuum_entry, sensor_entry],
+            ) as mock_entries,
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert data["device"]["name"] == "Xiaomi Robot Vacuum X10"
+        assert data["device"]["manufacturer"] == "Xiaomi"
+        domains = sorted(e["domain"] for e in data["entities"])
+        assert domains == ["sensor", "vacuum"]
+        current_room = next(e for e in data["entities"] if e["entity_id"].endswith("current_room"))
+        assert current_room["state"] == "Dining Room"
+        assert current_room["name"] == "Current Room"
+        # Disabled entities excluded by default
+        _, kwargs = mock_entries.call_args
+        assert kwargs["include_disabled_entities"] is False
+
+    async def test_post_tools_call_get_device_details_not_found(self, view, mock_hass):
+        """Test get_device_details returns an error for an unknown device."""
+        mock_dr = Mock()
+        mock_dr.async_get.return_value = None
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_device_details", "arguments": {"device_id": "nope"}},
+                "id": 102,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_dr,
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "not found" in body["result"]["content"][0]["text"]
+
+    async def test_post_tools_call_get_device_details_no_states(self, view, mock_hass):
+        """Test get_device_details omits states when include_states is false."""
+        mock_device = Mock()
+        mock_device.id = "device1"
+        mock_device.name = "Pet Feeder"
+        mock_device.manufacturer = "Acme"
+        mock_device.model = "PF1"
+        mock_device.area_id = None
+        mock_device.name_by_user = None
+        mock_dr = Mock()
+        mock_dr.async_get.return_value = mock_device
+
+        entry = Mock()
+        entry.entity_id = "switch.pet_feeder_dispense"
+        entry.name = "Dispense"
+        entry.original_name = "Dispense"
+        entry.disabled_by = None
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "get_device_details",
+                    "arguments": {"device_id": "device1", "include_states": False},
+                },
+                "id": 103,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_dr,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=Mock(),
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities."
+                "er.async_entries_for_device",
+                return_value=[entry],
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert data["entities"][0]["entity_id"] == "switch.pet_feeder_dispense"
+        assert "state" not in data["entities"][0]
+        assert data["entities"][0]["name"] == "Dispense"
+
+    async def test_post_tools_call_get_device_details_entity_without_state(self, view, mock_hass):
+        """Test get_device_details reports state=None for an entity with no current state."""
+        mock_device = Mock()
+        mock_device.id = "device1"
+        mock_device.name = "Pet Feeder"
+        mock_device.manufacturer = "Acme"
+        mock_device.model = "PF1"
+        mock_device.area_id = None
+        mock_device.name_by_user = None
+        mock_dr = Mock()
+        mock_dr.async_get.return_value = mock_device
+
+        entry = Mock()
+        entry.entity_id = "switch.pet_feeder_dispense"
+        entry.name = None
+        entry.original_name = "Dispense"
+        entry.disabled_by = None
+
+        # The registered entity has no state in the machine (e.g. unavailable or not loaded).
+        mock_hass.states.get.return_value = None
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_device_details", "arguments": {"device_id": "device1"}},
+                "id": 104,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_dr,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=Mock(),
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities."
+                "er.async_entries_for_device",
+                return_value=[entry],
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert data["entities"][0]["entity_id"] == "switch.pet_feeder_dispense"
+        assert data["entities"][0]["state"] is None
+        # With no state to override it, the name falls back to the registry original_name.
+        assert data["entities"][0]["name"] == "Dispense"
+
     async def test_post_tools_call_list_services(self, view, mock_hass):
         """Test POST with tools/call for list_services."""
         mock_hass.services.async_services.return_value = {
@@ -476,6 +700,147 @@ class TestToolsEntities:
         services = json.loads(body["result"]["content"][0]["text"])
         assert "light" in services
         assert "switch" not in services
+
+    async def test_post_tools_call_describe_service_single(self, view, mock_hass):
+        """Test describe_service returns one service's field schema."""
+        descriptions = {
+            "vacuum": {
+                "clean_area": {
+                    "name": "Clean area",
+                    "description": "Clean selected mapped areas.",
+                    "fields": {
+                        "cleaning_area_id": {
+                            "required": True,
+                            "selector": {"text": {"multiple": True}},
+                        }
+                    },
+                },
+                "start": {"name": "Start", "fields": {}},
+            }
+        }
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "describe_service",
+                    "arguments": {"domain": "vacuum", "service": "clean_area"},
+                },
+                "id": 110,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities."
+                "async_get_all_descriptions",
+                AsyncMock(return_value=descriptions),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert list(data.keys()) == ["clean_area"]
+        assert "cleaning_area_id" in data["clean_area"]["fields"]
+        assert data["clean_area"]["fields"]["cleaning_area_id"]["required"] is True
+
+    async def test_post_tools_call_describe_service_whole_domain(self, view, mock_hass):
+        """Test describe_service returns every service in a domain when service is omitted."""
+        descriptions = {
+            "vacuum": {
+                "clean_area": {"name": "Clean area", "fields": {}},
+                "start": {"name": "Start", "fields": {}},
+            }
+        }
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "describe_service", "arguments": {"domain": "vacuum"}},
+                "id": 111,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities."
+                "async_get_all_descriptions",
+                AsyncMock(return_value=descriptions),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert sorted(data.keys()) == ["clean_area", "start"]
+
+    async def test_post_tools_call_describe_service_unknown_domain(self, view, mock_hass):
+        """Test describe_service reports when a domain has no services."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "describe_service", "arguments": {"domain": "nope"}},
+                "id": 112,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities."
+                "async_get_all_descriptions",
+                AsyncMock(return_value={"vacuum": {"start": {}}}),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "No services found" in body["result"]["content"][0]["text"]
+
+    async def test_post_tools_call_describe_service_unknown_service(self, view, mock_hass):
+        """Test describe_service reports when a service does not exist in the domain."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "describe_service",
+                    "arguments": {"domain": "vacuum", "service": "nope"},
+                },
+                "id": 113,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities."
+                "async_get_all_descriptions",
+                AsyncMock(return_value={"vacuum": {"start": {}}}),
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "not found" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_search_entities_by_query(self, view, mock_hass):
         """Test search_entities matches by friendly name."""

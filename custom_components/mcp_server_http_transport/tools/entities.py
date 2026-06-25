@@ -9,6 +9,7 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
+from homeassistant.helpers.service import async_get_all_descriptions
 
 from . import _HAJSONEncoder, register_tool
 
@@ -267,6 +268,91 @@ async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
 
 
 @register_tool(
+    name="get_device_details",
+    description=(
+        "Get a device together with every entity registered to it, across all domains. "
+        "Use this after list_devices when a request is about a physical device "
+        "(e.g. 'where is the vacuum', 'what can my washing machine do'): it returns all "
+        "related entities so you do not have to guess entity IDs or naming conventions. "
+        "Includes each entity's current state and attributes by default"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "device_id": {
+                "type": "string",
+                "description": "The device ID, as returned by list_devices",
+            },
+            "include_entities": {
+                "type": "boolean",
+                "description": "Include entities registered to the device (default true)",
+            },
+            "include_states": {
+                "type": "boolean",
+                "description": (
+                    "Include each entity's current state and attributes (default true). "
+                    "Ignored when include_entities is false"
+                ),
+            },
+            "include_disabled": {
+                "type": "boolean",
+                "description": "Include disabled entities (default false)",
+            },
+        },
+        "required": ["device_id"],
+    },
+)
+async def get_device_details(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Get a device and the entities registered to it."""
+    device_id = arguments["device_id"]
+    include_entities = arguments.get("include_entities", True)
+    include_states = arguments.get("include_states", True)
+    include_disabled = arguments.get("include_disabled", False)
+
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get(device_id)
+    if device is None:
+        return {"content": [{"type": "text", "text": f"Device {device_id} not found"}]}
+
+    result: dict[str, Any] = {
+        "device": {
+            "id": device.id,
+            "name": device.name,
+            "manufacturer": device.manufacturer,
+            "model": device.model,
+            "area_id": device.area_id,
+            "name_by_user": device.name_by_user,
+        }
+    }
+
+    if include_entities:
+        entity_registry = er.async_get(hass)
+        entries = er.async_entries_for_device(
+            entity_registry, device_id, include_disabled_entities=include_disabled
+        )
+        entities = []
+        for entry in entries:
+            entity: dict[str, Any] = {
+                "entity_id": entry.entity_id,
+                "domain": entry.entity_id.split(".")[0],
+                "name": entry.name or entry.original_name or entry.entity_id,
+                "disabled": entry.disabled_by is not None,
+            }
+            if include_states:
+                state = hass.states.get(entry.entity_id)
+                if state is not None:
+                    entity["state"] = state.state
+                    entity["attributes"] = dict(state.attributes)
+                    entity["name"] = state.attributes.get("friendly_name", entity["name"])
+                else:
+                    entity["state"] = None
+            entities.append(entity)
+        result["entities"] = entities
+
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+
+
+@register_tool(
     name="list_services",
     description="List available services in Home Assistant, optionally filtered by domain",
     input_schema={
@@ -291,6 +377,55 @@ async def list_services(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     result = {}
     for domain, domain_services in services.items():
         result[domain] = list(domain_services.keys())
+
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+
+
+@register_tool(
+    name="describe_service",
+    description=(
+        "Get the full parameter schema for a service: each field's description, whether it "
+        "is required, example values, selectors, and target constraints. Use this after "
+        "list_services when you need to know how to call a service, instead of guessing the "
+        "payload. Note: selectors describe a parameter's type and constraints; for dynamic "
+        "per-entity options (such as a specific vacuum's mapped rooms) read the target "
+        "entity's attributes via get_state"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "domain": {
+                "type": "string",
+                "description": "The service domain (e.g., vacuum, light)",
+            },
+            "service": {
+                "type": "string",
+                "description": (
+                    "The service name (e.g., clean_area). "
+                    "Omit to describe every service in the domain"
+                ),
+            },
+        },
+        "required": ["domain"],
+    },
+)
+async def describe_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Describe a service's parameters, selectors, and targets."""
+    domain = arguments["domain"]
+    service = arguments.get("service")
+
+    descriptions = await async_get_all_descriptions(hass)
+    domain_services = descriptions.get(domain)
+    if not domain_services:
+        return {"content": [{"type": "text", "text": f"No services found for domain {domain}"}]}
+
+    if service is not None:
+        description = domain_services.get(service)
+        if description is None:
+            return {"content": [{"type": "text", "text": f"Service {domain}.{service} not found"}]}
+        result = {service: description}
+    else:
+        result = dict(domain_services)
 
     return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
 

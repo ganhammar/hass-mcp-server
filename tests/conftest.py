@@ -11,7 +11,8 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
-# Mock the oidc_provider module before any imports
+# Stand-in for the paired OIDC provider's get_issuer_from_request, used only when
+# the real integration isn't available.
 def mock_get_issuer_from_request(request):
     """Mock implementation of get_issuer_from_request."""
     forwarded_proto = request.headers.get("X-Forwarded-Proto")
@@ -23,11 +24,18 @@ def mock_get_issuer_from_request(request):
         return str(request.url.origin())
 
 
-mock_token_validator = Mock()
-mock_token_validator.get_issuer_from_request = mock_get_issuer_from_request
-mock_token_validator.validate_access_token = Mock(return_value=None)
-sys.modules["custom_components.oidc_provider"] = Mock()
-sys.modules["custom_components.oidc_provider.token_validator"] = mock_token_validator
+# Use the real paired OIDC provider when it's vendored into the test environment
+# (CI copies custom_components/oidc_provider for the audience-contract tests in
+# test_e2e_oidc.py); otherwise stub it so the MCP component imports without the
+# separate integration present.
+try:
+    import custom_components.oidc_provider.token_validator  # noqa: F401
+except ImportError:
+    mock_token_validator = Mock()
+    mock_token_validator.get_issuer_from_request = mock_get_issuer_from_request
+    mock_token_validator.validate_access_token = Mock(return_value=None)
+    sys.modules["custom_components.oidc_provider"] = Mock()
+    sys.modules["custom_components.oidc_provider.token_validator"] = mock_token_validator
 
 
 @pytest.fixture

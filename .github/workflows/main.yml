@@ -51,10 +51,10 @@ jobs:
       run: poetry run ruff check custom_components/ tests/
 
     - name: Run unit tests
-      run: poetry run pytest tests/ -v --ignore=tests/test_integration.py
+      run: poetry run pytest tests/ -v --ignore=tests/test_integration.py --ignore=tests/test_e2e.py
 
     - name: Run tests with coverage
-      run: poetry run pytest tests/ --ignore=tests/test_integration.py --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
+      run: poetry run pytest tests/ --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
@@ -97,5 +97,5 @@ jobs:
       env:
         EXTRA_DEPS: ${{ matrix.extra-deps }}
 
-    - name: Run integration tests
-      run: .venv/bin/pytest tests/test_integration.py -v
+    - name: Run integration and end-to-end tests
+      run: .venv/bin/pytest tests/test_integration.py tests/test_e2e.py -v

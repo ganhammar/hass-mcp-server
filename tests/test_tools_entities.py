@@ -587,6 +587,64 @@ class TestToolsEntities:
         assert "state" not in data["entities"][0]
         assert data["entities"][0]["name"] == "Dispense"
 
+    async def test_post_tools_call_get_device_details_entity_without_state(self, view, mock_hass):
+        """Test get_device_details reports state=None for an entity with no current state."""
+        mock_device = Mock()
+        mock_device.id = "device1"
+        mock_device.name = "Pet Feeder"
+        mock_device.manufacturer = "Acme"
+        mock_device.model = "PF1"
+        mock_device.area_id = None
+        mock_device.name_by_user = None
+        mock_dr = Mock()
+        mock_dr.async_get.return_value = mock_device
+
+        entry = Mock()
+        entry.entity_id = "switch.pet_feeder_dispense"
+        entry.name = None
+        entry.original_name = "Dispense"
+        entry.disabled_by = None
+
+        # The registered entity has no state in the machine (e.g. unavailable or not loaded).
+        mock_hass.states.get.return_value = None
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_device_details", "arguments": {"device_id": "device1"}},
+                "id": 104,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
+                return_value=mock_dr,
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
+                return_value=Mock(),
+            ),
+            patch(
+                "custom_components.mcp_server_http_transport.tools.entities."
+                "er.async_entries_for_device",
+                return_value=[entry],
+            ),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert data["entities"][0]["entity_id"] == "switch.pet_feeder_dispense"
+        assert data["entities"][0]["state"] is None
+        # With no state to override it, the name falls back to the registry original_name.
+        assert data["entities"][0]["name"] == "Dispense"
+
     async def test_post_tools_call_list_services(self, view, mock_hass):
         """Test POST with tools/call for list_services."""
         mock_hass.services.async_services.return_value = {

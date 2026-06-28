@@ -7,7 +7,13 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_IDEMPOTENT,
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,6 +93,7 @@ async def _entity_id_to_item_id(hass: HomeAssistant, entity_id: str) -> tuple[st
             }
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_helpers(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List helpers, optionally filtered by domain."""
@@ -146,6 +153,7 @@ async def list_helpers(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         },
         "required": ["entity_id"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get a helper's stored config."""
@@ -191,6 +199,7 @@ async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         },
         "required": ["domain", "config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a new helper."""
@@ -244,6 +253,7 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         },
         "required": ["entity_id", "config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def update_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Update an existing helper."""
@@ -269,6 +279,7 @@ async def update_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         },
         "required": ["entity_id"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def delete_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete a helper."""

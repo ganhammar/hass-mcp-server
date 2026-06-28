@@ -11,7 +11,12 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.service import async_get_all_descriptions
 
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +51,7 @@ def _get_aliases(hass: HomeAssistant, entry: er.RegistryEntry) -> list[str]:
         },
         "required": ["entity_id"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get entity state."""
@@ -101,6 +107,7 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
         },
         "required": ["domain", "service"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Call a Home Assistant service."""
@@ -156,6 +163,7 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             },
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List entities."""
@@ -213,6 +221,7 @@ async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_areas(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List all areas."""
@@ -241,6 +250,7 @@ async def list_areas(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
             }
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List devices."""
@@ -364,6 +374,7 @@ async def get_device_details(hass: HomeAssistant, arguments: dict[str, Any]) -> 
             }
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_services(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List available services."""
@@ -463,6 +474,7 @@ async def describe_service(hass: HomeAssistant, arguments: dict[str, Any]) -> di
             },
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Search entities by various criteria."""
@@ -548,6 +560,7 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_labels(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List all labels."""
@@ -591,6 +604,7 @@ async def list_labels(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         },
         "required": ["entity_ids"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get state for multiple entities."""

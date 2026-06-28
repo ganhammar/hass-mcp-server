@@ -6,7 +6,13 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_IDEMPOTENT,
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +35,7 @@ _LOGGER = logging.getLogger(__name__)
         },
         "required": ["config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a new automation."""
@@ -65,6 +72,7 @@ async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         },
         "required": ["automation_id", "config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Update an existing automation."""
@@ -96,6 +104,7 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         },
         "required": ["automation_id"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def delete_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete an automation."""
@@ -115,6 +124,7 @@ async def delete_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_automations(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List all automations with full config."""
@@ -142,6 +152,7 @@ async def list_automations(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         },
         "required": ["automation_id"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_automation_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get a single automation's full config."""
@@ -172,6 +183,7 @@ async def get_automation_config(hass: HomeAssistant, arguments: dict[str, Any]) 
         },
         "required": ["config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def create_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a new scene."""
@@ -203,6 +215,7 @@ async def create_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         },
         "required": ["scene_id", "config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def update_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Update an existing scene."""
@@ -230,6 +243,7 @@ async def update_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         },
         "required": ["scene_id"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def delete_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete a scene."""
@@ -249,6 +263,7 @@ async def delete_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_scenes(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List all scenes with full config."""
@@ -276,6 +291,7 @@ async def list_scenes(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         },
         "required": ["scene_id"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_scene_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get a single scene's full config."""
@@ -310,6 +326,7 @@ async def get_scene_config(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         },
         "required": ["key", "config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def create_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a new script."""
@@ -343,6 +360,7 @@ async def create_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         },
         "required": ["key", "config"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def update_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Update an existing script."""
@@ -370,6 +388,7 @@ async def update_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         },
         "required": ["key"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def delete_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete a script."""
@@ -389,6 +408,7 @@ async def delete_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_scripts(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List all scripts with full config."""
@@ -416,6 +436,7 @@ async def list_scripts(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         },
         "required": ["key"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_script_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get a single script's full config."""

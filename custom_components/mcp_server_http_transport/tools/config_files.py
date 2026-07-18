@@ -282,6 +282,13 @@ def _list_yaml_filenames_sync(config_dir: Path, recursive: bool = False) -> list
                 and entry.suffix.lower() in _ALLOWED_SUFFIXES
                 and entry.name.lower() not in _SECRETS_FILES
             ):
+                # A file symlink pointing outside is rejected on read, so listing it
+                # would only offer a path that always errors.
+                try:
+                    if not entry.resolve().is_relative_to(root):
+                        continue
+                except OSError:
+                    continue
                 found.append(entry.relative_to(config_dir).as_posix())
 
     _walk(config_dir, 0)

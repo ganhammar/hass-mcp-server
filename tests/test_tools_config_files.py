@@ -199,6 +199,21 @@ class TestListConfigFilesRecursive:
 
         assert files == []
 
+    async def test_recursive_omits_file_symlink_pointing_outside(self, tmp_path):
+        """Listing and reading must agree — a path that always errors is not worth listing."""
+        outside = tmp_path.parent / "outside_file.yaml"
+        outside.write_text("secret: data")
+        nested = tmp_path / "includes"
+        nested.mkdir()
+        (nested / "escape.yaml").symlink_to(outside)
+        (nested / "real.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == ["includes/real.yaml"]
+
     async def test_recursive_respects_depth_limit(self, tmp_path):
         deep = tmp_path
         for i in range(10):

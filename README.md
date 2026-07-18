@@ -144,7 +144,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 
 | Tool | Description |
 |------|-------------|
-| `list_config_files` | List all YAML files in the config directory (first level, secrets excluded) |
+| `list_config_files` | List YAML files in the config directory (first level by default, `recursive=true` for split configs; secrets excluded) |
 | `get_config_file` | Read the contents of a YAML config file (max 1 MB) |
 | `save_config_file` | Write or replace a YAML config file; auto-backs up all files first, then validates config |
 | `delete_config_file` | Delete a YAML config file; auto-backs up all files first |
@@ -381,10 +381,25 @@ batch_edit_config_files(
 
 Both `saves` and `deletes` are optional — you can use either or both in the same call.
 
-> **Note:** Only first-level `.yaml`/`.yml` files in the config directory are accessible. Subdirectories and non-YAML files are blocked. The following files are also blocked from direct edits — use the dedicated tools instead:
+**Split configurations.** If your `configuration.yaml` splits config across folders — `!include_dir_merge_list`, `!include_dir_named`, `packages`, and friends — pass `recursive=true` to find those files, then read or edit them by their relative path:
+
+```
+list_config_files(recursive=True)
+# → ["configuration.yaml", "includes/templates/dishwasher.yaml", "packages/hvac.yaml", ...]
+
+get_config_file(filename="includes/templates/dishwasher.yaml")
+save_config_file(filename="includes/templates/dishwasher.yaml", content="...")
+```
+
+Recursive listing skips hidden folders (`.storage`, …), `custom_components`, `deps`, `www`, `node_modules`, `tts`, and `mcp_backups`. `save_config_file` will not create missing directories — create the folder in Home Assistant first.
+
+> **Note:** Only `.yaml`/`.yml` files inside the config directory are accessible. Paths are resolved before use and must stay within the config directory — `..`, absolute paths, and symlinks pointing outside are rejected. The following are also blocked from direct edits — use the dedicated tools instead:
 >
-> - **`secrets.yaml`** — never readable, contains credentials
-> - **`automations.yaml`**, **`scenes.yaml`**, **`scripts.yaml`** — owned by Home Assistant's storage layer; use `create_automation` / `update_automation` / `delete_automation` (and the equivalents for scenes and scripts) so UI-managed entries stay consistent. These files are still included in backups, so a restore never drops them.
+> - **`secrets.yaml`** — never readable, contains credentials. Blocked at **any** depth, so `includes/secrets.yaml` is protected too.
+> - **`automations.yaml`**, **`scenes.yaml`**, **`scripts.yaml`** — owned by Home Assistant's storage layer; use `create_automation` / `update_automation` / `delete_automation` (and the equivalents for scenes and scripts) so UI-managed entries stay consistent. These files are still included in backups, so a restore never drops them. Only the **top-level** files are blocked — a split-config file that happens to be named `packages/scripts.yaml` is your own and stays editable.
+> - Anything inside **`mcp_backups/`** — use `list_config_backups` / `restore_config_backup` instead.
+
+> **Backup caveat:** the automatic snapshot taken before every save/delete covers **first-level** YAML files only. Edits to files in subdirectories are not captured by it, so there is no automatic rollback for those — keep your own copy (or use version control) before editing split config.
 </details>
 
 <details>
@@ -412,7 +427,7 @@ The image is returned directly to the model for analysis. `get_image_file` suppo
 <details>
 <summary>How does the automatic backup work?</summary>
 
-Every call to `save_config_file` and `delete_config_file` automatically creates a full snapshot of all first-level YAML files (excluding `secrets.yaml`) before making any change. When using `batch_edit_config_files`, only one backup is created for the entire batch — regardless of how many files are saved or deleted. Snapshots are stored in:
+Every call to `save_config_file` and `delete_config_file` automatically creates a full snapshot of all first-level YAML files (excluding `secrets.yaml`) before making any change. Files in subdirectories are not included in this snapshot. When using `batch_edit_config_files`, only one backup is created for the entire batch — regardless of how many files are saved or deleted. Snapshots are stored in:
 
 ```
 config/mcp_backups/2026-04-26_14-30-00-123456/

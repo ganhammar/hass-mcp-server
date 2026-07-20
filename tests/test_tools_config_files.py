@@ -227,6 +227,46 @@ class TestListConfigFilesRecursive:
 
         assert files == []
 
+    async def test_recursive_skips_unreadable_subdirectory(self, tmp_path):
+        """A permission-denied folder must not abort the whole listing."""
+        (tmp_path / "locked").mkdir()
+        (tmp_path / "locked" / "hidden.yaml").write_text("")
+        (tmp_path / "readable").mkdir()
+        (tmp_path / "readable" / "real.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+        original = Path.iterdir
+
+        def fail_on_locked(self):
+            if self.name == "locked":
+                raise OSError("permission denied")
+            return original(self)
+
+        with patch.object(Path, "iterdir", fail_on_locked):
+            result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == ["readable/real.yaml"]
+
+    async def test_recursive_skips_entries_that_fail_to_resolve(self, tmp_path):
+        """A broken symlink (dir or file) is skipped rather than crashing the walk."""
+        (tmp_path / "baddir").mkdir()
+        (tmp_path / "baddir" / "x.yaml").write_text("")
+        (tmp_path / "badfile.yaml").write_text("")
+        (tmp_path / "good.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+        original = Path.resolve
+
+        def fail_on_bad(self, *args, **kwargs):
+            if self.name in ("baddir", "badfile.yaml"):
+                raise OSError("too many levels of symbolic links")
+            return original(self, *args, **kwargs)
+
+        with patch.object(Path, "resolve", fail_on_bad):
+            result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == ["good.yaml"]
+
     async def test_recursive_returns_sorted(self, tmp_path):
         (tmp_path / "zzz").mkdir()
         (tmp_path / "zzz" / "a.yaml").write_text("")
@@ -327,6 +367,13 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "includes/../configuration.yaml"})
         assert "'..'" in result["content"][0]["text"]
+
+    async def test_read_blocks_empty_filename(self, tmp_path):
+        """An empty path would otherwise resolve to the config directory itself."""
+        hass = _make_hass(tmp_path)
+        for empty in ("", "   "):
+            result = await get_config_file(hass, {"filename": empty})
+            assert "must not be empty" in result["content"][0]["text"]
 
     async def test_read_blocks_absolute_path(self, tmp_path):
         hass = _make_hass(tmp_path)

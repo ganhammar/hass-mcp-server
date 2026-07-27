@@ -104,6 +104,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `search_entities` | Search entities by friendly name, device class, domain, or area |
 | `get_device_details` | Get a device and every entity registered to it (all domains), with optional states |
 | `call_service` | Call any Home Assistant service |
+| `create_recurring_calendar_event` | Create a recurring calendar series with RRULE (local calendars; not via `calendar.create_event`) |
 | `fire_event` | Fire a custom event on the Home Assistant event bus |
 | `get_history` | Get state history of an entity over a time range |
 | `get_logbook` | Fetch logbook entries for an entity or time range |

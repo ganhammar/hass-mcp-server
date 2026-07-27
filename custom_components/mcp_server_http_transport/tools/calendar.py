@@ -1,12 +1,13 @@
-"""Calendar tools — recurring event create via CalendarEntity API."""
+"""Calendar tools — list, create, and delete events via CalendarEntity API."""
 
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
+from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import (
     DATA_COMPONENT,
     EVENT_DESCRIPTION,
@@ -25,6 +26,12 @@ from ..calendar_recurrence import recurrence_from_arguments
 from . import _HAJSONEncoder, register_tool
 
 _LOGGER = logging.getLogger(__name__)
+
+DESCRIPTION_PREVIEW_MAX = 80
+DELETE_SUMMARY_CONTAINS_MIN = 3
+DEFAULT_LIST_DAYS = 14
+DEFAULT_PURGE_LOOKAHEAD_DAYS = 400
+CALENDAR_TRIGGER_RELOAD_MINUTES = 15
 
 
 def _parse_event_time(raw: str, field: str) -> datetime:
@@ -50,6 +57,228 @@ def _error_text(message: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": message}]}
 
 
+def _minutes_until(start: datetime) -> float:
+    return (start - dt_util.now()).total_seconds() / 60
+
+
+def _lead_time_notice(start: datetime) -> str | None:
+    lead = _minutes_until(start)
+    if lead < 0:
+        return "Start time is in the past; calendar automations will not fire."
+    if lead < 15:
+        return (
+            f"Event starts in {lead:.0f} minutes. Calendar automations may miss it "
+            "unless triggers are reloaded (set reload_triggers=true)."
+        )
+    if lead < 20:
+        return f"Event starts in {lead:.0f} minutes; 20+ minutes ahead is safer for tests."
+    return None
+
+
+def _get_calendar_entity(hass: HomeAssistant, entity_id: str) -> CalendarEntity | dict[str, Any]:
+    if not entity_id.startswith("calendar."):
+        return _error_text(f"entity_id must be a calendar entity; got {entity_id!r}")
+
+    component = hass.data.get(DATA_COMPONENT)
+    if component is None:
+        return _error_text("Calendar component is not loaded")
+
+    entity = component.get_entity(entity_id)
+    if entity is None:
+        return _error_text(f"Calendar entity {entity_id} not found")
+    return entity
+
+
+def _has_feature(entity: CalendarEntity, feature: CalendarEntityFeature) -> bool:
+    return bool((entity.supported_features or 0) & feature)
+
+
+def _serialize_event(
+    event: CalendarEvent,
+    *,
+    include_description: bool,
+    description_preview_chars: int,
+) -> dict[str, Any]:
+    start = (
+        event.start_datetime_local.isoformat()
+        if hasattr(event, "start_datetime_local")
+        else (
+            event.start.isoformat()
+            if isinstance(event.start, datetime)
+            else event.start.isoformat()
+        )
+    )
+    end = (
+        event.end_datetime_local.isoformat()
+        if hasattr(event, "end_datetime_local")
+        else (event.end.isoformat() if isinstance(event.end, datetime) else event.end.isoformat())
+    )
+    payload: dict[str, Any] = {
+        "start": start,
+        "end": end,
+        "summary": event.summary,
+        "uid": event.uid,
+        "rrule": event.rrule,
+        "recurrence_id": event.recurrence_id,
+        "all_day": event.all_day,
+    }
+    if include_description and event.description:
+        payload["description"] = event.description
+    elif event.description:
+        preview_len = max(0, description_preview_chars)
+        if preview_len and len(event.description) > preview_len:
+            payload["description_preview"] = event.description[:preview_len] + "…"
+        elif preview_len:
+            payload["description_preview"] = event.description
+    return payload
+
+
+async def _reload_calendar_triggers(hass: HomeAssistant, entity_id: str) -> None:
+    await hass.services.async_call(
+        "homeassistant",
+        "reload_config_entry",
+        {"entity_id": entity_id},
+        blocking=True,
+    )
+    await hass.services.async_call("automation", "reload", {}, blocking=True)
+
+
+async def _maybe_reload_triggers(
+    hass: HomeAssistant,
+    entity_id: str,
+    dtstart: datetime,
+    *,
+    reload_triggers: bool,
+) -> bool:
+    if not reload_triggers:
+        return False
+    if _minutes_until(dtstart) >= CALENDAR_TRIGGER_RELOAD_MINUTES:
+        return False
+    await _reload_calendar_triggers(hass, entity_id)
+    return True
+
+
+def _resolve_event_window(arguments: dict[str, Any]) -> tuple[datetime, datetime]:
+    now = dt_util.now()
+    start = _parse_event_time(arguments["start"], "start") if arguments.get("start") else now
+    if arguments.get("end"):
+        end = _parse_event_time(arguments["end"], "end")
+    else:
+        days = int(arguments.get("days") or DEFAULT_LIST_DAYS)
+        if days < 1:
+            raise ValueError("days must be >= 1")
+        end = start + timedelta(days=days)
+    if end <= start:
+        raise ValueError("end must be after start")
+    return start, end
+
+
+@register_tool(
+    name="create_calendar_event",
+    description=(
+        "Create a one-off calendar event (no recurrence). Uses the calendar entity API "
+        "(preferred over calendar.create_event for local calendars). "
+        "Provide dtstart/dtend or dtstart with duration_minutes."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_id": {
+                "type": "string",
+                "description": "Calendar entity (e.g. calendar.cursor_prompts)",
+            },
+            "summary": {"type": "string", "description": "Event title"},
+            "dtstart": {
+                "type": "string",
+                "description": "Start, local ISO datetime (e.g. 2026-08-04T09:00:00)",
+            },
+            "dtend": {
+                "type": "string",
+                "description": "End ISO datetime after dtstart; omit if duration_minutes set.",
+            },
+            "duration_minutes": {
+                "type": "integer",
+                "description": "Event length in minutes when dtend omitted (default 5)",
+            },
+            "description": {
+                "type": "string",
+                "description": "Event body (e.g. full Cursor agent prompt)",
+            },
+            "location": {"type": "string", "description": "Optional location"},
+            "reload_triggers": {
+                "type": "boolean",
+                "description": (
+                    "When true and start is within 15 minutes, reload calendar config entry "
+                    "and automations so triggers pick up the new event (default false)"
+                ),
+            },
+        },
+        "required": ["entity_id", "summary", "dtstart"],
+    },
+)
+async def create_calendar_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Create a one-off calendar event."""
+    entity_or_error = _get_calendar_entity(hass, arguments["entity_id"])
+    if isinstance(entity_or_error, dict):
+        return entity_or_error
+    entity = entity_or_error
+
+    if not _has_feature(entity, CalendarEntityFeature.CREATE_EVENT):
+        return _error_text(f"Calendar {arguments['entity_id']} does not support event creation")
+
+    try:
+        dtstart = _parse_event_time(arguments["dtstart"], "dtstart")
+        if arguments.get("dtend"):
+            dtend = _parse_event_time(arguments["dtend"], "dtend")
+        else:
+            duration = int(arguments.get("duration_minutes") or 5)
+            if duration < 1:
+                raise ValueError("duration_minutes must be >= 1")
+            dtend = dtstart + timedelta(minutes=duration)
+        if dtend <= dtstart:
+            return _error_text("dtend must be after dtstart")
+    except ValueError as exc:
+        return _error_text(str(exc))
+
+    event: dict[str, Any] = {
+        EVENT_START: dtstart,
+        EVENT_END: dtend,
+        EVENT_SUMMARY: arguments["summary"],
+    }
+    if description := arguments.get("description"):
+        event[EVENT_DESCRIPTION] = description
+    if location := arguments.get("location"):
+        event[EVENT_LOCATION] = location
+
+    try:
+        await entity.async_create_event(**event)
+    except HomeAssistantError as exc:
+        _LOGGER.error(
+            "create_calendar_event failed for %s: %s",
+            arguments["entity_id"],
+            exc,
+        )
+        return _error_text(f"Failed to create event: {exc}")
+
+    reloaded = await _maybe_reload_triggers(
+        hass,
+        arguments["entity_id"],
+        dtstart,
+        reload_triggers=bool(arguments.get("reload_triggers")),
+    )
+    result: dict[str, Any] = {
+        "entity_id": arguments["entity_id"],
+        "summary": arguments["summary"],
+        "dtstart": dtstart.isoformat(),
+        "dtend": dtend.isoformat(),
+        "method": "calendar_entity_async_create_event",
+        "triggers_reloaded": reloaded,
+    }
+    if notice := _lead_time_notice(dtstart):
+        result["lead_time_notice"] = notice
+    return _text_result(result)
+
+
 @register_tool(
     name="create_recurring_calendar_event",
     description=(
@@ -64,10 +293,7 @@ def _error_text(message: str) -> dict[str, Any]:
                 "type": "string",
                 "description": "Calendar entity (e.g. calendar.cursor_prompts)",
             },
-            "summary": {
-                "type": "string",
-                "description": "Event title",
-            },
+            "summary": {"type": "string", "description": "Event title"},
             "dtstart": {
                 "type": "string",
                 "description": "First start, local ISO datetime (e.g. 2026-08-04T09:00:00)",
@@ -76,14 +302,15 @@ def _error_text(message: str) -> dict[str, Any]:
                 "type": "string",
                 "description": "First end, local ISO datetime (exclusive, after dtstart)",
             },
+            "duration_minutes": {
+                "type": "integer",
+                "description": "When dtend omitted, length in minutes from dtstart (default 5)",
+            },
             "description": {
                 "type": "string",
                 "description": "Event body (e.g. full Cursor agent prompt)",
             },
-            "location": {
-                "type": "string",
-                "description": "Optional location",
-            },
+            "location": {"type": "string", "description": "Optional location"},
             "rrule": {
                 "type": "string",
                 "description": (
@@ -116,33 +343,38 @@ def _error_text(message: str) -> dict[str, Any]:
                 "type": "integer",
                 "description": "Monthly only: day of month 1-31",
             },
+            "reload_triggers": {
+                "type": "boolean",
+                "description": (
+                    "When true and first start is within 15 minutes, reload calendar "
+                    "config entry and automations (default false)"
+                ),
+            },
         },
-        "required": ["entity_id", "summary", "dtstart", "dtend"],
+        "required": ["entity_id", "summary", "dtstart"],
     },
 )
 async def create_recurring_calendar_event(
     hass: HomeAssistant, arguments: dict[str, Any]
 ) -> dict[str, Any]:
     """Create a recurring calendar event series."""
-    entity_id = arguments["entity_id"]
-    if not entity_id.startswith("calendar."):
-        return _error_text(f"entity_id must be a calendar entity; got {entity_id!r}")
+    entity_or_error = _get_calendar_entity(hass, arguments["entity_id"])
+    if isinstance(entity_or_error, dict):
+        return entity_or_error
+    entity = entity_or_error
 
-    component = hass.data.get(DATA_COMPONENT)
-    if component is None:
-        return _error_text("Calendar component is not loaded")
-
-    entity = component.get_entity(entity_id)
-    if entity is None:
-        return _error_text(f"Calendar entity {entity_id} not found")
-
-    features = entity.supported_features or 0
-    if not features & CalendarEntityFeature.CREATE_EVENT:
-        return _error_text(f"Calendar {entity_id} does not support event creation")
+    if not _has_feature(entity, CalendarEntityFeature.CREATE_EVENT):
+        return _error_text(f"Calendar {arguments['entity_id']} does not support event creation")
 
     try:
         dtstart = _parse_event_time(arguments["dtstart"], "dtstart")
-        dtend = _parse_event_time(arguments["dtend"], "dtend")
+        if arguments.get("dtend"):
+            dtend = _parse_event_time(arguments["dtend"], "dtend")
+        else:
+            duration = int(arguments.get("duration_minutes") or 5)
+            if duration < 1:
+                raise ValueError("duration_minutes must be >= 1")
+            dtend = dtstart + timedelta(minutes=duration)
         if dtend <= dtstart:
             return _error_text("dtend must be after dtstart")
         rrule = recurrence_from_arguments(arguments)
@@ -163,16 +395,252 @@ async def create_recurring_calendar_event(
     try:
         await entity.async_create_event(**event)
     except HomeAssistantError as exc:
-        _LOGGER.error("create_recurring_calendar_event failed: %s", exc)
+        _LOGGER.error(
+            "create_recurring_calendar_event failed for %s: %s",
+            arguments["entity_id"],
+            exc,
+        )
         return _error_text(f"Failed to create recurring event: {exc}")
+
+    reloaded = await _maybe_reload_triggers(
+        hass,
+        arguments["entity_id"],
+        dtstart,
+        reload_triggers=bool(arguments.get("reload_triggers")),
+    )
+    result: dict[str, Any] = {
+        "entity_id": arguments["entity_id"],
+        "summary": arguments["summary"],
+        "dtstart": dtstart.isoformat(),
+        "dtend": dtend.isoformat(),
+        "rrule": rrule,
+        "method": "calendar_entity_async_create_event",
+        "triggers_reloaded": reloaded,
+    }
+    if notice := _lead_time_notice(dtstart):
+        result["lead_time_notice"] = notice
+    return _text_result(result)
+
+
+@register_tool(
+    name="list_calendar_events",
+    description=(
+        "List calendar events in a time window. Returns uid for delete operations. "
+        "Descriptions are omitted by default; use include_description only when needed."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_id": {
+                "type": "string",
+                "description": "Calendar entity (e.g. calendar.cursor_prompts)",
+            },
+            "start": {
+                "type": "string",
+                "description": "Window start ISO datetime (default: now)",
+            },
+            "end": {
+                "type": "string",
+                "description": "Window end ISO datetime (omit to use days)",
+            },
+            "days": {
+                "type": "integer",
+                "description": (
+                    f"Days forward from start when end omitted (default {DEFAULT_LIST_DAYS})"
+                ),
+            },
+            "include_description": {
+                "type": "boolean",
+                "description": "Include full event description/prompt text (default false)",
+            },
+            "description_preview_chars": {
+                "type": "integer",
+                "description": (
+                    f"When include_description is false, preview length (default "
+                    f"{DESCRIPTION_PREVIEW_MAX}, 0 to omit previews)"
+                ),
+            },
+        },
+        "required": ["entity_id"],
+    },
+)
+async def list_calendar_events(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """List calendar events in a time range."""
+    entity_or_error = _get_calendar_entity(hass, arguments["entity_id"])
+    if isinstance(entity_or_error, dict):
+        return entity_or_error
+    entity = entity_or_error
+
+    try:
+        start, end = _resolve_event_window(arguments)
+    except ValueError as exc:
+        return _error_text(str(exc))
+
+    include_description = bool(arguments.get("include_description"))
+    preview_chars = int(arguments.get("description_preview_chars", DESCRIPTION_PREVIEW_MAX))
+
+    try:
+        events = await entity.async_get_events(hass, start, end)
+    except HomeAssistantError as exc:
+        _LOGGER.error(
+            "list_calendar_events failed for %s: %s",
+            arguments["entity_id"],
+            exc,
+        )
+        return _error_text(f"Failed to list events: {exc}")
+
+    unique: dict[str, CalendarEvent] = {}
+    for event in events:
+        key = event.uid or f"{event.summary}:{event.start}:{event.end}"
+        if key not in unique:
+            unique[key] = event
+
+    serialized = [
+        _serialize_event(
+            event,
+            include_description=include_description,
+            description_preview_chars=preview_chars,
+        )
+        for event in sorted(unique.values(), key=lambda e: e.start_datetime_local)
+    ]
 
     return _text_result(
         {
-            "entity_id": entity_id,
-            "summary": arguments["summary"],
-            "dtstart": dtstart.isoformat(),
-            "dtend": dtend.isoformat(),
-            "rrule": rrule,
-            "method": "calendar_entity_async_create_event",
+            "entity_id": arguments["entity_id"],
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "count": len(serialized),
+            "events": serialized,
+        }
+    )
+
+
+@register_tool(
+    name="delete_calendar_events",
+    description=(
+        "Delete calendar event series by uid or by summary filter. Requires a specific "
+        "filter (uid, exact summary, or summary_contains with at least 3 characters). "
+        "Use dry_run=true to preview matches without deleting."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_id": {
+                "type": "string",
+                "description": "Calendar entity (e.g. calendar.cursor_prompts)",
+            },
+            "uid": {
+                "type": "string",
+                "description": "Delete one series/instance by uid (from list_calendar_events)",
+            },
+            "summary": {
+                "type": "string",
+                "description": "Exact summary match (deletes each matching series once)",
+            },
+            "summary_contains": {
+                "type": "string",
+                "description": (
+                    f"Case-insensitive substring match (min {DELETE_SUMMARY_CONTAINS_MIN} chars)"
+                ),
+            },
+            "days": {
+                "type": "integer",
+                "description": (
+                    f"Search window in days from now when matching by summary "
+                    f"(default {DEFAULT_PURGE_LOOKAHEAD_DAYS})"
+                ),
+            },
+            "dry_run": {
+                "type": "boolean",
+                "description": "List matches without deleting (default false)",
+            },
+        },
+        "required": ["entity_id"],
+    },
+)
+async def delete_calendar_events(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Delete calendar events matching uid or summary filters."""
+    entity_or_error = _get_calendar_entity(hass, arguments["entity_id"])
+    if isinstance(entity_or_error, dict):
+        return entity_or_error
+    entity = entity_or_error
+
+    if not _has_feature(entity, CalendarEntityFeature.DELETE_EVENT):
+        return _error_text(f"Calendar {arguments['entity_id']} does not support event deletion")
+
+    uid = (arguments.get("uid") or "").strip()
+    summary = arguments.get("summary")
+    summary_contains = (arguments.get("summary_contains") or "").strip()
+    filters = sum(bool(x) for x in (uid, summary, summary_contains))
+    if filters != 1:
+        return _error_text("Provide exactly one of uid, summary, or summary_contains")
+    if summary_contains and len(summary_contains) < DELETE_SUMMARY_CONTAINS_MIN:
+        return _error_text(
+            f"summary_contains must be at least {DELETE_SUMMARY_CONTAINS_MIN} characters"
+        )
+
+    dry_run = bool(arguments.get("dry_run"))
+    matches: list[dict[str, Any]] = []
+
+    if uid:
+        matches.append({"uid": uid, "summary": None})
+    else:
+        days = int(arguments.get("days") or DEFAULT_PURGE_LOOKAHEAD_DAYS)
+        if days < 1:
+            return _error_text("days must be >= 1")
+        start = dt_util.now()
+        end = start + timedelta(days=days)
+        try:
+            events = await entity.async_get_events(hass, start, end)
+        except HomeAssistantError as exc:
+            _LOGGER.error(
+                "delete_calendar_events list failed for %s: %s",
+                arguments["entity_id"],
+                exc,
+            )
+            return _error_text(f"Failed to search events: {exc}")
+
+        seen_uids: set[str] = set()
+        for event in events:
+            event_summary = event.summary or ""
+            if summary is not None and event_summary != summary:
+                continue
+            if summary_contains and summary_contains.lower() not in event_summary.lower():
+                continue
+            if not event.uid or event.uid in seen_uids:
+                continue
+            seen_uids.add(event.uid)
+            matches.append({"uid": event.uid, "summary": event_summary})
+
+    if not matches:
+        return _text_result(
+            {
+                "entity_id": arguments["entity_id"],
+                "deleted_count": 0,
+                "dry_run": dry_run,
+                "matches": [],
+            }
+        )
+
+    deleted: list[dict[str, Any]] = []
+    if not dry_run:
+        for match in matches:
+            try:
+                await entity.async_delete_event(match["uid"])
+            except HomeAssistantError as exc:
+                _LOGGER.error(
+                    "delete_calendar_events failed uid=%s: %s",
+                    match["uid"],
+                    exc,
+                )
+                return _error_text(f"Failed to delete uid {match['uid']}: {exc}")
+            deleted.append(match)
+
+    return _text_result(
+        {
+            "entity_id": arguments["entity_id"],
+            "deleted_count": 0 if dry_run else len(deleted),
+            "dry_run": dry_run,
+            "matches": matches,
         }
     )

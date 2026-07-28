@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_IDEMPOTENT,
+    ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     _HAJSONEncoder,
     register_tool,
@@ -44,8 +45,12 @@ async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -
 @register_tool(
     name="get_dashboard_config",
     description=(
-        "Get the full configuration (views and cards) of a Lovelace dashboard. "
-        'Use url_path="default" for the main Overview dashboard.'
+        "Get the configuration (views and cards) of a Lovelace dashboard. "
+        'Use url_path="default" for the main Overview dashboard. '
+        "Returns the whole config by default, which can be very large on a busy dashboard. "
+        "For a large dashboard, start with summary=true to get an outline of the views and "
+        "cards with a JSON Pointer for each, then pass one of those pointers as 'path' to read "
+        "just that card or view. The same pointers are what patch_dashboard_config edits"
     ),
     input_schema={
         "type": "object",
@@ -56,7 +61,23 @@ async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -
                     'Dashboard URL path (e.g., "energy", "map"). '
                     'Use "default" for the main Overview dashboard.'
                 ),
-            }
+            },
+            "path": {
+                "type": "string",
+                "description": (
+                    "JSON Pointer to the part of the config to return, e.g. '/views/2' or "
+                    "'/views/2/cards/5'. Omit to return the whole config."
+                ),
+            },
+            "summary": {
+                "type": "boolean",
+                "description": (
+                    "Return an outline instead of the full config (default: false): view "
+                    "titles plus each card's type, label, and entities, with a JSON Pointer "
+                    "for every entry but without the cards' full options. "
+                    "Can be combined with path='/views/<n>' to outline a single view"
+                ),
+            },
         },
         "required": ["url_path"],
     },
@@ -65,13 +86,44 @@ async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -
 async def get_dashboard_config_tool(
     hass: HomeAssistant, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    """Get dashboard configuration."""
-    from ..dashboard_manager import get_dashboard_config
+    """Get a dashboard configuration, optionally scoped to a pointer or summarized."""
+    from ..dashboard_manager import (
+        get_dashboard_config,
+        summarize_dashboard_config,
+        summarize_view,
+    )
+    from ..json_patch import parse_pointer, resolve_pointer
+
+    pointer = arguments.get("path") or ""
 
     try:
         config = await get_dashboard_config(hass, arguments["url_path"])
+
+        if arguments.get("summary", False):
+            tokens = parse_pointer(pointer)
+            if not tokens:
+                result: Any = summarize_dashboard_config(config)
+            elif len(tokens) == 2 and tokens[0] == "views" and tokens[1].isdigit():
+                view = resolve_pointer(config, pointer)
+                result = summarize_view(view, tokens, int(tokens[1]))
+            else:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"summary=true supports the whole config (omit path) or a "
+                                f"single view (path='/views/0'), not '{pointer}'. "
+                                f"Call again without summary to read '{pointer}' in full."
+                            ),
+                        }
+                    ]
+                }
+        else:
+            result = resolve_pointer(config, pointer) if pointer else config
+
         return {
-            "content": [{"type": "text", "text": json.dumps(config, indent=2, cls=_HAJSONEncoder)}]
+            "content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting dashboard config: {str(e)}"}]}
@@ -81,7 +133,9 @@ async def get_dashboard_config_tool(
     name="save_dashboard_config",
     description=(
         "Save (replace) the full configuration of a Lovelace dashboard. "
-        'Use url_path="default" for the main Overview dashboard.'
+        'Use url_path="default" for the main Overview dashboard. '
+        "This requires sending every view and card, so for anything short of a rewrite "
+        "use patch_dashboard_config instead"
     ),
     input_schema={
         "type": "object",
@@ -120,6 +174,120 @@ async def save_dashboard_config_tool(
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error saving dashboard config: {str(e)}"}]}
+
+
+def _count(value: Any) -> int:
+    """Length of a list-valued config key, 0 for anything else."""
+    return len(value) if isinstance(value, list) else 0
+
+
+def _view_overview(config: dict[str, Any]) -> list[str]:
+    """One compact line per view: index, title, and how many cards it now holds."""
+    lines: list[str] = []
+    for index, view in enumerate(config.get("views") or []):
+        if not isinstance(view, dict):
+            lines.append(f"  [{index}] (not an object)")
+            continue
+        sections = [s for s in (view.get("sections") or []) if isinstance(s, dict)]
+        cards = _count(view.get("cards")) + sum(_count(s.get("cards")) for s in sections)
+        title = view.get("title") or view.get("path") or ""
+        parts = [f"{cards} card(s)"]
+        if sections:
+            parts.append(f"{len(sections)} section(s)")
+        lines.append(f"  [{index}] {title}: " + ", ".join(parts))
+    return lines
+
+
+@register_tool(
+    name="patch_dashboard_config",
+    description=(
+        "Edit parts of a Lovelace dashboard without resending the whole config. "
+        "Takes RFC 6902 JSON Patch operations addressing locations by JSON Pointer, "
+        "e.g. move one card between views or change a single card's entity. "
+        'Use url_path="default" for the main Overview dashboard. '
+        "Discover pointers with get_dashboard_config(summary=true). "
+        "Operations apply in order and all-or-nothing: if one fails the dashboard is "
+        "left untouched. Because each operation sees the result of the previous one, "
+        "removing several cards from the same view is safest done highest index first. "
+        "Guard against a stale read by leading with a 'test' operation"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "url_path": {
+                "type": "string",
+                "description": (
+                    'Dashboard URL path (e.g., "energy", "map"). '
+                    'Use "default" for the main Overview dashboard.'
+                ),
+            },
+            "operations": {
+                "type": "array",
+                "description": (
+                    "JSON Patch operations to apply in order. Example: "
+                    '[{"op": "test", "path": "/views/1/cards/3/entity", '
+                    '"value": "fan.air_purifier"}, '
+                    '{"op": "move", "from": "/views/1/cards/3", "path": "/views/2/cards/-"}]'
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "op": {
+                            "type": "string",
+                            "enum": ["add", "remove", "replace", "move", "copy", "test"],
+                            "description": (
+                                "add: insert a value (into an array at the given index, "
+                                "or set an object key). remove: delete the value. "
+                                "replace: overwrite an existing value. "
+                                "move/copy: relocate or duplicate the value at 'from'. "
+                                "test: fail the whole patch unless the value matches"
+                            ),
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "JSON Pointer to the target, e.g. '/views/2/cards/5' or "
+                                "'/views/0/sections/1/cards/0/entity'. For 'add' and 'move', "
+                                "end an array path with '/-' to append, or with an index to "
+                                "insert before that position"
+                            ),
+                        },
+                        "value": {
+                            "description": (
+                                "The value for add, replace, and test. "
+                                "For a card this is the full card object"
+                            ),
+                        },
+                        "from": {
+                            "type": "string",
+                            "description": "Source JSON Pointer, required for move and copy",
+                        },
+                    },
+                    "required": ["op", "path"],
+                },
+            },
+        },
+        "required": ["url_path", "operations"],
+    },
+    annotations=ANNOTATION_NON_IDEMPOTENT,
+)
+async def patch_dashboard_config_tool(
+    hass: HomeAssistant, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """Apply JSON Patch operations to a dashboard configuration."""
+    from ..dashboard_manager import patch_dashboard_config
+
+    url_path = arguments["url_path"]
+    operations = arguments.get("operations")
+
+    try:
+        config = await patch_dashboard_config(hass, url_path, operations)
+        count = len(operations) if isinstance(operations, list) else 0
+        lines = [f"Applied {count} operation(s) to dashboard '{url_path}'"]
+        lines.extend(_view_overview(config))
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error patching dashboard config: {str(e)}"}]}
 
 
 @register_tool(

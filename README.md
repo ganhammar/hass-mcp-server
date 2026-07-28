@@ -12,7 +12,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, scripts, and helper entities (input_boolean, counter, timer, schedule, and more)
-- 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards)
+- 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards) with outline reads and JSON Patch edits so a single card can be changed without resending the whole dashboard
 - 🩺 System administration tools (error log, config validation, restart, system status)
 - 📁 YAML config file management — read, write, delete files with automatic backup before every change and built-in config validation (opt-in)
 - 📷 Camera & image access — capture live camera frames and read saved image files for visual analysis (opt-in)
@@ -159,7 +159,8 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | Tool | Description |
 |------|-------------|
 | `list_dashboards` | List all Lovelace dashboards with metadata |
-| `get_dashboard_config` | Get full dashboard configuration (views/cards) |
+| `get_dashboard_config` | Get a dashboard configuration; `summary=true` returns an outline of views and cards, `path` returns just the part a JSON Pointer addresses |
+| `patch_dashboard_config` | Apply JSON Patch operations to a dashboard: move, add, remove, or edit individual cards without resending the whole config |
 | `save_dashboard_config` | Save (replace) full dashboard configuration |
 | `delete_dashboard_config` | Reset a dashboard configuration to empty |
 | `create_dashboard` | Create a new Lovelace dashboard (experimental) |
@@ -314,6 +315,36 @@ Use `list_dashboards` to see all dashboards, then `get_dashboard_config` and `sa
 get_dashboard_config(url_path="default")
 save_dashboard_config(url_path="default", config={"views": [{"title": "Home", "cards": [...]}]})
 ```
+
+A real dashboard can easily be over 100 KB, which is too much to read and write back for a one-card change. For anything smaller than a rewrite, work through the outline instead.
+
+`get_dashboard_config(url_path="default", summary=true)` returns each view and card as type, label, and entities, with a JSON Pointer for every entry:
+
+```json
+{
+  "view_count": 2,
+  "views": [
+    {"pointer": "/views/0", "index": 0, "title": "Living Room", "path": "living", "card_count": 2,
+     "cards": [
+       {"pointer": "/views/0/cards/0", "index": 0, "type": "tile", "entity": "light.sofa"},
+       {"pointer": "/views/0/cards/1", "index": 1, "type": "tile", "entity": "fan.air_purifier"}
+     ]}
+  ]
+}
+```
+
+Pass one of those pointers as `path` to read a single card in full, and to `patch_dashboard_config` to change it. Operations follow [RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902) (`add`, `remove`, `replace`, `move`, `copy`, `test`) and apply in order, all-or-nothing, so a failing operation leaves the dashboard untouched:
+
+```json
+get_dashboard_config(url_path="default", path="/views/0/cards/1")
+
+patch_dashboard_config(url_path="default", operations=[
+  {"op": "test", "path": "/views/0/cards/1/entity", "value": "fan.air_purifier"},
+  {"op": "move", "from": "/views/0/cards/1", "path": "/views/1/cards/-"}
+])
+```
+
+A leading `test` operation makes the patch fail rather than edit the wrong card if the dashboard changed since it was read. End an array path with `/-` to append.
 
 To create or delete dashboards themselves, use the experimental `create_dashboard` and `delete_dashboard` tools. These use internal HA APIs and may break with future HA updates.
 </details>
@@ -475,7 +506,7 @@ You can also delete entries from `config/mcp_backups/` manually via SSH, the Sam
 
 Some tools use internal Home Assistant APIs that are not publicly exposed and may break with future HA updates.
 
-**Dashboard tools:** `create_dashboard`, `update_dashboard`, and `delete_dashboard` use `DashboardsCollection` and replicate side effects (panel registration, dashboards dict updates) that HA normally handles internally. The config-level tools (`list_dashboards`, `get/save/delete_dashboard_config`) use stable public APIs and are not experimental.
+**Dashboard tools:** `create_dashboard`, `update_dashboard`, and `delete_dashboard` use `DashboardsCollection` and replicate side effects (panel registration, dashboards dict updates) that HA normally handles internally. The config-level tools (`list_dashboards`, `get/save/patch/delete_dashboard_config`) use stable public APIs and are not experimental.
 
 **Helper tools:** `get_helper_config`, `create_helper`, `update_helper`, and `delete_helper` use `StorageCollection` internals to manage UI-created helpers. They only affect helpers stored in `.storage/` — helpers defined in YAML are read-only from the perspective of these tools. `list_helpers` uses public APIs and is not experimental.
 </details>

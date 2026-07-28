@@ -8,7 +8,11 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +51,7 @@ _VALID_PERIODS = {"5minute", "hour", "day", "week", "month"}
         },
         "required": ["entity_id", "start_time"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Fetch long-term statistics for an entity."""

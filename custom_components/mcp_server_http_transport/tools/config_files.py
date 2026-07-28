@@ -12,7 +12,13 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from ..const import DOMAIN
-from . import register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_IDEMPOTENT,
+    ANNOTATION_NON_IDEMPOTENT,
+    ANNOTATION_READ_ONLY,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -232,6 +238,7 @@ def _atomic_write(path: Path, content: str) -> None:
             }
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List YAML files in the config directory, optionally recursing into subdirectories."""
@@ -319,6 +326,7 @@ def _list_yaml_filenames_sync(config_dir: Path, recursive: bool = False) -> list
         },
         "required": ["filename"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read a YAML config file."""
@@ -383,6 +391,7 @@ def _read_config_file_sync(path: Path, filename: str) -> str:
         },
         "required": ["filename", "content"],
     },
+    annotations=ANNOTATION_IDEMPOTENT,
 )
 async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Back up all YAML files, write the new content, then optionally validate."""
@@ -439,6 +448,7 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         },
         "required": ["filename"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Back up all YAML files, then delete the target file."""
@@ -556,6 +566,7 @@ def _apply_batch_edit_sync(
             },
         },
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """One backup → apply all saves → apply all deletes → one config check."""
@@ -649,6 +660,7 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
         "Call this before bulk edits to preserve a rollback snapshot"
     ),
     input_schema={"type": "object", "properties": {}},
+    annotations=ANNOTATION_NON_IDEMPOTENT,
 )
 async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Copy all first-level YAML files (except secrets) into a timestamped backup folder."""
@@ -691,6 +703,7 @@ def _backup_and_list_sync(config_dir: Path) -> dict[str, Any]:
         "newest first. Shows the timestamp and number of files in each backup"
     ),
     input_schema={"type": "object", "properties": {}},
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List available backup snapshots, newest first."""
@@ -738,6 +751,7 @@ def _list_backups_sync(config_dir: Path) -> list[dict[str, Any]]:
             }
         },
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def cleanup_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete backup snapshots older than older_than_days days."""
@@ -814,6 +828,7 @@ def _cleanup_backups_sync(config_dir: Path, older_than_days: int) -> dict[str, l
             }
         },
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Restore files from a backup snapshot into the config directory."""

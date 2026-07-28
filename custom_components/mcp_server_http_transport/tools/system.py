@@ -9,7 +9,12 @@ from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +26,7 @@ _LOGGER = logging.getLogger(__name__)
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get Home Assistant configuration."""
@@ -58,6 +64,7 @@ async def get_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         },
         "required": ["template"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def render_template(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Render a Jinja2 template."""
@@ -95,6 +102,7 @@ async def render_template(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         },
         "required": ["entity_id", "start_time"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_history(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get state history for an entity."""
@@ -168,6 +176,7 @@ _BLOCKED_EVENT_TYPES = frozenset(
         },
         "required": ["event_type"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Fire an event on the Home Assistant event bus."""
@@ -217,6 +226,7 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         },
         "required": ["start_time"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_logbook(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get logbook entries for an entity or time range."""

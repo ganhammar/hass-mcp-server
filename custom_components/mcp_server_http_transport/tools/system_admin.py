@@ -9,7 +9,12 @@ from typing import Any
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +35,7 @@ _LOGGER = logging.getLogger(__name__)
             }
         },
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_error_log(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Fetch the Home Assistant error log, falling back to the in-memory buffer."""
@@ -149,6 +155,7 @@ def _format_system_log_entry(entry: dict[str, Any]) -> str:
         },
         "required": ["confirm"],
     },
+    annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def restart_ha(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Restart Home Assistant."""
@@ -186,6 +193,7 @@ async def restart_ha(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_system_status(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get system status overview."""
@@ -229,6 +237,7 @@ async def get_system_status(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         },
         "required": ["domain"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_domain_stats(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get aggregate stats for a domain."""
@@ -272,6 +281,7 @@ async def get_domain_stats(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def check_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Validate HA configuration."""
@@ -299,6 +309,7 @@ async def check_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         "type": "object",
         "properties": {},
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def list_integrations(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List installed integrations."""

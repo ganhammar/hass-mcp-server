@@ -12,7 +12,10 @@ from custom_components.mcp_server_http_transport.dashboard_manager import (
     delete_dashboard_config,
     get_dashboard_config,
     list_dashboards,
+    patch_dashboard_config,
     save_dashboard_config,
+    summarize_dashboard_config,
+    summarize_view,
     update_dashboard,
 )
 
@@ -215,6 +218,300 @@ class TestSaveDashboardConfig:
         hass = _make_hass({"energy": dashboard})
         with pytest.raises(ValueError, match="Failed to save config"):
             await save_dashboard_config(hass, "energy", {})
+
+
+class TestPatchDashboardConfig:
+    """Tests for patch_dashboard_config."""
+
+    @staticmethod
+    def _dashboard_with(config: dict) -> AsyncMock:
+        dashboard = AsyncMock()
+        dashboard.async_load.return_value = config
+        return dashboard
+
+    async def test_saves_only_the_patched_result(self):
+        dashboard = self._dashboard_with(
+            {"views": [{"title": "Home", "cards": [{"type": "tile", "entity": "light.a"}]}]}
+        )
+        hass = _make_hass({"energy": dashboard})
+
+        result = await patch_dashboard_config(
+            hass,
+            "energy",
+            [{"op": "replace", "path": "/views/0/cards/0/entity", "value": "light.b"}],
+        )
+
+        assert result["views"][0]["cards"][0]["entity"] == "light.b"
+        dashboard.async_save.assert_called_once_with(result)
+
+    async def test_moves_a_card_between_views(self):
+        dashboard = self._dashboard_with(
+            {
+                "views": [
+                    {"title": "Living", "cards": [{"type": "tile", "entity": "fan.purifier"}]},
+                    {"title": "Bedroom", "cards": []},
+                ]
+            }
+        )
+        hass = _make_hass({None: dashboard})
+
+        result = await patch_dashboard_config(
+            hass,
+            "default",
+            [{"op": "move", "from": "/views/0/cards/0", "path": "/views/1/cards/-"}],
+        )
+
+        assert result["views"][0]["cards"] == []
+        assert result["views"][1]["cards"][0]["entity"] == "fan.purifier"
+
+    async def test_does_not_save_when_an_operation_fails(self):
+        dashboard = self._dashboard_with({"views": [{"title": "Home", "cards": []}]})
+        hass = _make_hass({"energy": dashboard})
+
+        with pytest.raises(ValueError, match="test failed"):
+            await patch_dashboard_config(
+                hass,
+                "energy",
+                [{"op": "test", "path": "/views/0/title", "value": "Away"}],
+            )
+
+        dashboard.async_save.assert_not_called()
+
+    async def test_does_not_mutate_the_loaded_config(self):
+        loaded = {"views": [{"title": "Home", "cards": [{"type": "tile"}]}]}
+        dashboard = self._dashboard_with(loaded)
+        hass = _make_hass({"energy": dashboard})
+
+        await patch_dashboard_config(hass, "energy", [{"op": "remove", "path": "/views/0/cards/0"}])
+
+        assert loaded["views"][0]["cards"] == [{"type": "tile"}]
+
+    async def test_rejects_a_patch_that_produces_a_non_object(self):
+        dashboard = self._dashboard_with({"views": []})
+        hass = _make_hass({"energy": dashboard})
+
+        with pytest.raises(ValueError, match="must be an object"):
+            await patch_dashboard_config(
+                hass, "energy", [{"op": "replace", "path": "", "value": []}]
+            )
+
+        dashboard.async_save.assert_not_called()
+
+    async def test_rejects_a_patch_that_breaks_the_views_list(self):
+        dashboard = self._dashboard_with({"views": [{"title": "Home"}]})
+        hass = _make_hass({"energy": dashboard})
+
+        with pytest.raises(ValueError, match="'views' must be a list"):
+            await patch_dashboard_config(
+                hass, "energy", [{"op": "replace", "path": "/views", "value": {"0": {}}}]
+            )
+
+        dashboard.async_save.assert_not_called()
+
+    async def test_allows_a_config_without_views(self):
+        dashboard = self._dashboard_with({})
+        hass = _make_hass({"energy": dashboard})
+
+        result = await patch_dashboard_config(
+            hass, "energy", [{"op": "add", "path": "/title", "value": "Home"}]
+        )
+
+        assert result == {"title": "Home"}
+        dashboard.async_save.assert_called_once_with(result)
+
+    async def test_raises_for_nonexistent_dashboard(self):
+        hass = _make_hass({})
+        with pytest.raises(ValueError, match="not found"):
+            await patch_dashboard_config(
+                hass, "nonexistent", [{"op": "remove", "path": "/views/0"}]
+            )
+
+
+class TestSummarizeDashboardConfig:
+    """Tests for summarize_dashboard_config and its helpers."""
+
+    def test_summarizes_views_and_cards_with_pointers(self):
+        config = {
+            "views": [
+                {
+                    "title": "Living Room",
+                    "path": "living",
+                    "icon": "mdi:sofa",
+                    "cards": [
+                        {"type": "tile", "entity": "light.sofa", "name": "Sofa"},
+                        {"type": "tile", "entity": "fan.air_purifier"},
+                    ],
+                }
+            ]
+        }
+
+        result = summarize_dashboard_config(config)
+
+        assert result["view_count"] == 1
+        view = result["views"][0]
+        assert view["pointer"] == "/views/0"
+        assert view["title"] == "Living Room"
+        assert view["path"] == "living"
+        assert view["card_count"] == 2
+        assert view["cards"][1]["pointer"] == "/views/0/cards/1"
+        assert view["cards"][1]["entity"] == "fan.air_purifier"
+        assert view["cards"][0]["label"] == "Sofa"
+
+    def test_omits_card_options(self):
+        config = {
+            "views": [
+                {
+                    "title": "Home",
+                    "cards": [
+                        {
+                            "type": "tile",
+                            "entity": "light.a",
+                            "features": [{"type": "light-brightness"}],
+                            "vertical": True,
+                        }
+                    ],
+                }
+            ]
+        }
+
+        card = summarize_dashboard_config(config)["views"][0]["cards"][0]
+
+        assert card["type"] == "tile"
+        assert "features" not in card
+        assert "vertical" not in card
+
+    def test_summarizes_sections_view(self):
+        config = {
+            "views": [
+                {
+                    "title": "Home",
+                    "type": "sections",
+                    "sections": [
+                        {
+                            "type": "grid",
+                            "title": "Lights",
+                            "cards": [{"type": "tile", "entity": "light.a"}],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        view = summarize_dashboard_config(config)["views"][0]
+
+        assert view["section_count"] == 1
+        section = view["sections"][0]
+        assert section["pointer"] == "/views/0/sections/0"
+        assert section["title"] == "Lights"
+        assert section["cards"][0]["pointer"] == "/views/0/sections/0/cards/0"
+
+    def test_summarizes_nested_stack_cards(self):
+        config = {
+            "views": [
+                {
+                    "title": "Home",
+                    "cards": [
+                        {
+                            "type": "vertical-stack",
+                            "cards": [
+                                {"type": "tile", "entity": "light.a"},
+                                {"type": "tile", "entity": "light.b"},
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        stack = summarize_dashboard_config(config)["views"][0]["cards"][0]
+
+        assert stack["card_count"] == 2
+        assert stack["cards"][1]["pointer"] == "/views/0/cards/0/cards/1"
+        assert stack["cards"][1]["entity"] == "light.b"
+
+    def test_truncates_beyond_the_nesting_limit(self):
+        card: dict = {"type": "tile", "entity": "light.deep"}
+        for _ in range(8):
+            card = {"type": "vertical-stack", "cards": [card]}
+
+        result = summarize_dashboard_config({"views": [{"title": "Home", "cards": [card]}]})
+
+        node = result["views"][0]["cards"][0]
+        depth = 0
+        while "cards" in node:
+            node = node["cards"][0]
+            depth += 1
+        assert node["truncated"] is True
+        assert depth == 6
+
+    def test_caps_the_entities_it_lists(self):
+        entities = [f"light.l{i}" for i in range(14)]
+        config = {
+            "views": [{"title": "Home", "cards": [{"type": "entities", "entities": entities}]}]
+        }
+
+        card = summarize_dashboard_config(config)["views"][0]["cards"][0]
+
+        assert card["entity_count"] == 14
+        assert len(card["entities"]) == 10
+
+    def test_reads_entity_ids_from_row_objects(self):
+        config = {
+            "views": [
+                {
+                    "title": "Home",
+                    "cards": [
+                        {
+                            "type": "entities",
+                            "entities": [{"entity": "light.a", "name": "A"}, "light.b"],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        card = summarize_dashboard_config(config)["views"][0]["cards"][0]
+        assert card["entities"] == ["light.a", "light.b"]
+
+    def test_summarizes_badges(self):
+        config = {
+            "views": [{"title": "Home", "badges": [{"type": "entity", "entity": "person.me"}]}]
+        }
+
+        view = summarize_dashboard_config(config)["views"][0]
+
+        assert view["badge_count"] == 1
+        assert view["badges"][0]["pointer"] == "/views/0/badges/0"
+
+    def test_handles_config_without_views(self):
+        assert summarize_dashboard_config({}) == {"views": [], "view_count": 0}
+
+    def test_handles_malformed_entries(self):
+        config = {
+            "views": [
+                "not-a-view",
+                {"title": "Home", "cards": ["not-a-card"], "sections": ["not-a-section"]},
+            ]
+        }
+
+        result = summarize_dashboard_config(config)
+
+        assert result["views"][0]["value"] == "not-a-view"
+        assert result["views"][1]["cards"][0]["value"] == "not-a-card"
+        assert result["views"][1]["sections"][0]["value"] == "not-a-section"
+
+    def test_rejects_non_object_config(self):
+        with pytest.raises(ValueError, match="must be an object"):
+            summarize_dashboard_config([])
+
+    def test_summarize_view_uses_the_given_pointer(self):
+        view = {"title": "Bedroom", "cards": [{"type": "tile", "entity": "light.bed"}]}
+
+        result = summarize_view(view, ["views", "3"], 3)
+
+        assert result["pointer"] == "/views/3"
+        assert result["index"] == 3
+        assert result["cards"][0]["pointer"] == "/views/3/cards/0"
 
 
 class TestDeleteDashboardConfig:

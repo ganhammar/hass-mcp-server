@@ -27,14 +27,21 @@ _ALLOWED_SUFFIXES = {".yaml", ".yml"}
 # Files blocked from direct read/write/delete via the config file tools.
 # Each entry maps the lowercase filename to the reason the AI sees in the error,
 # so when a write is rejected the AI can pick the right alternative tool instead
-# of just seeing "blocked." Two distinct blocking reasons live here:
-#   - sensitive data (secrets must never be exposed to the AI)
-#   - dedicated tool exists (raw YAML edits would bypass HA's storage layer
-#     and clobber UI-managed entries; the tool-specific CRUD goes through HA's
-#     own write path and keeps registries consistent)
-_BLOCKED_FILES = {
+# of just seeing "blocked." The two block lists differ in scope because their
+# reasons differ:
+#   - _BLOCKED_ANYWHERE: sensitive data. Secrets must never be exposed to the AI
+#     no matter where they live, so these match on basename at any depth —
+#     `includes/secrets.yaml` is just as sensitive as `secrets.yaml`.
+#   - _BLOCKED_AT_ROOT: a dedicated tool exists. Raw YAML edits would bypass HA's
+#     storage layer and clobber UI-managed entries. HA only owns these at the
+#     config root, so a split-config file that happens to be named
+#     `packages/scripts.yaml` is the user's own and stays editable.
+_BLOCKED_ANYWHERE = {
     "secrets.yaml": "contains sensitive credentials and must never be exposed",
     "secrets.yml": "contains sensitive credentials and must never be exposed",
+}
+
+_BLOCKED_AT_ROOT = {
     "automations.yaml": (
         "is owned by Home Assistant's UI and is rewritten on every change. "
         "Use create_automation / update_automation / delete_automation instead — "
@@ -78,29 +85,75 @@ def _config_dir(hass: HomeAssistant) -> Path:
 
 
 def _resolve_safe(hass: HomeAssistant, filename: str) -> Path:
-    """Return resolved Path inside config dir, or raise ValueError."""
-    if os.sep in filename or "/" in filename:
-        raise ValueError("Subdirectories are not allowed — only first-level files")
-    blocked_reason = _BLOCKED_FILES.get(filename.lower())
+    """Return resolved Path inside config dir, or raise ValueError.
+
+    `filename` may name a file in a subdirectory (e.g. 'includes/templates/x.yaml')
+    so that split configurations — `!include_dir_merge_list`, `packages`, and
+    friends — are reachable. Containment is enforced by resolving the joined path
+    and requiring it to stay under the config directory; because `resolve()`
+    follows symlinks, that single check covers '..' traversal, absolute paths, and
+    symlinks pointing outside the config root. The explicit '..'/absolute rejections
+    below are for a clearer error message, not for safety.
+    """
+    if not filename or not filename.strip():
+        raise ValueError("Filename must not be empty")
+    normalized = filename.replace(os.sep, "/")
+    candidate = Path(filename)
+    if candidate.is_absolute() or normalized.startswith("/"):
+        raise ValueError(f"Absolute paths are not allowed, got '{filename}'")
+    if ".." in normalized.split("/"):
+        raise ValueError(f"Parent directory references ('..') are not allowed, got '{filename}'")
+
+    basename = candidate.name.lower()
+    blocked_reason = _BLOCKED_ANYWHERE.get(basename)
+    if blocked_reason is None and candidate.parent == Path("."):
+        blocked_reason = _BLOCKED_AT_ROOT.get(basename)
     if blocked_reason is not None:
         raise ValueError(f"Access to '{filename}' is blocked: {blocked_reason}")
-    suffix = Path(filename).suffix.lower()
+
+    suffix = candidate.suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
         raise ValueError(f"Only YAML files are supported (.yaml, .yml), got '{suffix or filename}'")
-    path = _config_dir(hass) / filename
+
+    config_dir = _config_dir(hass)
+    path = config_dir / filename
     # Paranoia check: resolved path must still be inside config_dir
-    if not path.resolve().is_relative_to(_config_dir(hass).resolve()):
+    if not path.resolve().is_relative_to(config_dir.resolve()):
         raise ValueError("Path traversal detected")
+    # The backup folder is managed by the backup/restore tools; editing snapshots
+    # through the generic file tools would corrupt rollback state.
+    if _BACKUP_DIR_NAME in path.resolve().relative_to(config_dir.resolve()).parts[:-1]:
+        raise ValueError(
+            f"Access to '{filename}' is blocked: it is inside the '{_BACKUP_DIR_NAME}' "
+            "folder. Use list_config_backups / restore_config_backup instead"
+        )
     return path
 
 
 _SECRETS_FILES = {"secrets.yaml", "secrets.yml"}
 
+# Directories skipped when listing recursively. These hold YAML that is not part of
+# the user's own configuration (HA internals, vendored dependencies, our own backup
+# snapshots), and walking them buries the real config in noise. Hidden directories
+# (".storage", ".git", …) are skipped by the leading-dot rule instead of by name.
+_SKIP_DIRS = {
+    _BACKUP_DIR_NAME,
+    "custom_components",
+    "deps",
+    "node_modules",
+    "tts",
+    "www",
+}
+
+# Guards against a pathological or symlink-looped tree turning a list call into an
+# unbounded walk. Real split configs nest two or three levels.
+_MAX_LIST_DEPTH = 6
+
 
 def _yaml_files_in(directory: Path) -> list[Path]:
     """Return sorted first-level YAML files for backups, excluding only secrets.
 
-    Note: this is intentionally narrower than `_BLOCKED_FILES`. The block list
+    Note: this is intentionally narrower than the block lists. Those lists
     keeps the AI from rewriting registry-owned files via the config tools, but
     those files MUST still be included in backups — otherwise a restore would
     silently drop the user's automations, scenes, or scripts. Only secrets are
@@ -142,6 +195,11 @@ def _atomic_write(path: Path, content: str) -> None:
 
     Avoids leaving the target half-written if the process dies mid-write.
     """
+    if not path.parent.is_dir():
+        raise ValueError(
+            f"Target directory '{path.parent.name}/' does not exist. "
+            "Create it in Home Assistant first, or save into an existing directory"
+        )
     tmp = path.with_name(f".{path.name}.mcp_tmp")
     try:
         tmp.write_text(content, encoding="utf-8")
@@ -159,35 +217,98 @@ def _atomic_write(path: Path, content: str) -> None:
     name="list_config_files",
     description=(
         "List YAML configuration files in the Home Assistant config directory "
-        "(first level only; secrets.yaml is excluded). "
+        "(first level only by default; secrets.yaml is excluded). "
+        "Pass recursive=true to also list files in subdirectories — use this for split "
+        "configurations that use !include_dir_merge_list, !include_dir_named, or packages. "
+        "Recursive results are paths relative to the config directory "
+        "(e.g. 'includes/templates/dishwasher.yaml') and can be passed straight to "
+        "get_config_file or save_config_file. "
         "Some listed files (automations.yaml, scenes.yaml, scripts.yaml) cannot be "
         "edited directly — use the dedicated CRUD tools for those instead"
     ),
-    input_schema={"type": "object", "properties": {}},
+    input_schema={
+        "type": "object",
+        "properties": {
+            "recursive": {
+                "type": "boolean",
+                "description": (
+                    "Include YAML files in subdirectories (default: false). "
+                    "Skips hidden folders, custom_components, deps, www, and mcp_backups"
+                ),
+            }
+        },
+    },
     annotations=ANNOTATION_READ_ONLY,
 )
 async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """List first-level YAML files in the config directory."""
+    """List YAML files in the config directory, optionally recursing into subdirectories."""
     if not _is_enabled(hass):
         return _DISABLED_RESPONSE
     config_dir = _config_dir(hass)
+    recursive = bool(arguments.get("recursive", False))
     try:
-        files = await hass.async_add_executor_job(_list_yaml_filenames_sync, config_dir)
+        files = await hass.async_add_executor_job(_list_yaml_filenames_sync, config_dir, recursive)
         return {"content": [{"type": "text", "text": json.dumps(files, indent=2)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing config files: {e}"}]}
 
 
-def _list_yaml_filenames_sync(config_dir: Path) -> list[str]:
-    """Return the first-level YAML filenames in config_dir, sorted."""
-    return [f.name for f in _yaml_files_in(config_dir)]
+def _list_yaml_filenames_sync(config_dir: Path, recursive: bool = False) -> list[str]:
+    """Return YAML filenames in config_dir, sorted.
+
+    When `recursive`, walks subdirectories and returns paths relative to the config
+    directory (e.g. 'includes/templates/dishwasher.yaml') — the same form the other
+    config file tools accept as `filename`. Secrets are excluded at every depth.
+    """
+    if not recursive:
+        return [f.name for f in _yaml_files_in(config_dir)]
+
+    root = config_dir.resolve()
+    found: list[str] = []
+
+    def _walk(directory: Path, depth: int) -> None:
+        if depth > _MAX_LIST_DEPTH:
+            return
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            if entry.is_dir():
+                if entry.name.startswith(".") or entry.name.lower() in _SKIP_DIRS:
+                    continue
+                # Never follow a symlink out of the config directory.
+                try:
+                    if not entry.resolve().is_relative_to(root):
+                        continue
+                except OSError:
+                    continue
+                _walk(entry, depth + 1)
+            elif (
+                entry.is_file()
+                and entry.suffix.lower() in _ALLOWED_SUFFIXES
+                and entry.name.lower() not in _SECRETS_FILES
+            ):
+                # A file symlink pointing outside is rejected on read, so listing it
+                # would only offer a path that always errors.
+                try:
+                    if not entry.resolve().is_relative_to(root):
+                        continue
+                except OSError:
+                    continue
+                found.append(entry.relative_to(config_dir).as_posix())
+
+    _walk(config_dir, 0)
+    return sorted(found)
 
 
 @register_tool(
     name="get_config_file",
     description=(
         "Read the contents of a YAML configuration file from the Home Assistant config directory. "
-        "First-level files only. secrets.yaml is blocked, and "
+        "Accepts subdirectory paths (e.g. 'includes/templates/dishwasher.yaml') so split "
+        "configurations are readable; use list_config_files with recursive=true to discover them. "
+        "secrets.yaml is blocked at any depth, and top-level "
         "automations.yaml / scenes.yaml / scripts.yaml are blocked from direct access — "
         "use list_automations / list_scenes / list_scripts (and their get_*_config variants) "
         "for those"
@@ -197,7 +318,10 @@ def _list_yaml_filenames_sync(config_dir: Path) -> list[str]:
         "properties": {
             "filename": {
                 "type": "string",
-                "description": "File name, e.g. 'automations.yaml' or 'configuration.yaml'",
+                "description": (
+                    "File path relative to the config directory, e.g. 'configuration.yaml' "
+                    "or 'includes/templates/dishwasher.yaml'"
+                ),
             }
         },
         "required": ["filename"],
@@ -232,12 +356,15 @@ def _read_config_file_sync(path: Path, filename: str) -> str:
     name="save_config_file",
     description=(
         "Write or replace a YAML configuration file in the Home Assistant config directory. "
-        "First-level files only. secrets.yaml is blocked, and "
+        "Accepts subdirectory paths (e.g. 'includes/templates/dishwasher.yaml') for split "
+        "configurations; the target directory must already exist. "
+        "secrets.yaml is blocked at any depth, and top-level "
         "automations.yaml / scenes.yaml / scripts.yaml are blocked from direct edits — "
         "use create_automation/update_automation, create_scene/update_scene, or "
         "create_script/update_script for those. "
         "Creates the file if it does not exist. "
-        "Automatically backs up all YAML files before writing and runs a config check after. "
+        "Automatically backs up all first-level YAML files before writing and runs a config "
+        "check after. Note the automatic backup does NOT cover files in subdirectories. "
         "When editing multiple files prefer batch_edit_config_files to avoid redundant backups"
     ),
     input_schema={
@@ -245,7 +372,10 @@ def _read_config_file_sync(path: Path, filename: str) -> str:
         "properties": {
             "filename": {
                 "type": "string",
-                "description": "File name, e.g. 'configuration.yaml' or 'templates.yaml'",
+                "description": (
+                    "File path relative to the config directory, e.g. 'configuration.yaml' "
+                    "or 'includes/templates/dishwasher.yaml'"
+                ),
             },
             "content": {
                 "type": "string",
@@ -297,10 +427,12 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     name="delete_config_file",
     description=(
         "Delete a YAML configuration file from the Home Assistant config directory. "
-        "First-level files only. secrets.yaml is blocked, and "
+        "Accepts subdirectory paths (e.g. 'includes/templates/dishwasher.yaml'). "
+        "secrets.yaml is blocked at any depth, and top-level "
         "automations.yaml / scenes.yaml / scripts.yaml are blocked — "
         "use delete_automation, delete_scene, or delete_script for those. "
-        "Automatically backs up all YAML files before deleting. "
+        "Automatically backs up all first-level YAML files before deleting. "
+        "Note the automatic backup does NOT cover files in subdirectories. "
         "When deleting multiple files prefer batch_edit_config_files to avoid redundant backups"
     ),
     input_schema={
@@ -308,7 +440,10 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         "properties": {
             "filename": {
                 "type": "string",
-                "description": "File name to delete, e.g. 'my_custom.yaml'",
+                "description": (
+                    "File path to delete relative to the config directory, "
+                    "e.g. 'my_custom.yaml' or 'includes/templates/old.yaml'"
+                ),
             }
         },
         "required": ["filename"],
@@ -394,7 +529,9 @@ def _apply_batch_edit_sync(
     name="batch_edit_config_files",
     description=(
         "Write and/or delete multiple YAML config files in one operation. "
-        "Creates one backup before any changes and runs one config check after all changes. "
+        "Filenames may include subdirectories (e.g. 'includes/templates/dishwasher.yaml'). "
+        "Creates one backup of all first-level YAML files before any changes (subdirectory "
+        "files are not covered by it) and runs one config check after all changes. "
         "Prefer this over repeated save_config_file or delete_config_file calls "
         "when touching more than one file — avoids redundant backups"
     ),
@@ -407,7 +544,12 @@ def _apply_batch_edit_sync(
                 "items": {
                     "type": "object",
                     "properties": {
-                        "filename": {"type": "string", "description": "e.g. 'templates.yaml'"},
+                        "filename": {
+                            "type": "string",
+                            "description": (
+                                "e.g. 'templates.yaml' or 'includes/templates/dishwasher.yaml'"
+                            ),
+                        },
                         "content": {"type": "string", "description": "Full YAML content to write"},
                     },
                     "required": ["filename", "content"],
@@ -415,7 +557,7 @@ def _apply_batch_edit_sync(
             },
             "deletes": {
                 "type": "array",
-                "description": "File names to delete.",
+                "description": "File paths to delete, relative to the config directory.",
                 "items": {"type": "string"},
             },
             "run_check": {

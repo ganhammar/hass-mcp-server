@@ -95,6 +95,7 @@ class TestListConfigFiles:
         assert "secrets.yml" not in files
 
     async def test_list_excludes_subdirectories(self, tmp_path):
+        """Default stays first-level-only so existing callers see no change."""
         subdir = tmp_path / "packages"
         subdir.mkdir()
         (subdir / "lights.yaml").write_text("")
@@ -104,6 +105,7 @@ class TestListConfigFiles:
         files = json.loads(result["content"][0]["text"])
 
         assert "lights.yaml" not in files
+        assert "packages/lights.yaml" not in files
 
     async def test_list_returns_sorted(self, tmp_path):
         (tmp_path / "zzz.yaml").write_text("")
@@ -126,6 +128,155 @@ class TestListConfigFiles:
         with patch.object(Path, "iterdir", side_effect=OSError("permission denied")):
             result = await list_config_files(hass, {})
         assert "Error listing config files" in result["content"][0]["text"]
+
+
+class TestListConfigFilesRecursive:
+    """Recursive listing for split configs (!include_dir_*, packages)."""
+
+    async def test_recursive_returns_relative_paths(self, tmp_path):
+        templates = tmp_path / "includes" / "templates"
+        templates.mkdir(parents=True)
+        (templates / "dishwasher.yaml").write_text("")
+        (tmp_path / "configuration.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert "includes/templates/dishwasher.yaml" in files
+        assert "configuration.yaml" in files
+
+    async def test_recursive_paths_are_accepted_by_get_config_file(self, tmp_path):
+        """The listed path must be usable verbatim as get_config_file's filename."""
+        templates = tmp_path / "includes" / "templates"
+        templates.mkdir(parents=True)
+        (templates / "dishwasher.yaml").write_text("marker: present")
+        hass = _make_hass(tmp_path)
+
+        listed = json.loads(
+            (await list_config_files(hass, {"recursive": True}))["content"][0]["text"]
+        )
+        result = await get_config_file(hass, {"filename": listed[0]})
+
+        assert "marker: present" in result["content"][0]["text"]
+
+    async def test_recursive_excludes_nested_secrets(self, tmp_path):
+        nested = tmp_path / "includes"
+        nested.mkdir()
+        (nested / "secrets.yaml").write_text("token: abc")
+        (nested / "lights.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert "includes/secrets.yaml" not in files
+        assert "includes/lights.yaml" in files
+
+    async def test_recursive_skips_noise_directories(self, tmp_path):
+        for noise in ("mcp_backups", "custom_components", "deps", "www", ".storage"):
+            d = tmp_path / noise
+            d.mkdir()
+            (d / "junk.yaml").write_text("")
+        (tmp_path / "packages").mkdir()
+        (tmp_path / "packages" / "real.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == ["packages/real.yaml"]
+
+    async def test_recursive_does_not_follow_symlink_out_of_config_dir(self, tmp_path):
+        outside = tmp_path.parent / "outside_dir"
+        outside.mkdir(exist_ok=True)
+        (outside / "leaked.yaml").write_text("secret: data")
+        (tmp_path / "escape").symlink_to(outside, target_is_directory=True)
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == []
+
+    async def test_recursive_omits_file_symlink_pointing_outside(self, tmp_path):
+        """Listing and reading must agree — a path that always errors is not worth listing."""
+        outside = tmp_path.parent / "outside_file.yaml"
+        outside.write_text("secret: data")
+        nested = tmp_path / "includes"
+        nested.mkdir()
+        (nested / "escape.yaml").symlink_to(outside)
+        (nested / "real.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == ["includes/real.yaml"]
+
+    async def test_recursive_respects_depth_limit(self, tmp_path):
+        deep = tmp_path
+        for i in range(10):
+            deep = deep / f"level{i}"
+        deep.mkdir(parents=True)
+        (deep / "too_deep.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == []
+
+    async def test_recursive_skips_unreadable_subdirectory(self, tmp_path):
+        """A permission-denied folder must not abort the whole listing."""
+        (tmp_path / "locked").mkdir()
+        (tmp_path / "locked" / "hidden.yaml").write_text("")
+        (tmp_path / "readable").mkdir()
+        (tmp_path / "readable" / "real.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+        original = Path.iterdir
+
+        def fail_on_locked(self):
+            if self.name == "locked":
+                raise OSError("permission denied")
+            return original(self)
+
+        with patch.object(Path, "iterdir", fail_on_locked):
+            result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == ["readable/real.yaml"]
+
+    async def test_recursive_skips_entries_that_fail_to_resolve(self, tmp_path):
+        """A broken symlink (dir or file) is skipped rather than crashing the walk."""
+        (tmp_path / "baddir").mkdir()
+        (tmp_path / "baddir" / "x.yaml").write_text("")
+        (tmp_path / "badfile.yaml").write_text("")
+        (tmp_path / "good.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+        original = Path.resolve
+
+        def fail_on_bad(self, *args, **kwargs):
+            if self.name in ("baddir", "badfile.yaml"):
+                raise OSError("too many levels of symbolic links")
+            return original(self, *args, **kwargs)
+
+        with patch.object(Path, "resolve", fail_on_bad):
+            result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == ["good.yaml"]
+
+    async def test_recursive_returns_sorted(self, tmp_path):
+        (tmp_path / "zzz").mkdir()
+        (tmp_path / "zzz" / "a.yaml").write_text("")
+        (tmp_path / "aaa.yaml").write_text("")
+        hass = _make_hass(tmp_path)
+
+        result = await list_config_files(hass, {"recursive": True})
+        files = json.loads(result["content"][0]["text"])
+
+        assert files == sorted(files)
 
 
 class TestGetConfigFile:
@@ -195,15 +346,82 @@ class TestGetConfigFile:
             "Error" in result["content"][0]["text"] or "Only YAML" in result["content"][0]["text"]
         )
 
-    async def test_read_blocks_subdirectory_path(self, tmp_path):
+    async def test_read_allows_subdirectory_path(self, tmp_path):
+        """Split configs (!include_dir_*) put real config one or more folders down."""
+        nested = tmp_path / "includes" / "templates"
+        nested.mkdir(parents=True)
+        (nested / "dishwasher.yaml").write_text("- sensor:\n    - name: Dishwasher\n")
         hass = _make_hass(tmp_path)
-        result = await get_config_file(hass, {"filename": "subdir/file.yaml"})
-        assert "Subdirectories are not allowed" in result["content"][0]["text"]
+        result = await get_config_file(hass, {"filename": "includes/templates/dishwasher.yaml"})
+        assert "name: Dishwasher" in result["content"][0]["text"]
 
     async def test_read_blocks_path_traversal(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "../etc/passwd"})
-        assert "Subdirectories are not allowed" in result["content"][0]["text"]
+        assert "'..'" in result["content"][0]["text"]
+
+    async def test_read_blocks_traversal_that_lands_inside_config_dir(self, tmp_path):
+        """'..' is rejected even when the resolved path would stay inside the config dir."""
+        (tmp_path / "configuration.yaml").write_text("x: 1")
+        (tmp_path / "includes").mkdir()
+        hass = _make_hass(tmp_path)
+        result = await get_config_file(hass, {"filename": "includes/../configuration.yaml"})
+        assert "'..'" in result["content"][0]["text"]
+
+    async def test_read_blocks_empty_filename(self, tmp_path):
+        """An empty path would otherwise resolve to the config directory itself."""
+        hass = _make_hass(tmp_path)
+        for empty in ("", "   "):
+            result = await get_config_file(hass, {"filename": empty})
+            assert "must not be empty" in result["content"][0]["text"]
+
+    async def test_read_blocks_absolute_path(self, tmp_path):
+        hass = _make_hass(tmp_path)
+        result = await get_config_file(hass, {"filename": "/etc/passwd.yaml"})
+        assert "Absolute paths are not allowed" in result["content"][0]["text"]
+
+    async def test_read_blocks_nested_secrets(self, tmp_path):
+        """Recursion must not open a leak the old depth-1 code structurally couldn't have."""
+        nested = tmp_path / "includes"
+        nested.mkdir()
+        (nested / "secrets.yaml").write_text("api_key: hunter2")
+        hass = _make_hass(tmp_path)
+        result = await get_config_file(hass, {"filename": "includes/secrets.yaml"})
+        text = result["content"][0]["text"]
+        assert "blocked" in text
+        assert "hunter2" not in text
+
+    async def test_read_allows_nested_file_named_like_registry_file(self, tmp_path):
+        """A subdir 'scripts.yaml' is the user's own, not HA's UI-managed one."""
+        nested = tmp_path / "packages"
+        nested.mkdir()
+        (nested / "scripts.yaml").write_text("my_package: true")
+        hass = _make_hass(tmp_path)
+        result = await get_config_file(hass, {"filename": "packages/scripts.yaml"})
+        assert "my_package: true" in result["content"][0]["text"]
+
+    async def test_read_blocks_backup_folder(self, tmp_path):
+        backup = tmp_path / "mcp_backups" / "2026-01-01_00-00-00-0"
+        backup.mkdir(parents=True)
+        (backup / "configuration.yaml").write_text("old: 1")
+        hass = _make_hass(tmp_path)
+        result = await get_config_file(
+            hass, {"filename": "mcp_backups/2026-01-01_00-00-00-0/configuration.yaml"}
+        )
+        assert "blocked" in result["content"][0]["text"]
+
+    async def test_read_blocks_subdirectory_symlink_escape(self, tmp_path):
+        """A symlink one level down must not reach outside the config dir either."""
+        outside = tmp_path.parent / "outside_nested.yaml"
+        outside.write_text("secret: data")
+        nested = tmp_path / "includes"
+        nested.mkdir()
+        (nested / "escape.yaml").symlink_to(outside)
+        hass = _make_hass(tmp_path)
+        result = await get_config_file(hass, {"filename": "includes/escape.yaml"})
+        text = result["content"][0]["text"]
+        assert "Path traversal detected" in text
+        assert "secret: data" not in text
 
     async def test_read_blocks_symlink_escape(self, tmp_path):
         """Symlink pointing outside config_dir must be blocked by is_relative_to check."""
@@ -369,10 +587,52 @@ class TestSaveConfigFile:
         )
         assert not (tmp_path / "malicious.sh").exists()
 
-    async def test_write_blocks_subdirectory_path(self, tmp_path):
+    async def test_write_allows_subdirectory_path(self, tmp_path):
+        nested = tmp_path / "includes" / "templates"
+        nested.mkdir(parents=True)
+        (nested / "dishwasher.yaml").write_text("old: 1")
         hass = _make_hass(tmp_path)
-        result = await save_config_file(hass, {"filename": "subdir/file.yaml", "content": "x: 1"})
-        assert "Subdirectories are not allowed" in result["content"][0]["text"]
+
+        result = await save_config_file(
+            hass, {"filename": "includes/templates/dishwasher.yaml", "content": "new: 2"}
+        )
+
+        assert "Successfully saved" in result["content"][0]["text"]
+        assert (nested / "dishwasher.yaml").read_text() == "new: 2"
+
+    async def test_write_creates_new_file_in_existing_subdirectory(self, tmp_path):
+        (tmp_path / "packages").mkdir()
+        hass = _make_hass(tmp_path)
+
+        result = await save_config_file(
+            hass, {"filename": "packages/dishwasher.yaml", "content": "x: 1"}
+        )
+
+        assert "Successfully saved" in result["content"][0]["text"]
+        assert (tmp_path / "packages" / "dishwasher.yaml").read_text() == "x: 1"
+
+    async def test_write_rejects_missing_directory(self, tmp_path):
+        """Auto-creating directories would silently accept a typo'd include path."""
+        hass = _make_hass(tmp_path)
+
+        result = await save_config_file(
+            hass, {"filename": "nonexistent/file.yaml", "content": "x: 1"}
+        )
+
+        assert "does not exist" in result["content"][0]["text"]
+        assert not (tmp_path / "nonexistent").exists()
+
+    async def test_write_blocks_nested_secrets(self, tmp_path):
+        nested = tmp_path / "includes"
+        nested.mkdir()
+        hass = _make_hass(tmp_path)
+
+        result = await save_config_file(
+            hass, {"filename": "includes/secrets.yaml", "content": "x: 1"}
+        )
+
+        assert "blocked" in result["content"][0]["text"]
+        assert not (nested / "secrets.yaml").exists()
 
 
 class TestDeleteConfigFile:
@@ -435,10 +695,29 @@ class TestDeleteConfigFile:
         )
         assert (tmp_path / "script.py").exists()
 
-    async def test_delete_blocks_subdirectory_path(self, tmp_path):
+    async def test_delete_allows_subdirectory_path(self, tmp_path):
+        nested = tmp_path / "includes" / "templates"
+        nested.mkdir(parents=True)
+        (nested / "old.yaml").write_text("x: 1")
         hass = _make_hass(tmp_path)
-        result = await delete_config_file(hass, {"filename": "subdir/file.yaml"})
-        assert "Subdirectories are not allowed" in result["content"][0]["text"]
+
+        result = await delete_config_file(hass, {"filename": "includes/templates/old.yaml"})
+
+        assert "Successfully deleted" in result["content"][0]["text"]
+        assert not (nested / "old.yaml").exists()
+        # The containing directory must survive — other includes may still live there.
+        assert nested.is_dir()
+
+    async def test_delete_blocks_nested_secrets(self, tmp_path):
+        nested = tmp_path / "includes"
+        nested.mkdir()
+        (nested / "secrets.yaml").write_text("api_key: hunter2")
+        hass = _make_hass(tmp_path)
+
+        result = await delete_config_file(hass, {"filename": "includes/secrets.yaml"})
+
+        assert "blocked" in result["content"][0]["text"]
+        assert (nested / "secrets.yaml").exists()
 
 
 class TestBackupConfigFiles:
@@ -909,6 +1188,49 @@ class TestBatchEditConfigFiles:
         text = result["content"][0]["text"]
         assert "error" in text.lower()
         assert not (tmp_path / "ok.yaml").exists()
+
+    async def test_saves_and_deletes_in_subdirectories(self, tmp_path):
+        templates = tmp_path / "includes" / "templates"
+        templates.mkdir(parents=True)
+        (templates / "old.yaml").write_text("old: 1")
+        hass = _make_hass(tmp_path)
+
+        with _mock_create_backup():
+            result = await batch_edit_config_files(
+                hass,
+                {
+                    "saves": [
+                        {"filename": "includes/templates/new.yaml", "content": "new: 1"},
+                        {"filename": "configuration.yaml", "content": "root: 1"},
+                    ],
+                    "deletes": ["includes/templates/old.yaml"],
+                    "run_check": False,
+                },
+            )
+
+        text = result["content"][0]["text"]
+        assert "includes/templates/new.yaml" in text
+        assert (templates / "new.yaml").read_text() == "new: 1"
+        assert (tmp_path / "configuration.yaml").read_text() == "root: 1"
+        assert not (templates / "old.yaml").exists()
+
+    async def test_nested_secrets_in_saves_aborts_before_any_change(self, tmp_path):
+        (tmp_path / "includes").mkdir()
+        hass = _make_hass(tmp_path)
+
+        result = await batch_edit_config_files(
+            hass,
+            {
+                "saves": [
+                    {"filename": "includes/secrets.yaml", "content": "bad: true"},
+                    {"filename": "ok.yaml", "content": "ok: 1"},
+                ]
+            },
+        )
+
+        assert "error" in result["content"][0]["text"].lower()
+        assert not (tmp_path / "ok.yaml").exists()
+        assert not (tmp_path / "includes" / "secrets.yaml").exists()
 
     async def test_delete_missing_file_aborts(self, tmp_path):
         hass = _make_hass(tmp_path)

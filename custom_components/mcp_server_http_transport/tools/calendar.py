@@ -23,7 +23,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from ..calendar_recurrence import recurrence_from_arguments
-from . import _HAJSONEncoder, register_tool
+from . import (
+    ANNOTATION_DESTRUCTIVE,
+    ANNOTATION_NON_IDEMPOTENT,
+    ANNOTATION_READ_ONLY,
+    _HAJSONEncoder,
+    register_tool,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -209,6 +215,7 @@ def _resolve_event_window(arguments: dict[str, Any]) -> tuple[datetime, datetime
         "(preferred over calendar.create_event for local calendars). "
         "Provide dtstart/dtend or dtstart with duration_minutes."
     ),
+    annotations=ANNOTATION_NON_IDEMPOTENT,
     input_schema={
         "type": "object",
         "properties": {
@@ -311,6 +318,7 @@ async def create_calendar_event(hass: HomeAssistant, arguments: dict[str, Any]) 
         "Uses the calendar entity API (not calendar.create_event, which is one-off only). "
         "Local calendars support open-ended recurrence when count/until are omitted."
     ),
+    annotations=ANNOTATION_NON_IDEMPOTENT,
     input_schema={
         "type": "object",
         "properties": {
@@ -449,6 +457,7 @@ async def create_recurring_calendar_event(
         "List calendar events in a time window. Returns uid for delete operations. "
         "Descriptions are omitted by default; use include_description only when needed."
     ),
+    annotations=ANNOTATION_READ_ONLY,
     input_schema={
         "type": "object",
         "properties": {
@@ -543,6 +552,7 @@ async def list_calendar_events(hass: HomeAssistant, arguments: dict[str, Any]) -
         "filter (uid, exact summary, or summary_contains with at least 3 characters). "
         "Use dry_run=true to preview matches without deleting."
     ),
+    annotations=ANNOTATION_DESTRUCTIVE,
     input_schema={
         "type": "object",
         "properties": {

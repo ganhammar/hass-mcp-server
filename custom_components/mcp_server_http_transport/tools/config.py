@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_IDEMPOTENT,
+    ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     _HAJSONEncoder,
     register_tool,
@@ -35,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
         },
         "required": ["config"],
     },
-    annotations=ANNOTATION_IDEMPOTENT,
+    annotations=ANNOTATION_NON_IDEMPOTENT,
 )
 async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a new automation."""

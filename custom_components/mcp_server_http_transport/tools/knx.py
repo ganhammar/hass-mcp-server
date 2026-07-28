@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_IDEMPOTENT,
+    ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     _HAJSONEncoder,
     register_tool,
@@ -276,7 +277,7 @@ async def knx_get_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         },
         "required": ["platform", "data"],
     },
-    annotations=ANNOTATION_IDEMPOTENT,
+    annotations=ANNOTATION_NON_IDEMPOTENT,
 )
 async def knx_create_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a KNX UI entity via the config_store."""

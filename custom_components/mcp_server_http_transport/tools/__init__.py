@@ -22,6 +22,12 @@ ANNOTATION_IDEMPOTENT: dict[str, Any] = {
     "idempotentHint": True,
     "openWorldHint": False,
 }
+ANNOTATION_NON_IDEMPOTENT: dict[str, Any] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": False,
+}
 ANNOTATION_DESTRUCTIVE: dict[str, Any] = {
     "readOnlyHint": False,
     "destructiveHint": True,
@@ -31,8 +37,8 @@ ANNOTATION_DESTRUCTIVE: dict[str, Any] = {
 
 
 def register_tool(
-    name: str, 
-    description: str, 
+    name: str,
+    description: str,
     input_schema: dict[str, Any],
     annotations: dict[str, Any] | None = None,
 ):

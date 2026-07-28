@@ -15,6 +15,7 @@ from ..const import DOMAIN
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_IDEMPOTENT,
+    ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     register_tool,
 )
@@ -517,7 +518,7 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
         "Call this before bulk edits to preserve a rollback snapshot"
     ),
     input_schema={"type": "object", "properties": {}},
-    annotations=ANNOTATION_IDEMPOTENT,
+    annotations=ANNOTATION_NON_IDEMPOTENT,
 )
 async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Copy all first-level YAML files (except secrets) into a timestamped backup folder."""

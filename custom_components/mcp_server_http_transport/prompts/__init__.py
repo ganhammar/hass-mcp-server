@@ -10,8 +10,8 @@ PROMPTS: dict[str, dict[str, Any]] = {}
 
 
 def register_prompt(
-    name: str, 
-    description: str, 
+    name: str,
+    description: str,
     arguments: list[dict[str, Any]] | None = None,
     annotations: dict[str, Any] | None = None,
 ):

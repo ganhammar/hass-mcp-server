@@ -10,6 +10,7 @@ from homeassistant.helpers import entity_registry as er
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_IDEMPOTENT,
+    ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     _HAJSONEncoder,
     register_tool,
@@ -199,7 +200,7 @@ async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         },
         "required": ["domain", "config"],
     },
-    annotations=ANNOTATION_IDEMPOTENT,
+    annotations=ANNOTATION_NON_IDEMPOTENT,
 )
 async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a new helper."""

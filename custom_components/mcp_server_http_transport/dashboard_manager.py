@@ -127,10 +127,19 @@ async def patch_dashboard_config(
     config = await get_dashboard_config(hass, url_path)
     patched = apply_patch(config, operations)
 
+    # A dashboard config is an object, and its `views` — when it has any — is a
+    # list. Anything else renders as a broken dashboard, so it is caught here
+    # rather than stored. `views` may legitimately be absent: that is what an
+    # empty dashboard looks like before its first view is added.
     if not isinstance(patched, dict):
         raise ValueError(
             "The patched config must be an object with a 'views' list, "
             f"but the operations produced a {type(patched).__name__}"
+        )
+    if "views" in patched and not isinstance(patched["views"], list):
+        raise ValueError(
+            "The patched config's 'views' must be a list, but the operations "
+            f"produced a {type(patched['views']).__name__}"
         )
 
     await save_dashboard_config(hass, url_path, patched)

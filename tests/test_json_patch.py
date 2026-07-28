@@ -103,6 +103,10 @@ class TestResolvePointer:
         with pytest.raises(JsonPatchError, match="not a valid array index"):
             resolve_pointer(_dashboard(), "/views/first")
 
+    def test_superscript_is_not_an_array_index(self):
+        with pytest.raises(JsonPatchError, match="not a valid array index"):
+            resolve_pointer(_dashboard(), "/views/²")
+
     def test_dash_does_not_resolve(self):
         with pytest.raises(JsonPatchError, match="end of an array"):
             resolve_pointer(_dashboard(), "/views/-")

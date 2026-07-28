@@ -55,7 +55,9 @@ def _list_index(token: str, length: int, tokens: list[str], allow_end: bool = Fa
         if not allow_end:
             raise JsonPatchError(f"'{where}': '-' only addresses the end of an array when adding")
         return length
-    if not token.isdigit():
+    # isdecimal rather than isdigit: the latter also accepts superscripts such as
+    # '²', which int() then rejects with a bare ValueError.
+    if not token.isdecimal():
         raise JsonPatchError(f"'{where}': '{token}' is not a valid array index")
     index = int(token)
     limit = length if allow_end else length - 1

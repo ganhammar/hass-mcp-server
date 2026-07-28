@@ -103,7 +103,7 @@ async def get_dashboard_config_tool(
             tokens = parse_pointer(pointer)
             if not tokens:
                 result: Any = summarize_dashboard_config(config)
-            elif len(tokens) == 2 and tokens[0] == "views" and tokens[1].isdigit():
+            elif len(tokens) == 2 and tokens[0] == "views" and tokens[1].isdecimal():
                 view = resolve_pointer(config, pointer)
                 result = summarize_view(view, tokens, int(tokens[1]))
             else:
@@ -282,8 +282,7 @@ async def patch_dashboard_config_tool(
 
     try:
         config = await patch_dashboard_config(hass, url_path, operations)
-        count = len(operations) if isinstance(operations, list) else 0
-        lines = [f"Applied {count} operation(s) to dashboard '{url_path}'"]
+        lines = [f"Applied {len(operations)} operation(s) to dashboard '{url_path}'"]
         lines.extend(_view_overview(config))
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:

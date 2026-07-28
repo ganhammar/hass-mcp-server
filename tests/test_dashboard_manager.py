@@ -297,6 +297,28 @@ class TestPatchDashboardConfig:
 
         dashboard.async_save.assert_not_called()
 
+    async def test_rejects_a_patch_that_breaks_the_views_list(self):
+        dashboard = self._dashboard_with({"views": [{"title": "Home"}]})
+        hass = _make_hass({"energy": dashboard})
+
+        with pytest.raises(ValueError, match="'views' must be a list"):
+            await patch_dashboard_config(
+                hass, "energy", [{"op": "replace", "path": "/views", "value": {"0": {}}}]
+            )
+
+        dashboard.async_save.assert_not_called()
+
+    async def test_allows_a_config_without_views(self):
+        dashboard = self._dashboard_with({})
+        hass = _make_hass({"energy": dashboard})
+
+        result = await patch_dashboard_config(
+            hass, "energy", [{"op": "add", "path": "/title", "value": "Home"}]
+        )
+
+        assert result == {"title": "Home"}
+        dashboard.async_save.assert_called_once_with(result)
+
     async def test_raises_for_nonexistent_dashboard(self):
         hass = _make_hass({})
         with pytest.raises(ValueError, match="not found"):

@@ -187,10 +187,8 @@ def summarize_card(card: Any, pointer_tokens: list[str], index: int, depth: int 
     return entry
 
 
-def _summarize_card_list(cards: Any, pointer_tokens: list[str]) -> list[dict]:
-    """Summarize a `cards` / `badges` list, tolerating a non-list value."""
-    if not isinstance(cards, list):
-        return []
+def _summarize_card_list(cards: list, pointer_tokens: list[str]) -> list[dict]:
+    """Summarize a `cards` / `badges` list."""
     return [summarize_card(card, pointer_tokens + [str(i)], i) for i, card in enumerate(cards)]
 
 

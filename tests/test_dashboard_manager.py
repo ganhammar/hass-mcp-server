@@ -465,8 +465,18 @@ class TestSummarizeDashboardConfig:
         assert summarize_dashboard_config({}) == {"views": [], "view_count": 0}
 
     def test_handles_malformed_entries(self):
-        result = summarize_dashboard_config({"views": ["not-a-view"]})
+        config = {
+            "views": [
+                "not-a-view",
+                {"title": "Home", "cards": ["not-a-card"], "sections": ["not-a-section"]},
+            ]
+        }
+
+        result = summarize_dashboard_config(config)
+
         assert result["views"][0]["value"] == "not-a-view"
+        assert result["views"][1]["cards"][0]["value"] == "not-a-card"
+        assert result["views"][1]["sections"][0]["value"] == "not-a-section"
 
     def test_rejects_non_object_config(self):
         with pytest.raises(ValueError, match="must be an object"):

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.tools.dashboards import _view_overview
 
 
 class TestToolsDashboards:
@@ -776,3 +777,43 @@ class TestToolsDashboards:
         assert "Error patching dashboard config" in text
         assert "test failed" in text
         mock_save.assert_not_awaited()
+
+
+class TestViewOverview:
+    """Tests for _view_overview, the confirmation line patch_dashboard_config returns."""
+
+    def test_counts_cards_per_view(self):
+        config = {
+            "views": [
+                {"title": "Living Room", "cards": [{"type": "tile"}, {"type": "tile"}]},
+                {"path": "bedroom", "cards": []},
+            ]
+        }
+
+        assert _view_overview(config) == [
+            "  [0] Living Room: 2 card(s)",
+            "  [1] bedroom: 0 card(s)",
+        ]
+
+    def test_counts_cards_inside_sections(self):
+        config = {
+            "views": [
+                {
+                    "title": "Home",
+                    "type": "sections",
+                    "cards": [{"type": "tile"}],
+                    "sections": [
+                        {"type": "grid", "cards": [{"type": "tile"}, {"type": "tile"}]},
+                        {"type": "grid", "cards": []},
+                    ],
+                }
+            ]
+        }
+
+        assert _view_overview(config) == ["  [0] Home: 3 card(s), 2 section(s)"]
+
+    def test_reports_a_view_that_is_not_an_object(self):
+        assert _view_overview({"views": ["broken"]}) == ["  [0] (not an object)"]
+
+    def test_handles_a_config_without_views(self):
+        assert _view_overview({}) == []

@@ -4,6 +4,7 @@ import pytest
 
 from custom_components.mcp_server_http_transport.json_patch import (
     JsonPatchError,
+    _describe,
     apply_patch,
     format_pointer,
     parse_pointer,
@@ -61,6 +62,23 @@ class TestFormatPointer:
     def test_roundtrips_escaped_tokens(self):
         pointer = "/a~1b/c~0d"
         assert format_pointer(parse_pointer(pointer)) == pointer
+
+
+class TestDescribe:
+    """Tests for _describe, which renders values into error messages."""
+
+    def test_renders_json(self):
+        assert _describe({"entity": "light.a"}) == '{"entity": "light.a"}'
+
+    def test_truncates_long_values(self):
+        text = _describe(["light.a"] * 50)
+        assert len(text) == 121
+        assert text.endswith("…")
+
+    def test_falls_back_to_repr_when_json_fails(self):
+        circular: dict = {}
+        circular["self"] = circular
+        assert _describe(circular) == "{'self': {...}}"
 
 
 class TestResolvePointer:
@@ -159,6 +177,14 @@ class TestApplyPatch:
                 _dashboard(), [{"op": "replace", "path": "/views/0/icon", "value": "mdi:x"}]
             )
 
+    def test_add_into_a_scalar_is_rejected(self):
+        with pytest.raises(JsonPatchError, match="cannot add to a str"):
+            apply_patch(_dashboard(), [{"op": "add", "path": "/views/0/title/x", "value": 1}])
+
+    def test_remove_from_a_scalar_is_rejected(self):
+        with pytest.raises(JsonPatchError, match="cannot remove from a str"):
+            apply_patch(_dashboard(), [{"op": "remove", "path": "/views/0/title/x"}])
+
     def test_replace_whole_document(self):
         result = apply_patch(_dashboard(), [{"op": "replace", "path": "", "value": {"views": []}}])
         assert result == {"views": []}
@@ -192,6 +218,11 @@ class TestApplyPatch:
                 _dashboard(),
                 [{"op": "move", "from": "/views/0", "path": "/views/0/cards/-"}],
             )
+
+    def test_move_to_the_root_replaces_the_document(self):
+        result = apply_patch(_dashboard(), [{"op": "move", "from": "/views/1", "path": ""}])
+
+        assert result["title"] == "Bedroom"
 
     def test_copy_duplicates_a_card(self):
         result = apply_patch(

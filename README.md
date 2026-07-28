@@ -102,6 +102,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `batch_get_state` | Get state for multiple entities in one call (max 50) |
 | `list_entities` | List all entities, with optional `domain`, `detailed`, and `fields` parameters |
 | `search_entities` | Search entities by friendly name, device class, domain, or area |
+| `get_device_details` | Get a device and every entity registered to it (all domains), with optional states |
 | `call_service` | Call any Home Assistant service |
 | `fire_event` | Fire a custom event on the Home Assistant event bus |
 | `get_history` | Get state history of an entity over a time range |
@@ -178,6 +179,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `list_areas` | List all areas |
 | `list_devices` | List devices, optionally filtered by area |
 | `list_services` | List available services, optionally filtered by domain |
+| `describe_service` | Get a service's full parameter schema: fields, selectors, examples, and targets |
 | `list_integrations` | List installed integrations and their status |
 | `list_labels` | List all labels for cross-domain grouping |
 

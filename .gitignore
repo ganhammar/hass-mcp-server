@@ -69,3 +69,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Vendored paired OIDC provider for the audience-contract tests (CI-only, see test_e2e_oidc.py)
+custom_components/oidc_provider/

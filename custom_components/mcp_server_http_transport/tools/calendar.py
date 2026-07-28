@@ -65,14 +65,42 @@ def _lead_time_notice(start: datetime) -> str | None:
     lead = _minutes_until(start)
     if lead < 0:
         return "Start time is in the past; calendar automations will not fire."
-    if lead < 15:
+    if lead < CALENDAR_TRIGGER_RELOAD_MINUTES:
         return (
             f"Event starts in {lead:.0f} minutes. Calendar automations may miss it "
-            "unless triggers are reloaded (set reload_triggers=true)."
+            "unless triggers are reloaded (set reload_triggers=auto or true)."
         )
     if lead < 20:
         return f"Event starts in {lead:.0f} minutes; 20+ minutes ahead is safer for tests."
     return None
+
+
+def _parse_reload_triggers(raw: Any) -> str:
+    """Return reload mode: false (default), auto, or true."""
+    if raw is None:
+        return "false"
+    if isinstance(raw, bool):
+        return "true" if raw else "false"
+    if isinstance(raw, str):
+        value = raw.strip().lower()
+        if value in ("true", "false", "auto"):
+            return value
+    raise ValueError("reload_triggers must be false, true, or auto")
+
+
+_RELOAD_TRIGGERS_SCHEMA: dict[str, Any] = {
+    "oneOf": [
+        {"type": "boolean"},
+        {"type": "string", "enum": ["true", "false", "auto"]},
+    ],
+    "description": (
+        "Whether to reload the calendar config entry and all automations after create "
+        "so calendar triggers pick up the new event. "
+        f"'false' (default): never reload. "
+        f"'auto': reload only when start is within {CALENDAR_TRIGGER_RELOAD_MINUTES} minutes. "
+        "'true': always reload after create. Boolean true/false also accepted."
+    ),
+}
 
 
 def _get_calendar_entity(hass: HomeAssistant, entity_id: str) -> CalendarEntity | dict[str, Any]:
@@ -148,11 +176,12 @@ async def _maybe_reload_triggers(
     entity_id: str,
     dtstart: datetime,
     *,
-    reload_triggers: bool,
+    reload_triggers: str,
 ) -> bool:
-    if not reload_triggers:
+    """Reload calendar/automation triggers per mode (false / auto / true)."""
+    if reload_triggers == "false":
         return False
-    if _minutes_until(dtstart) >= CALENDAR_TRIGGER_RELOAD_MINUTES:
+    if reload_triggers == "auto" and _minutes_until(dtstart) >= CALENDAR_TRIGGER_RELOAD_MINUTES:
         return False
     await _reload_calendar_triggers(hass, entity_id)
     return True
@@ -185,7 +214,7 @@ def _resolve_event_window(arguments: dict[str, Any]) -> tuple[datetime, datetime
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "Calendar entity (e.g. calendar.cursor_prompts)",
+                "description": "Calendar entity (e.g. calendar.birthdays)",
             },
             "summary": {"type": "string", "description": "Event title"},
             "dtstart": {
@@ -202,16 +231,10 @@ def _resolve_event_window(arguments: dict[str, Any]) -> tuple[datetime, datetime
             },
             "description": {
                 "type": "string",
-                "description": "Event body (e.g. full Cursor agent prompt)",
+                "description": "Event body (e.g. agenda notes)",
             },
             "location": {"type": "string", "description": "Optional location"},
-            "reload_triggers": {
-                "type": "boolean",
-                "description": (
-                    "When true and start is within 15 minutes, reload calendar config entry "
-                    "and automations so triggers pick up the new event (default false)"
-                ),
-            },
+            "reload_triggers": _RELOAD_TRIGGERS_SCHEMA,
         },
         "required": ["entity_id", "summary", "dtstart"],
     },
@@ -237,6 +260,7 @@ async def create_calendar_event(hass: HomeAssistant, arguments: dict[str, Any]) 
             dtend = dtstart + timedelta(minutes=duration)
         if dtend <= dtstart:
             return _error_text("dtend must be after dtstart")
+        reload_mode = _parse_reload_triggers(arguments.get("reload_triggers"))
     except ValueError as exc:
         return _error_text(str(exc))
 
@@ -264,7 +288,7 @@ async def create_calendar_event(hass: HomeAssistant, arguments: dict[str, Any]) 
         hass,
         arguments["entity_id"],
         dtstart,
-        reload_triggers=bool(arguments.get("reload_triggers")),
+        reload_triggers=reload_mode,
     )
     result: dict[str, Any] = {
         "entity_id": arguments["entity_id"],
@@ -272,6 +296,7 @@ async def create_calendar_event(hass: HomeAssistant, arguments: dict[str, Any]) 
         "dtstart": dtstart.isoformat(),
         "dtend": dtend.isoformat(),
         "method": "calendar_entity_async_create_event",
+        "reload_triggers": reload_mode,
         "triggers_reloaded": reloaded,
     }
     if notice := _lead_time_notice(dtstart):
@@ -291,7 +316,7 @@ async def create_calendar_event(hass: HomeAssistant, arguments: dict[str, Any]) 
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "Calendar entity (e.g. calendar.cursor_prompts)",
+                "description": "Calendar entity (e.g. calendar.birthdays)",
             },
             "summary": {"type": "string", "description": "Event title"},
             "dtstart": {
@@ -308,7 +333,7 @@ async def create_calendar_event(hass: HomeAssistant, arguments: dict[str, Any]) 
             },
             "description": {
                 "type": "string",
-                "description": "Event body (e.g. full Cursor agent prompt)",
+                "description": "Event body (e.g. agenda notes)",
             },
             "location": {"type": "string", "description": "Optional location"},
             "rrule": {
@@ -343,13 +368,7 @@ async def create_calendar_event(hass: HomeAssistant, arguments: dict[str, Any]) 
                 "type": "integer",
                 "description": "Monthly only: day of month 1-31",
             },
-            "reload_triggers": {
-                "type": "boolean",
-                "description": (
-                    "When true and first start is within 15 minutes, reload calendar "
-                    "config entry and automations (default false)"
-                ),
-            },
+            "reload_triggers": _RELOAD_TRIGGERS_SCHEMA,
         },
         "required": ["entity_id", "summary", "dtstart"],
     },
@@ -378,6 +397,7 @@ async def create_recurring_calendar_event(
         if dtend <= dtstart:
             return _error_text("dtend must be after dtstart")
         rrule = recurrence_from_arguments(arguments)
+        reload_mode = _parse_reload_triggers(arguments.get("reload_triggers"))
     except ValueError as exc:
         return _error_text(str(exc))
 
@@ -406,7 +426,7 @@ async def create_recurring_calendar_event(
         hass,
         arguments["entity_id"],
         dtstart,
-        reload_triggers=bool(arguments.get("reload_triggers")),
+        reload_triggers=reload_mode,
     )
     result: dict[str, Any] = {
         "entity_id": arguments["entity_id"],
@@ -415,6 +435,7 @@ async def create_recurring_calendar_event(
         "dtend": dtend.isoformat(),
         "rrule": rrule,
         "method": "calendar_entity_async_create_event",
+        "reload_triggers": reload_mode,
         "triggers_reloaded": reloaded,
     }
     if notice := _lead_time_notice(dtstart):
@@ -433,7 +454,7 @@ async def create_recurring_calendar_event(
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "Calendar entity (e.g. calendar.cursor_prompts)",
+                "description": "Calendar entity (e.g. calendar.birthdays)",
             },
             "start": {
                 "type": "string",
@@ -527,7 +548,7 @@ async def list_calendar_events(hass: HomeAssistant, arguments: dict[str, Any]) -
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "Calendar entity (e.g. calendar.cursor_prompts)",
+                "description": "Calendar entity (e.g. calendar.birthdays)",
             },
             "uid": {
                 "type": "string",

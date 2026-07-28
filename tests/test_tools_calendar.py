@@ -46,8 +46,8 @@ class TestCreateRecurringCalendarEvent:
         result = await calendar_mod.create_recurring_calendar_event(
             hass,
             {
-                "entity_id": "calendar.cursor_prompts",
-                "summary": "Cursor: weekly job",
+                "entity_id": "calendar.birthdays",
+                "summary": "Weekly reminder",
                 "dtstart": "2026-08-04T09:00:00",
                 "dtend": "2026-08-04T09:05:00",
                 "description": "Do the thing",
@@ -57,7 +57,7 @@ class TestCreateRecurringCalendarEvent:
         )
         entity.async_create_event.assert_awaited_once()
         kwargs = entity.async_create_event.await_args.kwargs
-        assert kwargs["summary"] == "Cursor: weekly job"
+        assert kwargs["summary"] == "Weekly reminder"
         assert kwargs["description"] == "Do the thing"
         assert kwargs["rrule"] == "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
         assert isinstance(kwargs["dtstart"], datetime)
@@ -71,7 +71,7 @@ class TestCreateRecurringCalendarEvent:
         await calendar_mod.create_recurring_calendar_event(
             hass,
             {
-                "entity_id": "calendar.cursor_prompts",
+                "entity_id": "calendar.birthdays",
                 "summary": "Daily",
                 "dtstart": "2026-08-04T09:00:00",
                 "duration_minutes": 10,
@@ -104,7 +104,7 @@ class TestCreateRecurringCalendarEvent:
         result = await calendar_mod.create_recurring_calendar_event(
             hass,
             {
-                "entity_id": "calendar.cursor_prompts",
+                "entity_id": "calendar.birthdays",
                 "summary": "Test",
                 "dtstart": "2026-08-04T09:00:00",
                 "dtend": "2026-08-04T09:05:00",
@@ -139,8 +139,8 @@ class TestCreateCalendarEvent:
         result = await calendar_mod.create_calendar_event(
             hass,
             {
-                "entity_id": "calendar.cursor_prompts",
-                "summary": "Cursor: test",
+                "entity_id": "calendar.birthdays",
+                "summary": "One-off test event",
                 "dtstart": "2026-08-04T09:00:00",
                 "duration_minutes": 5,
                 "description": "Hello",
@@ -152,6 +152,119 @@ class TestCreateCalendarEvent:
         assert kwargs["description"] == "Hello"
         payload = json.loads(result["content"][0]["text"])
         assert payload["method"] == "calendar_entity_async_create_event"
+        assert payload["reload_triggers"] == "false"
+        assert payload["triggers_reloaded"] is False
+        hass.services.async_call.assert_not_called()
+
+
+class TestReloadTriggers:
+    @pytest.fixture(autouse=True)
+    def _utc_local(self):
+        """Treat naive datetimes as UTC so lead-time math is stable in tests."""
+
+        def as_utc(value: datetime) -> datetime:
+            if value.tzinfo is None:
+                return value.replace(tzinfo=UTC)
+            return value
+
+        with patch.object(calendar_mod.dt_util, "as_local", side_effect=as_utc):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_default_false_skips_reload(self, mock_hass):
+        hass, _component, _entity = mock_hass
+        with patch.object(calendar_mod.dt_util, "now", return_value=_utc(2026, 8, 4, 8, 55, 0)):
+            # Event 5 minutes away — would reload under auto, but default is false
+            result = await calendar_mod.create_calendar_event(
+                hass,
+                {
+                    "entity_id": "calendar.birthdays",
+                    "summary": "Soon",
+                    "dtstart": "2026-08-04T09:00:00",
+                    "duration_minutes": 5,
+                },
+            )
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["reload_triggers"] == "false"
+        assert payload["triggers_reloaded"] is False
+        hass.services.async_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_reloads_within_window(self, mock_hass):
+        hass, _component, _entity = mock_hass
+        with patch.object(calendar_mod.dt_util, "now", return_value=_utc(2026, 8, 4, 8, 55, 0)):
+            result = await calendar_mod.create_calendar_event(
+                hass,
+                {
+                    "entity_id": "calendar.birthdays",
+                    "summary": "Soon",
+                    "dtstart": "2026-08-04T09:00:00",
+                    "duration_minutes": 5,
+                    "reload_triggers": "auto",
+                },
+            )
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["reload_triggers"] == "auto"
+        assert payload["triggers_reloaded"] is True
+        assert hass.services.async_call.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_auto_skips_outside_window(self, mock_hass):
+        hass, _component, _entity = mock_hass
+        with patch.object(calendar_mod.dt_util, "now", return_value=_utc(2026, 8, 4, 8, 0, 0)):
+            result = await calendar_mod.create_calendar_event(
+                hass,
+                {
+                    "entity_id": "calendar.birthdays",
+                    "summary": "Later",
+                    "dtstart": "2026-08-04T09:00:00",
+                    "duration_minutes": 5,
+                    "reload_triggers": "auto",
+                },
+            )
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["triggers_reloaded"] is False
+        hass.services.async_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_true_always_reloads(self, mock_hass):
+        hass, _component, _entity = mock_hass
+        with patch.object(calendar_mod.dt_util, "now", return_value=_utc(2026, 8, 1, 12, 0, 0)):
+            result = await calendar_mod.create_calendar_event(
+                hass,
+                {
+                    "entity_id": "calendar.birthdays",
+                    "summary": "Far ahead",
+                    "dtstart": "2026-08-04T09:00:00",
+                    "duration_minutes": 5,
+                    "reload_triggers": "true",
+                },
+            )
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["reload_triggers"] == "true"
+        assert payload["triggers_reloaded"] is True
+        assert hass.services.async_call.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_invalid_mode(self, mock_hass):
+        hass, _component, entity = mock_hass
+        result = await calendar_mod.create_calendar_event(
+            hass,
+            {
+                "entity_id": "calendar.birthdays",
+                "summary": "Bad",
+                "dtstart": "2026-08-04T09:00:00",
+                "duration_minutes": 5,
+                "reload_triggers": "sometimes",
+            },
+        )
+        entity.async_create_event.assert_not_called()
+        assert "reload_triggers must be false, true, or auto" in result["content"][0]["text"]
+
+    def test_parse_accepts_bool(self):
+        assert calendar_mod._parse_reload_triggers(True) == "true"
+        assert calendar_mod._parse_reload_triggers(False) == "false"
+        assert calendar_mod._parse_reload_triggers(None) == "false"
 
 
 class TestListCalendarEvents:
@@ -162,21 +275,21 @@ class TestListCalendarEvents:
             CalendarEvent(
                 start=_utc(2026, 8, 4, 9, 0, 0),
                 end=_utc(2026, 8, 4, 9, 5, 0),
-                summary="Cursor: job",
-                description="secret prompt text here",
+                summary="Team standup",
+                description="Bring cake and candles",
                 uid="abc123",
             )
         ]
         with patch.object(calendar_mod.dt_util, "now", return_value=_utc(2026, 8, 1, 12, 0, 0)):
             result = await calendar_mod.list_calendar_events(
                 hass,
-                {"entity_id": "calendar.cursor_prompts", "days": 7},
+                {"entity_id": "calendar.birthdays", "days": 7},
             )
         payload = json.loads(result["content"][0]["text"])
         assert payload["count"] == 1
         assert payload["events"][0]["uid"] == "abc123"
         assert "description" not in payload["events"][0]
-        assert payload["events"][0]["description_preview"] == "secret prompt text here"
+        assert payload["events"][0]["description_preview"] == "Bring cake and candles"
 
     @pytest.mark.asyncio
     async def test_include_description(self, mock_hass):
@@ -185,8 +298,8 @@ class TestListCalendarEvents:
             CalendarEvent(
                 start=_utc(2026, 8, 4, 9, 0, 0),
                 end=_utc(2026, 8, 4, 9, 5, 0),
-                summary="Cursor: job",
-                description="full prompt",
+                summary="Team standup",
+                description="Full birthday party notes",
                 uid="abc123",
             )
         ]
@@ -194,13 +307,13 @@ class TestListCalendarEvents:
             result = await calendar_mod.list_calendar_events(
                 hass,
                 {
-                    "entity_id": "calendar.cursor_prompts",
+                    "entity_id": "calendar.birthdays",
                     "days": 7,
                     "include_description": True,
                 },
             )
         payload = json.loads(result["content"][0]["text"])
-        assert payload["events"][0]["description"] == "full prompt"
+        assert payload["events"][0]["description"] == "Full birthday party notes"
         assert "description_preview" not in payload["events"][0]
 
 
@@ -210,7 +323,7 @@ class TestDeleteCalendarEvents:
         hass, _component, _entity = mock_hass
         result = await calendar_mod.delete_calendar_events(
             hass,
-            {"entity_id": "calendar.cursor_prompts"},
+            {"entity_id": "calendar.birthdays"},
         )
         assert "exactly one" in result["content"][0]["text"]
 
@@ -219,7 +332,7 @@ class TestDeleteCalendarEvents:
         hass, _component, entity = mock_hass
         result = await calendar_mod.delete_calendar_events(
             hass,
-            {"entity_id": "calendar.cursor_prompts", "uid": "series-1"},
+            {"entity_id": "calendar.birthdays", "uid": "series-1"},
         )
         entity.async_delete_event.assert_awaited_once_with("series-1")
         payload = json.loads(result["content"][0]["text"])
@@ -232,7 +345,7 @@ class TestDeleteCalendarEvents:
             CalendarEvent(
                 start=_utc(2026, 8, 4, 9, 0, 0),
                 end=_utc(2026, 8, 4, 9, 5, 0),
-                summary="Cursor: weekly earnings",
+                summary="Weekly earnings review",
                 uid="uid-weekly",
             )
         ]
@@ -240,7 +353,7 @@ class TestDeleteCalendarEvents:
             result = await calendar_mod.delete_calendar_events(
                 hass,
                 {
-                    "entity_id": "calendar.cursor_prompts",
+                    "entity_id": "calendar.birthdays",
                     "summary_contains": "weekly",
                     "dry_run": True,
                 },
@@ -248,7 +361,7 @@ class TestDeleteCalendarEvents:
         entity.async_delete_event.assert_not_called()
         payload = json.loads(result["content"][0]["text"])
         assert payload["dry_run"] is True
-        assert payload["matches"] == [{"uid": "uid-weekly", "summary": "Cursor: weekly earnings"}]
+        assert payload["matches"] == [{"uid": "uid-weekly", "summary": "Weekly earnings review"}]
 
     @pytest.mark.asyncio
     async def test_summary_contains_min_length(self, mock_hass):
@@ -256,7 +369,7 @@ class TestDeleteCalendarEvents:
         result = await calendar_mod.delete_calendar_events(
             hass,
             {
-                "entity_id": "calendar.cursor_prompts",
+                "entity_id": "calendar.birthdays",
                 "summary_contains": "ab",
             },
         )

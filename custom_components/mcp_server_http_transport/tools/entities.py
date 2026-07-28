@@ -311,6 +311,7 @@ async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         },
         "required": ["device_id"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def get_device_details(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get a device and the entities registered to it."""
@@ -419,6 +420,7 @@ async def list_services(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         },
         "required": ["domain"],
     },
+    annotations=ANNOTATION_READ_ONLY,
 )
 async def describe_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Describe a service's parameters, selectors, and targets."""

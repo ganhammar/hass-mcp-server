@@ -103,3 +103,22 @@ async def test_unauthenticated_request_is_rejected(
     assert resp.status == 401
     assert resp.headers.get("WWW-Authenticate", "").startswith("Bearer")
     assert (await resp.json())["error"] == "invalid_token"
+
+
+async def test_unauthenticated_get_carries_the_challenge(
+    loaded_entry: MockConfigEntry,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """A GET probe reaches the view instead of aiohttp's own method-not-allowed.
+
+    aiohttp answers an unrouted method itself, and that response carries no
+    WWW-Authenticate, so this asserts the route exists rather than that the
+    handler body is correct.
+    """
+    client = await hass_client_no_auth()
+
+    resp = await client.get("/api/mcp")
+
+    assert resp.status == 401
+    assert resp.headers.get("WWW-Authenticate", "").startswith("Bearer")
+    assert (await resp.json())["error"] == "invalid_token"

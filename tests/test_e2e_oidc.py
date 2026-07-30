@@ -157,3 +157,24 @@ async def test_expired_token_is_rejected(
     resp = await _post_initialize(client, token)
 
     assert resp.status == 401
+
+
+async def test_unauthenticated_get_advertises_resource_metadata(
+    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """A GET probe is told where this resource's metadata lives.
+
+    The advertised path is the RFC 9728 suffixed form. Home Assistant serves its
+    own metadata at the bare /.well-known/oauth-protected-resource and wins that
+    route by registering first, so pointing at the root would send the client to
+    HA's own authorization server.
+    """
+    client = await hass_client_no_auth()
+
+    resp = await client.get("/api/mcp", headers=FORWARDED)
+
+    assert resp.status == 401
+    assert resp.headers["WWW-Authenticate"] == (
+        'Bearer realm="MCP Server",'
+        f' resource_metadata="{ISSUER_BASE}/.well-known/oauth-protected-resource/api/mcp"'
+    )

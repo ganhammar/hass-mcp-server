@@ -163,6 +163,54 @@ class MCPEndpointView(HomeAssistantView):
 
         return None
 
+    def _unauthorized(self, request: web.Request) -> web.Response:
+        """Build the 401 that points a client at this resource's metadata.
+
+        The resource_metadata URL is the RFC 9728 path-suffixed form. HA Core
+        serves its own metadata at the bare /.well-known/oauth-protected-resource
+        and wins that route by registering first, so a client that falls back to
+        the root path is told the authorization server is HA itself.
+        """
+        base_url = _get_issuer(request)
+        if base_url is not None:
+            resource_metadata_url = f"{base_url}/.well-known/oauth-protected-resource/api/mcp"
+            www_authenticate = (
+                f'Bearer realm="MCP Server",' f' resource_metadata="{resource_metadata_url}"'
+            )
+        else:
+            www_authenticate = 'Bearer realm="Home Assistant MCP Server"'
+
+        return web.json_response(
+            {
+                "error": "invalid_token",
+                "error_description": "Invalid or missing token",
+            },
+            status=401,
+            headers={"WWW-Authenticate": www_authenticate},
+        )
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Answer GET probes, which clients use to discover how to authenticate.
+
+        This endpoint carries no SSE stream, so an authenticated GET is Method
+        Not Allowed. An unauthenticated one still gets the challenge, because a
+        bare 405 leaves the client with no pointer to the resource metadata.
+        """
+        if not _integration_loaded(self.hass):
+            return _service_unavailable()
+
+        if not await self._validate_token(request):
+            return self._unauthorized(request)
+
+        return web.json_response(
+            {
+                "error": "method_not_allowed",
+                "error_description": "This endpoint accepts POST and serves no SSE stream",
+            },
+            status=405,
+            headers={"Allow": "OPTIONS, POST"},
+        )
+
     async def post(self, request: web.Request) -> web.Response:
         """Handle POST requests for MCP messages."""
         if not _integration_loaded(self.hass):
@@ -171,24 +219,7 @@ class MCPEndpointView(HomeAssistantView):
         # Validate token
         token_payload = await self._validate_token(request)
         if not token_payload:
-            # Build WWW-Authenticate header
-            base_url = _get_issuer(request)
-            if base_url is not None:
-                resource_metadata_url = f"{base_url}/.well-known/oauth-protected-resource/api/mcp"
-                www_authenticate = (
-                    f'Bearer realm="MCP Server",' f' resource_metadata="{resource_metadata_url}"'
-                )
-            else:
-                www_authenticate = 'Bearer realm="Home Assistant MCP Server"'
-
-            return web.json_response(
-                {
-                    "error": "invalid_token",
-                    "error_description": "Invalid or missing token",
-                },
-                status=401,
-                headers={"WWW-Authenticate": www_authenticate},
-            )
+            return self._unauthorized(request)
 
         body = None
         try:

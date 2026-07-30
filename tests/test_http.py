@@ -299,6 +299,52 @@ class TestMCPEndpointView:
 
         assert response.status == 202
 
+    async def test_get_without_token_returns_401_with_challenge(self, view):
+        """Test GET without a token returns 401 carrying the metadata pointer."""
+        request = Mock()
+        request.headers = {}
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        with patch(
+            "custom_components.mcp_server_http_transport.http._get_issuer",
+            return_value="https://homeassistant.local:8123",
+        ):
+            response = await view.get(request)
+
+        assert response.status == 401
+        body = json.loads(response.body)
+        assert body["error"] == "invalid_token"
+        assert (
+            'resource_metadata="https://homeassistant.local:8123'
+            '/.well-known/oauth-protected-resource/api/mcp"' in response.headers["WWW-Authenticate"]
+        )
+
+    async def test_get_with_valid_token_returns_405(self, view):
+        """Test GET with a valid token is Method Not Allowed; there is no SSE stream."""
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.get(request)
+
+        assert response.status == 405
+        assert response.headers["Allow"] == "OPTIONS, POST"
+        assert "WWW-Authenticate" not in response.headers
+
+    async def test_get_returns_503_when_unloaded(self, mock_server):
+        """Test GET is gated on the integration being loaded, like POST."""
+        hass = Mock()
+        hass.data = {}
+        view = MCPEndpointView(hass, mock_server)
+
+        request = Mock()
+        request.headers = {}
+
+        response = await view.get(request)
+
+        assert response.status == 503
+        assert json.loads(response.body)["error"] == "service_unavailable"
+
     async def test_validate_token_without_bearer_prefix(self, view):
         """Test _validate_token without Bearer prefix returns None."""
         request = Mock()

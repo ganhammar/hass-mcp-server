@@ -20,8 +20,9 @@ def _make_hass() -> Mock:
     return Mock()
 
 
-def _registry(unique_id: str | None):
-    """Mock entity registry whose async_get returns an entry (or None)."""
+def _registry(unique_id: str | None, *, entity_id: str | None = None):
+    """Mock entity registry: async_get returns an entry (or None); async_get_entity_id
+    (the reverse item_id -> entity_id lookup) returns entity_id (or None)."""
     registry = Mock()
     if unique_id is None:
         registry.async_get.return_value = None
@@ -29,6 +30,7 @@ def _registry(unique_id: str | None):
         entry = Mock()
         entry.unique_id = unique_id
         registry.async_get.return_value = entry
+    registry.async_get_entity_id.return_value = entity_id
     return registry
 
 
@@ -122,11 +124,68 @@ class TestListTraces:
             captured["key"] = key
             return []
 
-        with patch(f"{_TRACE_UTIL}.async_list_traces", side_effect=fake_list):
+        with (
+            patch(f"{_ER}.async_get", return_value=_registry("1718")),
+            patch(f"{_TRACE_UTIL}.async_list_traces", side_effect=fake_list),
+        ):
             result = await list_traces(hass, {"domain": "script"})
 
         assert captured == {"domain": "script", "key": None}
         assert json.loads(result["content"][0]["text"]) == []
+
+    async def test_domain_wide_summary_carries_resolved_entity_id(self):
+        """A domain-wide listing must resolve each item_id to an entity_id so the
+        caller can drill into a result with get_trace."""
+        reg = _registry("1718", entity_id="automation.morning")
+        with (
+            patch(f"{_ER}.async_get", return_value=reg),
+            patch(f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[_summary("a", _T0)])),
+        ):
+            result = await list_traces(_make_hass(), {"domain": "automation"})
+
+        row = json.loads(result["content"][0]["text"])[0]
+        assert row["entity_id"] == "automation.morning"
+        reg.async_get_entity_id.assert_called_with("automation", "automation", "1718")
+
+    async def test_domain_wide_entity_id_is_null_when_unregistered(self):
+        reg = _registry("1718", entity_id=None)
+        with (
+            patch(f"{_ER}.async_get", return_value=reg),
+            patch(f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[_summary("a", _T0)])),
+        ):
+            result = await list_traces(_make_hass(), {"domain": "automation"})
+
+        assert json.loads(result["content"][0]["text"])[0]["entity_id"] is None
+
+    async def test_domain_wide_summary_without_item_id_gets_null_entity_id(self):
+        """A malformed summary lacking item_id must not crash enrichment."""
+        reg = _registry("1718", entity_id="automation.morning")
+        bare = {
+            "run_id": "x",
+            "state": "running",
+            "timestamp": {"start": _T0},
+            "domain": "automation",
+        }
+        with (
+            patch(f"{_ER}.async_get", return_value=reg),
+            patch(f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[bare])),
+        ):
+            result = await list_traces(_make_hass(), {"domain": "automation"})
+
+        assert json.loads(result["content"][0]["text"])[0]["entity_id"] is None
+        reg.async_get_entity_id.assert_not_called()
+
+    async def test_entity_scoped_summary_uses_the_given_entity_id(self):
+        """When the caller names an entity_id, no reverse lookup is needed."""
+        reg = _registry("1718")
+        with (
+            patch(f"{_ER}.async_get", return_value=reg),
+            patch(f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[_summary("a", _T0)])),
+        ):
+            result = await list_traces(_make_hass(), {"entity_id": "automation.morning"})
+
+        assert json.loads(result["content"][0]["text"])[0]["entity_id"] == "automation.morning"
+        reg.async_get_entity_id.assert_not_called()
 
     async def test_requires_entity_or_domain(self):
         result = await list_traces(_make_hass(), {})
@@ -213,6 +272,9 @@ class TestGetTrace:
         }
         with (
             patch(f"{_ER}.async_get", return_value=_registry("1718")),
+            patch(
+                f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[_summary("r1", _T0)])
+            ),
             patch(f"{_TRACE_UTIL}.async_get_trace", AsyncMock(return_value=extended)),
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning", "run_id": "r1"})
@@ -246,6 +308,9 @@ class TestGetTrace:
         }
         with (
             patch(f"{_ER}.async_get", return_value=_registry("1718")),
+            patch(
+                f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[_summary("r1", _T0)])
+            ),
             patch(f"{_TRACE_UTIL}.async_get_trace", AsyncMock(return_value=extended)),
         ):
             result = await get_trace(
@@ -276,6 +341,9 @@ class TestGetTrace:
         }
         with (
             patch(f"{_ER}.async_get", return_value=_registry("1718")),
+            patch(
+                f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[_summary("r1", _T0)])
+            ),
             patch(f"{_TRACE_UTIL}.async_get_trace", AsyncMock(return_value=extended)),
         ):
             result = await get_trace(
@@ -296,6 +364,9 @@ class TestGetTrace:
         }
         with (
             patch(f"{_ER}.async_get", return_value=_registry("1718")),
+            patch(
+                f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[_summary("r1", _T0)])
+            ),
             patch(f"{_TRACE_UTIL}.async_get_trace", AsyncMock(return_value=extended)),
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning", "run_id": "r1"})
@@ -305,21 +376,22 @@ class TestGetTrace:
         assert payload["trace"]["condition/0"][0]["changed_variables"] == {"a": 1}
 
     async def test_explicit_run_id_is_used(self):
+        """A named run_id present in the listing is fetched directly."""
         hass = _make_hass()
-        list_mock = AsyncMock(return_value=[])
 
         async def fake_get(hass_arg, key, run_id):
             return {"run_id": run_id, "trace": {}}
 
         with (
             patch(f"{_ER}.async_get", return_value=_registry("1718")),
-            patch(f"{_TRACE_UTIL}.async_list_traces", list_mock),
+            patch(
+                f"{_TRACE_UTIL}.async_list_traces",
+                AsyncMock(return_value=[_summary("abc123", _T0), _summary("other", _T0)]),
+            ),
             patch(f"{_TRACE_UTIL}.async_get_trace", side_effect=fake_get),
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning", "run_id": "abc123"})
 
-        # With an explicit run_id we must not need to list first.
-        list_mock.assert_not_called()
         assert json.loads(result["content"][0]["text"])["run_id"] == "abc123"
 
     async def test_no_traces_gives_friendly_message(self):
@@ -335,33 +407,40 @@ class TestGetTrace:
         assert "hasn't run recently" in text
 
     async def test_unknown_run_id_reports_that_run_id(self):
+        """An unknown run_id is caught against the listing, not via a swallowed KeyError."""
         hass = _make_hass()
+        get_mock = AsyncMock()
         with (
             patch(f"{_ER}.async_get", return_value=_registry("1718")),
-            patch(f"{_TRACE_UTIL}.async_get_trace", AsyncMock(side_effect=KeyError("nope"))),
+            patch(
+                f"{_TRACE_UTIL}.async_list_traces",
+                AsyncMock(return_value=[_summary("real", _T0)]),
+            ),
+            patch(f"{_TRACE_UTIL}.async_get_trace", get_mock),
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning", "run_id": "ghost"})
 
         text = result["content"][0]["text"]
         assert "run_id 'ghost'" in text
         assert "list_traces" in text
+        # We knew it was absent from the listing, so we never hit the store.
+        get_mock.assert_not_called()
 
-    async def test_derived_run_vanishing_falls_back_to_no_traces(self):
-        """If the newest run disappears between list and get, report 'no traces', not a run_id."""
+    async def test_broken_trace_store_surfaces_as_error_not_no_traces(self):
+        """A failure reaching the trace store must not be reported as 'no traces found'."""
         hass = _make_hass()
         with (
             patch(f"{_ER}.async_get", return_value=_registry("1718")),
             patch(
                 f"{_TRACE_UTIL}.async_list_traces",
-                AsyncMock(return_value=[_summary("gone", _T0)]),
+                AsyncMock(side_effect=KeyError("trace store missing")),
             ),
-            patch(f"{_TRACE_UTIL}.async_get_trace", AsyncMock(side_effect=KeyError("race"))),
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning"})
 
         text = result["content"][0]["text"]
-        assert "No traces found" in text
-        assert "run_id" not in text
+        assert "Error getting trace" in text
+        assert "No traces found" not in text
 
     async def test_unregistered_entity_falls_back_to_object_id(self):
         """A YAML script not in the registry should still resolve via its object-id."""
@@ -374,6 +453,10 @@ class TestGetTrace:
 
         with (
             patch(f"{_ER}.async_get", return_value=_registry(None)),
+            patch(
+                f"{_TRACE_UTIL}.async_list_traces",
+                AsyncMock(return_value=[{"run_id": "r1", "timestamp": {"start": _T0}}]),
+            ),
             patch(f"{_TRACE_UTIL}.async_get_trace", side_effect=fake_get),
         ):
             result = await get_trace(hass, {"entity_id": "script.bedtime", "run_id": "r1"})
@@ -388,6 +471,9 @@ class TestGetTrace:
     async def test_unexpected_error_is_reported(self):
         with (
             patch(f"{_ER}.async_get", return_value=_registry("1718")),
+            patch(
+                f"{_TRACE_UTIL}.async_list_traces", AsyncMock(return_value=[_summary("r1", _T0)])
+            ),
             patch(
                 f"{_TRACE_UTIL}.async_get_trace",
                 AsyncMock(side_effect=RuntimeError("boom")),

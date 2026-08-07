@@ -112,6 +112,43 @@ def _summarize_step(element: Any) -> Any:
     return trimmed
 
 
+def _attach_entity_ids(
+    hass: HomeAssistant, traces: list[dict[str, Any]], known_entity_id: str | None
+) -> list[dict[str, Any]]:
+    """Add an ``entity_id`` to each summary so a domain-wide listing is actionable.
+
+    A summary carries ``item_id`` (the registry unique_id), but get_trace takes an
+    entity_id, so without this a caller who lists a whole domain can't drill into a
+    result. We reverse-resolve item_id -> entity_id via the registry (``entity_id``
+    is None for the rare unregistered YAML item). When the caller already named an
+    entity_id, every summary is for it, so we skip the lookup.
+
+    The dicts are copied first: for a stopped trace ``as_short_dict`` returns HA's
+    own cached dict, and mutating it would corrupt the trace store.
+    """
+    if not traces:
+        return []
+    registry = er.async_get(hass)
+    cache: dict[tuple[str, str], str | None] = {}
+    enriched: list[dict[str, Any]] = []
+    for summary in traces:
+        item = dict(summary)
+        if known_entity_id is not None:
+            item["entity_id"] = known_entity_id
+        else:
+            domain = item.get("domain")
+            item_id = item.get("item_id")
+            if domain and item_id is not None:
+                ck = (domain, item_id)
+                if ck not in cache:
+                    cache[ck] = registry.async_get_entity_id(domain, domain, item_id)
+                item["entity_id"] = cache[ck]
+            else:
+                item["entity_id"] = None
+        enriched.append(item)
+    return enriched
+
+
 def _summarize_trace(trace: dict[str, Any]) -> dict[str, Any]:
     """Return an outline of an extended trace: the step skeleton without the bulk.
 
@@ -134,7 +171,8 @@ def _summarize_trace(trace: dict[str, Any]) -> dict[str, Any]:
         "List recent execution traces for automations or scripts, newest first. "
         "Each trace summary shows the run's state (e.g. stopped/error), start/finish "
         "timestamps, the last step reached, why the script execution ended, any error, "
-        "and a run_id to pass to get_trace for the full step-by-step detail. "
+        "and both the entity_id and a run_id to pass to get_trace for the full "
+        "step-by-step detail. "
         "Provide entity_id (e.g. 'automation.morning') to trace one item, or domain "
         "('automation' or 'script') to see recent runs across all items in that domain. "
         "Note: only automations that have an id are traced, and only the last few runs "
@@ -210,6 +248,7 @@ async def list_traces(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
 
         traces = await async_list_traces(hass, domain, key)
         traces = sorted(traces, key=_sort_key, reverse=True)[:limit]
+        traces = _attach_entity_ids(hass, traces, entity_id)
         return {
             "content": [{"type": "text", "text": json.dumps(traces, indent=2, cls=_TRACE_ENCODER)}]
         }
@@ -279,10 +318,27 @@ async def get_trace(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
     try:
         domain, key = _resolve_trace_key(hass, entity_id)
 
-        if not run_id:
-            summaries = await async_list_traces(hass, domain, key)
-            if not summaries:
-                return {"content": [{"type": "text", "text": _no_traces}]}
+        # List first — it validates that the run exists (so an unknown run_id gives a
+        # clear message instead of a KeyError) and lets a genuinely broken trace store
+        # surface as an error rather than being mistaken for "no traces".
+        summaries = await async_list_traces(hass, domain, key)
+        if not summaries:
+            return {"content": [{"type": "text", "text": _no_traces}]}
+
+        if run_id:
+            if run_id not in {s.get("run_id") for s in summaries}:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"No trace found for '{entity_id}' with run_id '{run_id}'. "
+                                "Use list_traces to see available run_ids."
+                            ),
+                        }
+                    ]
+                }
+        else:
             run_id = max(summaries, key=_sort_key)["run_id"]
 
         trace = await async_get_trace(hass, key, run_id)
@@ -293,21 +349,6 @@ async def get_trace(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
         }
     except ValueError as e:
         return {"content": [{"type": "text", "text": f"Error: {e}"}]}
-    except KeyError:
-        # Unknown key or run_id — HA raises KeyError from the trace store lookup.
-        if run_id and arguments.get("run_id"):
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"No trace found for '{entity_id}' with run_id '{run_id}'. "
-                            "Use list_traces to see available run_ids."
-                        ),
-                    }
-                ]
-            }
-        return {"content": [{"type": "text", "text": _no_traces}]}
     except Exception as e:
         _LOGGER.error("Error getting trace: %s", e)
         return {"content": [{"type": "text", "text": f"Error getting trace: {e}"}]}

@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -110,7 +110,7 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
     annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Call a Home Assistant service."""
+    """Call a Home Assistant service, returning its response data when it has any."""
     domain = arguments["domain"]
     service = arguments["service"]
     entity_id = arguments.get("entity_id")
@@ -121,18 +121,43 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         service_data["entity_id"] = entity_id
 
     try:
-        await hass.services.async_call(domain, service, service_data, blocking=True)
+        # A service declared SupportsResponse.ONLY cannot be called at all
+        # without asking for its response — Home Assistant refuses the call
+        # rather than dropping the data. That covers whole categories of reads
+        # that only exist as services: calendar.get_events, todo.get_items,
+        # weather.get_forecasts, recorder.get_statistics. OPTIONAL services do
+        # run, but withhold what they were asked for.
+        supports = hass.services.supports_response(domain, service)
+        wants_response = supports is not SupportsResponse.NONE
+
+        response = await hass.services.async_call(
+            domain,
+            service,
+            service_data,
+            blocking=True,
+            return_response=wants_response,
+        )
+    except Exception as e:
+        _LOGGER.error("Error calling service: %s", e)
+        return {"content": [{"type": "text", "text": f"Error calling service: {str(e)}"}]}
+
+    if wants_response and response is not None:
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": f"Successfully called {domain}.{service}",
+                    "text": json.dumps(response, indent=2, cls=_HAJSONEncoder),
                 }
             ]
         }
-    except Exception as e:
-        _LOGGER.error("Error calling service: %s", e)
-        return {"content": [{"type": "text", "text": f"Error calling service: {str(e)}"}]}
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": f"Successfully called {domain}.{service}",
+            }
+        ]
+    }
 
 
 @register_tool(

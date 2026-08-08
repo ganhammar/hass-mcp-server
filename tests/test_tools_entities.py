@@ -5,6 +5,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.core import SupportsResponse
 
 from custom_components.mcp_server_http_transport.http import MCPEndpointView
 from custom_components.mcp_server_http_transport.tools import entities as entities_mod
@@ -54,6 +55,10 @@ class TestToolsEntities:
         hass = Mock()
         hass.states = Mock()
         hass.services = Mock()
+        # Most services return nothing; the ones that do are set per test. Left
+        # as a bare Mock this would read as "returns a response" and every call
+        # would ask for one.
+        hass.services.supports_response = Mock(return_value=SupportsResponse.NONE)
         return hass
 
     @pytest.fixture
@@ -165,7 +170,78 @@ class TestToolsEntities:
             "turn_on",
             {"brightness": 255, "entity_id": "light.living_room"},
             blocking=True,
+            return_response=False,
         )
+
+    async def test_post_tools_call_service_returns_response_data(self, view, mock_hass):
+        """A service that only exists to return data must return it.
+
+        Home Assistant refuses to run a SupportsResponse.ONLY service unless the
+        caller asks for the response, so without this these services could not be
+        called at all — not merely called without their answer.
+        """
+        mock_hass.services.supports_response = Mock(return_value=SupportsResponse.ONLY)
+        mock_hass.services.async_call = AsyncMock(
+            return_value={"calendar.family": {"events": [{"summary": "Dentist"}]}}
+        )
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "call_service",
+                    "arguments": {
+                        "domain": "calendar",
+                        "service": "get_events",
+                        "entity_id": "calendar.family",
+                    },
+                },
+                "id": 7,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Dentist" in body["result"]["content"][0]["text"]
+        mock_hass.services.async_call.assert_called_once_with(
+            "calendar",
+            "get_events",
+            {"entity_id": "calendar.family"},
+            blocking=True,
+            return_response=True,
+        )
+
+    async def test_post_tools_call_service_optional_response_without_data(self, view, mock_hass):
+        """An OPTIONAL service that answers with nothing still reports success."""
+        mock_hass.services.supports_response = Mock(return_value=SupportsResponse.OPTIONAL)
+        mock_hass.services.async_call = AsyncMock(return_value=None)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "call_service",
+                    "arguments": {"domain": "conversation", "service": "process"},
+                },
+                "id": 8,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Successfully called" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_service_error(self, view, mock_hass):
         """Test POST with tools/call for call_service that fails."""

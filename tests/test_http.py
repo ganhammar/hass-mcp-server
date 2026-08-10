@@ -255,7 +255,7 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert body["jsonrpc"] == "2.0"
         assert "tools" in body["result"]
-        assert len(body["result"]["tools"]) == 74
+        assert len(body["result"]["tools"]) == 78
         tool_names = [t["name"] for t in body["result"]["tools"]]
         assert "get_state" in tool_names
         assert "call_service" in tool_names
@@ -272,6 +272,10 @@ class TestMCPEndpointView:
         assert "batch_get_state" in tool_names
         assert "list_traces" in tool_names
         assert "get_trace" in tool_names
+        assert "list_statistic_ids" in tool_names
+        assert "validate_statistics" in tool_names
+        assert "adjust_statistics" in tool_names
+        assert "clear_statistics" in tool_names
 
     async def test_post_unknown_method_returns_error(self, view):
         """Test POST with unknown method returns error."""

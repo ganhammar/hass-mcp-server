@@ -113,6 +113,10 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `get_history` | Get state history of an entity over a time range |
 | `get_logbook` | Fetch logbook entries for an entity or time range |
 | `get_statistics` | Fetch long-term statistics (energy, climate) with configurable period |
+| `list_statistic_ids` | List statistic IDs and their metadata (source, unit, whether they carry a mean/sum) |
+| `validate_statistics` | Report statistics issues the recorder detected — the Developer Tools "Fix issues" list |
+| `adjust_statistics` | Correct a statistic's sum from a point in time onward (spike/bad reset); sum statistics only |
+| `clear_statistics` | Permanently delete a statistic's history so it can start clean (irreversible; requires `confirm=true`) |
 | `render_template` | Evaluate a Jinja2 template |
 
 **Automations, Scenes & Scripts**

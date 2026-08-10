@@ -273,8 +273,8 @@ async def adjust_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         }
     start_time = dt_util.as_utc(start_time)
 
-    instance = get_instance(hass)
     try:
+        instance = get_instance(hass)
         metadatas = await instance.async_add_executor_job(
             recorder_list_statistic_ids, hass, {statistic_id}, None
         )
@@ -361,6 +361,9 @@ async def adjust_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> d
 async def clear_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete all statistics for the given statistic IDs."""
     from homeassistant.components.recorder import get_instance
+    from homeassistant.components.recorder.statistics import (
+        list_statistic_ids as recorder_list_statistic_ids,
+    )
 
     if arguments.get("confirm") is not True:
         return {
@@ -376,8 +379,42 @@ async def clear_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         }
 
     statistic_ids = arguments["statistic_ids"]
+    if not isinstance(statistic_ids, list) or not all(isinstance(s, str) for s in statistic_ids):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "statistic_ids must be an array of statistic ID strings.",
+                }
+            ]
+        }
     if not statistic_ids:
         return {"content": [{"type": "text", "text": "statistic_ids must not be empty."}]}
+
+    # Verify every ID exists before deleting anything, so a typo can't be reported as a
+    # successful clear of history that never existed. This is irreversible.
+    try:
+        instance = get_instance(hass)
+        metadatas = await instance.async_add_executor_job(
+            recorder_list_statistic_ids, hass, set(statistic_ids), None
+        )
+    except Exception as e:
+        _LOGGER.error("Error clearing statistics: %s", e)
+        return {"content": [{"type": "text", "text": f"Error clearing statistics: {str(e)}"}]}
+
+    known = {metadata.get("statistic_id") for metadata in metadatas}
+    unknown = [statistic_id for statistic_id in statistic_ids if statistic_id not in known]
+    if unknown:
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"Unknown statistic ID(s): {', '.join(unknown)}. Nothing was cleared."
+                    ),
+                }
+            ]
+        }
 
     done = asyncio.Event()
 
@@ -385,7 +422,7 @@ async def clear_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         hass.loop.call_soon_threadsafe(done.set)
 
     try:
-        get_instance(hass).async_clear_statistics(statistic_ids, on_done=_on_done)
+        instance.async_clear_statistics(statistic_ids, on_done=_on_done)
         async with asyncio.timeout(_CLEAR_STATISTICS_TIMEOUT):
             await done.wait()
     except TimeoutError:

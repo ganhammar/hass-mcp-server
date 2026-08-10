@@ -393,6 +393,26 @@ class TestAdjustStatistics:
         )
         assert "Error adjusting statistics" in text
 
+    async def test_recorder_disabled(self, view):
+        """get_instance raising (recorder off) degrades to an error, not a 500."""
+        text = await _run_tool(
+            view,
+            "adjust_statistics",
+            {
+                "statistic_id": "sensor.energy",
+                "start_time": "2024-01-01T00:00:00+00:00",
+                "adjustment": 1,
+            },
+            recorder=None,
+            extra_patches=[
+                patch(
+                    "homeassistant.components.recorder.get_instance",
+                    side_effect=KeyError("recorder"),
+                )
+            ],
+        )
+        assert "Error adjusting statistics" in text
+
 
 class TestClearStatistics:
     """Tests for the clear_statistics tool."""
@@ -403,16 +423,22 @@ class TestClearStatistics:
         hass.loop = asyncio.get_event_loop()
         return MCPEndpointView(hass, Mock())
 
+    def _recorder(self, known_ids=("sensor.energy",), clear=None):
+        """A recorder whose existence check knows known_ids."""
+        recorder = Mock()
+        recorder.async_add_executor_job = AsyncMock(
+            return_value=[{"statistic_id": sid} for sid in known_ids]
+        )
+        recorder.async_clear_statistics = clear or Mock(side_effect=lambda ids, on_done: on_done())
+        return recorder
+
     async def test_clears_when_confirmed(self, view):
         view.hass.loop = asyncio.get_running_loop()
-        recorder = Mock()
-        recorder.async_clear_statistics = Mock(side_effect=lambda ids, on_done: on_done())
-
         text = await _run_tool(
             view,
             "clear_statistics",
             {"statistic_ids": ["sensor.energy"], "confirm": True},
-            recorder,
+            self._recorder(),
         )
         assert "Cleared statistics for: sensor.energy" in text
 
@@ -425,6 +451,16 @@ class TestClearStatistics:
         )
         assert "requires confirm=true" in text
 
+    async def test_rejects_non_list(self, view):
+        """A bare string must not be iterated character by character."""
+        text = await _run_tool(
+            view,
+            "clear_statistics",
+            {"statistic_ids": "sensor.energy", "confirm": True},
+            recorder=Mock(),
+        )
+        assert "must be an array" in text
+
     async def test_rejects_empty_ids(self, view):
         text = await _run_tool(
             view,
@@ -434,11 +470,32 @@ class TestClearStatistics:
         )
         assert "must not be empty" in text
 
+    async def test_rejects_unknown_id(self, view):
+        """A nonexistent ID must not report a successful clear."""
+        text = await _run_tool(
+            view,
+            "clear_statistics",
+            {"statistic_ids": ["sensor.nope"], "confirm": True},
+            self._recorder(known_ids=()),
+        )
+        assert "Unknown statistic ID(s): sensor.nope" in text
+        assert "Nothing was cleared" in text
+
+    async def test_error_listing_metadata(self, view):
+        recorder = Mock()
+        recorder.async_add_executor_job = AsyncMock(side_effect=Exception("boom"))
+        text = await _run_tool(
+            view,
+            "clear_statistics",
+            {"statistic_ids": ["sensor.energy"], "confirm": True},
+            recorder,
+        )
+        assert "Error clearing statistics" in text
+
     async def test_timeout(self, view):
         view.hass.loop = asyncio.get_running_loop()
-        recorder = Mock()
         # Never invoke on_done, so the wait times out.
-        recorder.async_clear_statistics = Mock()
+        recorder = self._recorder(clear=Mock())
 
         text = await _run_tool(
             view,
@@ -457,8 +514,7 @@ class TestClearStatistics:
 
     async def test_error_surfaces(self, view):
         view.hass.loop = asyncio.get_running_loop()
-        recorder = Mock()
-        recorder.async_clear_statistics = Mock(side_effect=Exception("boom"))
+        recorder = self._recorder(clear=Mock(side_effect=Exception("boom")))
         text = await _run_tool(
             view,
             "clear_statistics",

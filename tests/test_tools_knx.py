@@ -137,6 +137,74 @@ class TestKnxRecentTelegrams:
         assert "unavailable" in result["content"][0]["text"]
 
 
+class TestKnxRecentTelegramsDbStore:
+    """Test knx_recent_telegrams against the DB-backed telegram store.
+
+    Newer KNX integration releases moved off the in-memory
+    `knx.telegrams.recent_telegrams` list onto a DB-backed
+    `knx.telegrams.store.query(...)` (the same backend HA's own
+    `knx/group_monitor_info` websocket handler queries). These tests cover
+    that path explicitly; TestKnxRecentTelegrams above covers the
+    (still-supported) in-memory fallback for older HA/KNX versions.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _patch_key(self):
+        with patch.object(knx_mod, "KNX_MODULE_KEY", _KEY):
+            yield
+
+    def _hass_with_store(self, telegrams, query_side_effect=None):
+        module = Mock()
+        module.entry.options = {}
+        query_result = Mock()
+        query_result.telegrams = telegrams
+        module.telegrams.store = Mock()
+        if query_side_effect is not None:
+            module.telegrams.store.query = AsyncMock(side_effect=query_side_effect)
+        else:
+            module.telegrams.store.query = AsyncMock(return_value=query_result)
+        module.telegrams.model_to_dict = lambda t: t
+        hass = Mock()
+        hass.data = {_KEY: module}
+        return hass
+
+    async def test_uses_store_when_available(self):
+        hass = self._hass_with_store(_TELEGRAMS)
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {})
+        data = _unpack(result)
+        assert data["buffer_size"] == 3
+        assert data["matched"] == 3
+        hass.data[_KEY].telegrams.store.query.assert_awaited_once()
+
+    async def test_filter_ga_via_store(self):
+        hass = self._hass_with_store(_TELEGRAMS)
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {"filter_ga": "^0/0/249$"})
+        data = _unpack(result)
+        assert data["matched"] == 2
+        assert all(t["destination"] == "0/0/249" for t in data["telegrams"])
+
+    async def test_store_query_error_returns_unavailable(self):
+        hass = self._hass_with_store(
+            [], query_side_effect=knx_mod.KnxTelegramStoreException("db locked")
+        )
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {})
+        assert "content" in result
+        assert "unavailable" in result["content"][0]["text"]
+
+    async def test_falls_back_to_in_memory_list_when_store_and_query_missing(self):
+        """Without TelegramQuery available, even a `store` attribute must not be used."""
+        hass = self._hass_with_store(_TELEGRAMS)
+        hass.data[_KEY].telegrams.recent_telegrams = _TELEGRAMS
+        with patch.object(knx_mod, "TelegramQuery", None):
+            result = await knx_mod.knx_recent_telegrams(hass, {})
+        data = _unpack(result)
+        assert data["buffer_size"] == 3
+        hass.data[_KEY].telegrams.store.query.assert_not_awaited()
+
+
 class TestKnxEntityTools:
     """Test the KNX base-data / entity read+write tools."""
 

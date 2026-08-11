@@ -3,9 +3,11 @@
 import json
 import logging
 import re
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from . import (
     ANNOTATION_DESTRUCTIVE,
@@ -22,9 +24,26 @@ _LOGGER = logging.getLogger(__name__)
 # (same access path used by HA's own `knx/group_monitor_info` websocket command).
 # Imported defensively so the MCP server still loads when KNX isn't installed.
 try:
-    from homeassistant.components.knx.const import KNX_MODULE_KEY
+    from homeassistant.components.knx.const import (
+        CONF_KNX_TELEGRAM_DB_LOAD_HOURS,
+        KNX_MODULE_KEY,
+    )
 except Exception:  # pragma: no cover - KNX integration not available
+    CONF_KNX_TELEGRAM_DB_LOAD_HOURS = None
     KNX_MODULE_KEY = None
+
+# TelegramQuery/KnxTelegramStoreException back the DB-backed telegram store
+# that `knx.telegrams.store.query(...)` uses since the KNX integration moved
+# off the old in-memory `knx.telegrams.recent_telegrams` list (same backend
+# HA's own `knx/group_monitor_info` websocket handler queries — see
+# homeassistant/components/knx/websocket.py:ws_group_monitor_info). Imported
+# defensively: older HA/KNX versions may still only have the in-memory list,
+# handled via the AttributeError fallback in knx_recent_telegrams() below.
+try:
+    from knx_telegram_store import KnxTelegramStoreException, TelegramQuery
+except Exception:  # pragma: no cover - older KNX integration without the store
+    KnxTelegramStoreException = Exception
+    TelegramQuery = None
 
 
 def _get_knx_module(hass: HomeAssistant):
@@ -37,6 +56,37 @@ def _get_knx_module(hass: HomeAssistant):
 def _destination(telegram: dict[str, Any]) -> str:
     """Group address of a telegram, tolerating key naming differences."""
     return str(telegram.get("destination") or telegram.get("destination_address") or "")
+
+
+async def _load_recent_telegrams(knx) -> list[dict[str, Any]] | None:
+    """Return recent telegrams as dicts, or None if unavailable on this HA version.
+
+    Primary path: the DB-backed `knx.telegrams.store.query(...)` (current KNX
+    integration, same backend as the `knx/group_monitor_info` websocket
+    command). Falls back to the older in-memory `knx.telegrams.recent_telegrams`
+    list for older HA/KNX versions that don't have the store yet.
+    """
+    store = getattr(knx.telegrams, "store", None)
+    if store is not None and TelegramQuery is not None:
+        load_hours = 9
+        if CONF_KNX_TELEGRAM_DB_LOAD_HOURS is not None:
+            try:
+                load_hours = knx.entry.options[CONF_KNX_TELEGRAM_DB_LOAD_HOURS]
+            except (KeyError, AttributeError):
+                pass
+        start_time = dt_util.now() - timedelta(hours=load_hours)
+        query = TelegramQuery(start_time=start_time, order_descending=True)
+        try:
+            result = await store.query(query, flush_first=True)
+        except KnxTelegramStoreException as err:
+            _LOGGER.warning("KNX telegram store query failed: %s", err)
+            return None
+        return [knx.telegrams.model_to_dict(t) for t in result.telegrams]
+
+    try:
+        return [dict(t) for t in knx.telegrams.recent_telegrams]
+    except AttributeError:
+        return None
 
 
 @register_tool(
@@ -89,9 +139,8 @@ async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -
             ]
         }
 
-    try:
-        telegrams = [dict(t) for t in knx.telegrams.recent_telegrams]
-    except AttributeError:
+    telegrams = await _load_recent_telegrams(knx)
+    if telegrams is None:
         return {
             "content": [
                 {

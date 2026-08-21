@@ -57,6 +57,7 @@ def _get_protected_resource_metadata(base_url: str) -> dict[str, Any]:
     return {
         "resource": f"{base_url}/api/mcp",
         "authorization_servers": [f"{base_url}/oidc"],
+        "scopes_supported": ["openid"],
         "bearer_methods_supported": ["header"],
         "resource_signing_alg_values_supported": ["RS256"],
         "resource_documentation": f"{base_url}/api/mcp",

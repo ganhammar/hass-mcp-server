@@ -165,6 +165,18 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `restore_config_backup` | Restore files from the latest or a specific backup; creates a pre-restore snapshot of the current state and runs config validation after restoring |
 | `cleanup_config_backups` | Delete backup snapshots older than N days (default 30); keeps the folder from growing indefinitely |
 
+**AppDaemon Files (opt-in)**
+
+| Tool | Description |
+|------|-------------|
+| `list_appdaemon_files` | List regular files under the configured AppDaemon apps root with SHA-256 hashes |
+| `get_appdaemon_file` | Read one relative AppDaemon app file with its SHA-256 hash |
+| `save_appdaemon_file` | Atomically save one AppDaemon app file after creating a rollback snapshot |
+| `delete_appdaemon_file` | Delete one AppDaemon app file after creating a rollback snapshot |
+| `backup_appdaemon_files` | Create a controlled snapshot of the AppDaemon apps tree |
+| `list_appdaemon_backups` | List available AppDaemon snapshots |
+| `restore_appdaemon_backup` | Restore a named AppDaemon snapshot with rollback protection |
+
 **Dashboards**
 
 | Tool | Description |
@@ -520,6 +532,25 @@ Some tools use internal Home Assistant APIs that are not publicly exposed and ma
 **Dashboard tools:** `create_dashboard`, `update_dashboard`, and `delete_dashboard` use `DashboardsCollection` and replicate side effects (panel registration, dashboards dict updates) that HA normally handles internally. The config-level tools (`list_dashboards`, `get/save/patch/delete_dashboard_config`) use stable public APIs and are not experimental.
 
 **Helper tools:** `get_helper_config`, `create_helper`, `update_helper`, and `delete_helper` use `StorageCollection` internals to manage UI-created helpers. They only affect helpers stored in `.storage/` — helpers defined in YAML are read-only from the perspective of these tools. `list_helpers` uses public APIs and is not experimental.
+</details>
+
+<details>
+<summary>How does bounded AppDaemon app-file access work?</summary>
+
+AppDaemon file access is disabled by default and is independent of shell or
+add-on process control. Enable it only after reviewing the contents and
+secrets of the apps tree. The `appdaemon_apps_root` option defaults to the
+legacy AppDaemon private apps path, `/addon_configs/a0d7b954_appdaemon/apps`,
+for compatibility. On installations where Home Assistant Core cannot see an
+add-on-private mount, configure the AppDaemon add-on and this integration to
+use a shared root such as `/share/appdaemon/apps` or `/media/appdaemon/apps`.
+
+Only the legacy root and paths below `/share/` or `/media/` are accepted.
+Absolute paths, malformed components, `..` traversal, symlink components, and
+paths escaping the configured root are rejected. All list, read, save, delete,
+backup, and restore operations use the same validated root. Mutating operations
+create controlled snapshots, and saves use atomic replacement where supported.
+This capability does not provide shell access or restart/process control.
 </details>
 
 ## License

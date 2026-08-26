@@ -223,9 +223,18 @@ async def test_cleanup_ignores_malformed_and_symlink_entries(apps_root: Path, tm
 async def test_cleanup_missing_or_empty_backup_root_is_safe(apps_root: Path):
     result = await tools.cleanup_appdaemon_backups(_hass(), {})
     assert result["content"][0]["text"] == "No backups found"
-    (apps_root / tools._BACKUP_DIR_NAME).mkdir()
-    result = await tools.cleanup_appdaemon_backups(_hass(), {})
-    assert result["content"][0]["text"] == "No backups found"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_removes_stale_snapshot_staging_directory(apps_root: Path):
+    staging = (
+        apps_root / tools._BACKUP_DIR_NAME / ".2020-01-01_00-00-00-000000.mcp_staging_deadbeef"
+    )
+    staging.mkdir(parents=True)
+    (staging / "app.py").write_text("partial")
+    result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
+    assert "Deleted 1 backup(s)" in result["content"][0]["text"]
+    assert not staging.exists()
 
 
 @pytest.mark.asyncio
@@ -517,6 +526,25 @@ async def test_restore_failure_removes_file_that_was_previously_absent(
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"] and result["rollback_result"] == "succeeded"
     assert not one.exists() and two.read_text() == "current two\n"
+
+
+@pytest.mark.asyncio
+async def test_restore_failure_removes_directories_created_for_partial_tree(
+    apps_root: Path, monkeypatch
+):
+    (apps_root / "nested" / "one.py").parent.mkdir(parents=True)
+    (apps_root / "nested" / "one.py").write_text("snapshot\n")
+    stamp = _payload(await tools.backup_appdaemon_files(_hass(), {}))["backup"].split("/")[-1]
+    (apps_root / "nested" / "one.py").unlink()
+    (apps_root / "nested").rmdir()
+
+    def fail_restore(self, parts, content, mode, **kwargs):
+        raise OSError("injected mutation failure")
+
+    monkeypatch.setattr(tools._RootFS, "write", fail_restore)
+    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    assert not result["success"]
+    assert not (apps_root / "nested").exists()
 
 
 @pytest.mark.asyncio

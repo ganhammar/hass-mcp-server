@@ -13,7 +13,7 @@ from custom_components.mcp_server_http_transport.http import (
     _get_issuer,
     _get_protected_resource_metadata,
 )
-from custom_components.mcp_server_http_transport.tools import TOOLS
+from custom_components.mcp_server_http_transport.tools import TOOLS, call_tool
 
 
 def test_appdaemon_tools_are_registered_by_production_registry():
@@ -31,6 +31,15 @@ def test_appdaemon_tools_are_registered_by_production_registry():
             "restore_appdaemon_backup",
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_appdaemon_tool_is_callable_through_production_registry():
+    """The production registry dispatches an AppDaemon handler, not just its schema."""
+    hass = Mock()
+    hass.data = {"mcp_server_http_transport": {"appdaemon_file_access": False}}
+    result = await call_tool(hass, "list_appdaemon_files", {})
+    assert "disabled" in result["content"][0]["text"]
 
 
 def test_get_base_url_with_forwarded_headers():

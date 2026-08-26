@@ -90,6 +90,7 @@ def populated_hass():
     hass.services.async_call = AsyncMock()
     # None of the services above return data. Left as a bare Mock this would read
     # as "returns a response" and every call would ask for one.
+    hass.services.has_service = Mock(return_value=True)
     hass.services.supports_response = Mock(return_value=SupportsResponse.NONE)
 
     # --- Config ---

@@ -122,12 +122,22 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
 
     try:
         # A service declared SupportsResponse.ONLY cannot be called at all
-        # without asking for its response — Home Assistant refuses the call
+        # without asking for its response: Home Assistant refuses the call
         # rather than dropping the data. That covers whole categories of reads
-        # that only exist as services: calendar.get_events, todo.get_items,
-        # weather.get_forecasts, recorder.get_statistics. OPTIONAL services do
-        # run, but withhold what they were asked for.
-        supports = hass.services.supports_response(domain, service)
+        # that only exist as services, among them calendar.get_events,
+        # todo.get_items, weather.get_forecasts and recorder.get_statistics.
+        # OPTIONAL services do run, but withhold what they were asked for.
+        #
+        # supports_response() subscripts the service registry directly and
+        # raises KeyError for anything the registry does not hold, despite a
+        # docstring promising NONE, so has_service() guards it. An unknown
+        # service then reaches async_call and is reported as the
+        # ServiceNotFound it is.
+        supports = (
+            hass.services.supports_response(domain, service)
+            if hass.services.has_service(domain, service)
+            else SupportsResponse.NONE
+        )
         wants_response = supports is not SupportsResponse.NONE
 
         response = await hass.services.async_call(
@@ -137,27 +147,31 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             blocking=True,
             return_response=wants_response,
         )
-    except Exception as e:
-        _LOGGER.error("Error calling service: %s", e)
-        return {"content": [{"type": "text", "text": f"Error calling service: {str(e)}"}]}
 
-    if wants_response and response is not None:
+        # An OPTIONAL service with nothing to say answers with an empty dict
+        # rather than None, as every script without a response variable does.
+        # That carries no more than the success message.
+        if wants_response and response:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(response, indent=2, cls=_HAJSONEncoder),
+                    }
+                ]
+            }
+
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": json.dumps(response, indent=2, cls=_HAJSONEncoder),
+                    "text": f"Successfully called {domain}.{service}",
                 }
             ]
         }
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": f"Successfully called {domain}.{service}",
-            }
-        ]
-    }
+    except Exception as e:
+        _LOGGER.error("Error calling service: %s", e)
+        return {"content": [{"type": "text", "text": f"Error calling service: {str(e)}"}]}
 
 
 @register_tool(

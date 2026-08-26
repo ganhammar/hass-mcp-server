@@ -58,6 +58,7 @@ class TestToolsEntities:
         # Most services return nothing; the ones that do are set per test. Left
         # as a bare Mock this would read as "returns a response" and every call
         # would ask for one.
+        hass.services.has_service = Mock(return_value=True)
         hass.services.supports_response = Mock(return_value=SupportsResponse.NONE)
         return hass
 
@@ -242,6 +243,113 @@ class TestToolsEntities:
         assert response.status == 200
         body = json.loads(response.body)
         assert "Successfully called" in body["result"]["content"][0]["text"]
+
+    async def test_post_tools_call_service_empty_response_reports_success(self, view, mock_hass):
+        """A script with no response variable answers {} and still reports success.
+
+        Scripts are SupportsResponse.OPTIONAL and script/__init__.py returns
+        `response or {}`, so every ordinary script call would otherwise render
+        as an empty dict instead of a confirmation.
+        """
+        mock_hass.services.supports_response = Mock(return_value=SupportsResponse.OPTIONAL)
+        mock_hass.services.async_call = AsyncMock(return_value={})
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "call_service",
+                    "arguments": {"domain": "script", "service": "bedtime"},
+                },
+                "id": 9,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert body["result"]["content"][0]["text"] == "Successfully called script.bedtime"
+
+    async def test_post_tools_call_service_unknown_service(self, view, mock_hass):
+        """An unknown service reports itself as not found.
+
+        Core's supports_response() subscripts the service registry directly and
+        raises KeyError for anything it does not hold, which would replace the
+        ServiceNotFound message with a bare "'light'" before async_call is ever
+        reached. This is the common failure mode for a model guessing a name,
+        so the useful part of the message has to survive.
+        """
+        registry = {"light": {"turn_on": SupportsResponse.NONE}}
+        mock_hass.services.has_service = Mock(
+            side_effect=lambda domain, service: service in registry.get(domain, {})
+        )
+        mock_hass.services.supports_response = Mock(
+            side_effect=lambda domain, service: registry[domain][service]
+        )
+        # Stands in for ServiceNotFound, whose __str__ resolves a translation
+        # against a live hass and so cannot be raised from a mock.
+        mock_hass.services.async_call = AsyncMock(
+            side_effect=Exception("Action light.no_such_service not found.")
+        )
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "call_service",
+                    "arguments": {"domain": "light", "service": "no_such_service"},
+                },
+                "id": 10,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        text = json.loads(response.body)["result"]["content"][0]["text"]
+        assert "light.no_such_service" in text
+        mock_hass.services.async_call.assert_called_once_with(
+            "light",
+            "no_such_service",
+            {},
+            blocking=True,
+            return_response=False,
+        )
+
+    async def test_post_tools_call_service_unserializable_response(self, view, mock_hass):
+        """A response the encoder cannot handle degrades to the error string."""
+        mock_hass.services.supports_response = Mock(return_value=SupportsResponse.ONLY)
+        mock_hass.services.async_call = AsyncMock(return_value={"handle": object()})
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "call_service",
+                    "arguments": {"domain": "custom", "service": "read"},
+                },
+                "id": 11,
+            }
+        )
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "Error calling service" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_service_error(self, view, mock_hass):
         """Test POST with tools/call for call_service that fails."""

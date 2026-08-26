@@ -557,7 +557,9 @@ Only `.py`, `.yaml`, `.yml`, and `.json` files can be created, written, or
 deleted. Backups are bounded by the AppDaemon root and can be pruned with
 `cleanup_appdaemon_backups`. This capability does not provide shell access or
 AppDaemon process control, but that does not reduce the code-execution risk of
-writing AppDaemon Python files.
+writing AppDaemon Python files. Existing files with other extensions are
+captured in backups but are reported as skipped during restore; they are never
+made writable by restore.
 </details>
 
 ## License

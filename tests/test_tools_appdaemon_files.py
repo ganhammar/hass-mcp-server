@@ -183,6 +183,29 @@ async def test_restore_rejects_reserved_backup_paths(
 
 
 @pytest.mark.asyncio
+async def test_restore_rejects_existing_destination_symlink(apps_root: Path, tmp_path: Path):
+    source = apps_root / "app.py"
+    source.write_text("snapshot")
+    stamp = _payload(await tools.backup_appdaemon_files(_hass(), {}))["backup"].split("/")[-1]
+    source.unlink()
+    outside = tmp_path / "outside.py"
+    outside.write_text("outside")
+    source.symlink_to(outside)
+    result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp})
+    assert "not a regular file" in result["content"][0]["text"]
+    assert source.is_symlink() and outside.read_text() == "outside"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_rejects_oversized_file_and_removes_partial_backup(apps_root: Path):
+    (apps_root / "large.py").write_bytes(b"x" * (tools._MAX_FILE_BYTES + 1))
+    result = await tools.backup_appdaemon_files(_hass(), {})
+    assert "too large" in result["content"][0]["text"]
+    backup_root = apps_root / tools._BACKUP_DIR_NAME
+    assert not backup_root.exists() or not any(backup_root.iterdir())
+
+
+@pytest.mark.asyncio
 async def test_cleanup_ignores_malformed_and_symlink_entries(apps_root: Path, tmp_path: Path):
     backup_root = apps_root / tools._BACKUP_DIR_NAME
     backup_root.mkdir()
@@ -214,6 +237,18 @@ async def test_restore_creates_pre_restore_backup(apps_root: Path):
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": backup}))
     assert result["success"] and file.read_text() == "original\n"
     assert (apps_root / result["pre_restore_backup"] / "solar.py").read_text() == "changed\n"
+
+
+@pytest.mark.asyncio
+async def test_restore_removes_new_allowlisted_files(apps_root: Path):
+    original = apps_root / "original.py"
+    original.write_text("original")
+    stamp = _payload(await tools.backup_appdaemon_files(_hass(), {}))["backup"].split("/")[-1]
+    (apps_root / "new.py").write_text("new executable")
+    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    assert result["success"]
+    assert result["removed"] == ["new.py"]
+    assert not (apps_root / "new.py").exists()
 
 
 @pytest.mark.asyncio

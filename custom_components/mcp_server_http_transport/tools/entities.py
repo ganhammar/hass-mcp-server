@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -110,7 +110,7 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
     annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Call a Home Assistant service."""
+    """Call a Home Assistant service, returning its response data when it has any."""
     domain = arguments["domain"]
     service = arguments["service"]
     entity_id = arguments.get("entity_id")
@@ -121,7 +121,46 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         service_data["entity_id"] = entity_id
 
     try:
-        await hass.services.async_call(domain, service, service_data, blocking=True)
+        # A service declared SupportsResponse.ONLY cannot be called at all
+        # without asking for its response: Home Assistant refuses the call
+        # rather than dropping the data. That covers whole categories of reads
+        # that only exist as services, among them calendar.get_events,
+        # todo.get_items, weather.get_forecasts and recorder.get_statistics.
+        # OPTIONAL services do run, but withhold what they were asked for.
+        #
+        # supports_response() subscripts the service registry directly and
+        # raises KeyError for anything the registry does not hold, despite a
+        # docstring promising NONE, so has_service() guards it. An unknown
+        # service then reaches async_call and is reported as the
+        # ServiceNotFound it is.
+        supports = (
+            hass.services.supports_response(domain, service)
+            if hass.services.has_service(domain, service)
+            else SupportsResponse.NONE
+        )
+        wants_response = supports is not SupportsResponse.NONE
+
+        response = await hass.services.async_call(
+            domain,
+            service,
+            service_data,
+            blocking=True,
+            return_response=wants_response,
+        )
+
+        # An OPTIONAL service with nothing to say answers with an empty dict
+        # rather than None, as every script without a response variable does.
+        # That carries no more than the success message.
+        if wants_response and response:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(response, indent=2, cls=_HAJSONEncoder),
+                    }
+                ]
+            }
+
         return {
             "content": [
                 {

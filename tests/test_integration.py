@@ -10,6 +10,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.core import SupportsResponse
 
 from custom_components.mcp_server_http_transport.http import MCPEndpointView
 
@@ -87,6 +88,10 @@ def populated_hass():
         "homeassistant": {"restart": Mock(), "reload_all": Mock()},
     }
     hass.services.async_call = AsyncMock()
+    # None of the services above return data. Left as a bare Mock this would read
+    # as "returns a response" and every call would ask for one.
+    hass.services.has_service = Mock(return_value=True)
+    hass.services.supports_response = Mock(return_value=SupportsResponse.NONE)
 
     # --- Config ---
     mock_units = Mock()
@@ -453,6 +458,7 @@ class TestMCPClientSession:
             "turn_on",
             {"brightness": 128, "transition": 2, "entity_id": "light.bedroom"},
             blocking=True,
+            return_response=False,
         )
 
     async def test_get_state_for_nonexistent_entity(self, view, mock_entity_registry):

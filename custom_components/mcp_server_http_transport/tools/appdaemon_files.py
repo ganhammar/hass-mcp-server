@@ -221,6 +221,48 @@ class _RootFS:
                 # Closing after replacement cannot undo the replacement.
                 raise _WriteFailure(exc, possibly_committed=committed) from exc
 
+    def copy(self, source: tuple[str, ...], target: tuple[str, ...]) -> None:
+        """Copy one regular file through rooted descriptors without retaining its contents."""
+        source_parent, source_name = self._parent(source)
+        target_parent, target_name = self._parent(target)
+        temp = f".{target_name}.mcp_tmp_{uuid.uuid4().hex}"
+        committed = False
+        replace_started = False
+        source_fd = -1
+        target_fd = -1
+        try:
+            source_fd = os.open(source_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=source_parent)
+            info = os.fstat(source_fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("File does not exist or is not regular")
+            target_fd = os.open(
+                temp,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                stat.S_IMODE(info.st_mode),
+                dir_fd=target_parent,
+            )
+            while block := os.read(source_fd, 131072):
+                view = memoryview(block)
+                while view:
+                    view = view[os.write(target_fd, view) :]
+            os.fchmod(target_fd, stat.S_IMODE(info.st_mode))
+            os.fsync(target_fd)
+            os.close(target_fd)
+            target_fd = -1
+            replace_started = True
+            os.replace(temp, target_name, src_dir_fd=target_parent, dst_dir_fd=target_parent)
+            committed = True
+        except Exception as exc:
+            try:
+                os.unlink(temp, dir_fd=target_parent)
+            except FileNotFoundError:
+                pass
+            raise _WriteFailure(exc, possibly_committed=committed or replace_started) from exc
+        finally:
+            for fd in (source_fd, target_fd, source_parent, target_parent):
+                if fd >= 0:
+                    os.close(fd)
+
     def unlink(self, parts: tuple[str, ...]) -> None:
         parent, name = self._parent(parts)
         try:
@@ -275,6 +317,43 @@ class _RootFS:
             os.close(fd)
         return result
 
+    def file_paths(
+        self,
+        start: tuple[str, ...] = (),
+        *,
+        include_backups: bool = False,
+    ) -> list[tuple[str, ...]]:
+        """Return regular-file paths without reading their contents."""
+        result: list[tuple[str, ...]] = []
+
+        def walk(fd: int, rel: tuple[str, ...]) -> None:
+            for name in sorted(os.listdir(fd)):
+                if not include_backups and not rel and name == _BACKUP_DIR_NAME:
+                    continue
+                try:
+                    info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                child = rel + (name,)
+                if stat.S_ISDIR(info.st_mode):
+                    try:
+                        child_fd = os.open(name, _DIR_FLAGS, dir_fd=fd)
+                    except OSError:
+                        continue
+                    try:
+                        walk(child_fd, child)
+                    finally:
+                        os.close(child_fd)
+                elif stat.S_ISREG(info.st_mode):
+                    result.append(child)
+
+        fd = self.dir(start)
+        try:
+            walk(fd, ())
+        finally:
+            os.close(fd)
+        return result
+
     def metadata(self) -> list[tuple[tuple[str, ...], int, str]]:
         result: list[tuple[tuple[str, ...], int, str]] = []
 
@@ -297,6 +376,7 @@ class _RootFS:
                     finally:
                         os.close(child_fd)
                 elif stat.S_ISREG(info.st_mode):
+                    child_fd = -1
                     try:
                         child_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
                         digest = hashlib.sha256()
@@ -324,12 +404,12 @@ class _RootFS:
         finally:
             os.close(base)
         saved: list[str] = []
-        for rel, data, mode in self.files(strict=True):
+        for rel in self.file_paths():
             target = (_BACKUP_DIR_NAME, stamp) + rel
             parent = target[:-1]
             directory = self.dir(parent, create=True)
             os.close(directory)
-            self.write(target, data, mode)
+            self.copy(rel, target)
             saved.append("/".join(rel))
         return stamp, saved
 
@@ -378,8 +458,17 @@ def _cleanup_snapshots(fs: _RootFS, older_than_days: int) -> dict[str, list[str]
         except ValueError:
             continue
         if timestamp < cutoff:
-            _remove_tree(fs, (_BACKUP_DIR_NAME, stamp))
-            deleted.append(stamp)
+            try:
+                snapshot_fd = fs.dir((_BACKUP_DIR_NAME, stamp))
+            except (FileNotFoundError, NotADirectoryError, OSError):
+                continue
+            else:
+                os.close(snapshot_fd)
+                try:
+                    _remove_tree(fs, (_BACKUP_DIR_NAME, stamp))
+                except (FileNotFoundError, NotADirectoryError, OSError):
+                    continue
+                deleted.append(stamp)
         else:
             kept.append(stamp)
     if not deleted and not kept:
@@ -392,28 +481,22 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
     # Opening this directory via no-follow is source validation at use time.
     source_fd = fs.dir(source_prefix)
     os.close(source_fd)
-    sources = fs.files(source_prefix, include_backups=True, strict=True)
-    if not sources:
+    source_paths = fs.file_paths(source_prefix, include_backups=True)
+    if not source_paths:
         # An empty snapshot is legitimate, but the timestamp must be a controlled directory.
         pass
-    planned = [(rel, data, mode) for rel, data, mode in sources]
-    if any(
-        Path(rel[-1]).suffix.lower() not in _WRITABLE_EXTENSIONS for rel, _data, _mode in planned
-    ):
-        raise ValueError("Backup contains a file extension that is not writable")
-    previous: dict[tuple[str, ...], tuple[bytes, int] | None] = {}
-    for rel, _data, _mode in planned:
-        try:
-            previous[rel] = fs.read(rel)
-        except FileNotFoundError:
-            previous[rel] = None
+    if any(_BACKUP_DIR_NAME in rel for rel in source_paths):
+        raise ValueError("Backup contains a reserved backup-directory path")
+    planned = [rel for rel in source_paths if Path(rel[-1]).suffix.lower() in _WRITABLE_EXTENSIONS]
+    skipped = [rel for rel in source_paths if rel not in planned]
     pre, _ = fs.snapshot()
     attempted: list[tuple[str, ...]] = []
     possibly_committed: list[tuple[str, ...]] = []
     try:
-        for rel, data, mode in planned:
+        for rel in planned:
             attempted.append(rel)
             try:
+                data, mode = fs.read(source_prefix + rel, limit=_MAX_FILE_BYTES)
                 parent = fs.dir(rel[:-1], create=True)
                 os.close(parent)
                 fs.write(rel, data, mode)
@@ -429,8 +512,9 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         rolled_back: list[str] = []
         for rel in reversed(possibly_committed):
             try:
-                old = previous[rel]
-                if old is None:
+                try:
+                    old = fs.read((_BACKUP_DIR_NAME, pre) + rel, limit=_MAX_FILE_BYTES)
+                except FileNotFoundError:
                     try:
                         fs.unlink(rel)
                     except FileNotFoundError:
@@ -452,6 +536,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
             "rolled_back_paths": rolled_back,
             "rollback_failed_paths": [item.split(":", 1)[0] for item in rollback_errors],
             "rollback_errors": rollback_errors,
+            "skipped": ["/".join(item) for item in skipped],
         }
     return {
         "success": True,
@@ -465,6 +550,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         "rolled_back_paths": [],
         "rollback_failed_paths": [],
         "restored": ["/".join(item) for item in attempted],
+        "skipped": ["/".join(item) for item in skipped],
     }
 
 
@@ -609,7 +695,7 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
     "backup_appdaemon_files",
     "Create a timestamped snapshot of AppDaemon app files.",
     {"type": "object", "properties": {}},
-    ANNOTATION_NON_IDEMPOTENT,
+    ANNOTATION_DESTRUCTIVE,
 )
 async def backup_appdaemon_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     if not _enabled(hass):

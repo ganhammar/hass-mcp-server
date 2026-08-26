@@ -129,6 +129,83 @@ async def test_cleanup_appdaemon_backups_removes_only_old_snapshots(apps_root: P
 
 
 @pytest.mark.asyncio
+async def test_snapshot_copies_incrementally_without_tree_byte_list(apps_root: Path, monkeypatch):
+    (apps_root / "one.py").write_text("one")
+    (apps_root / "two.py").write_text("two")
+    monkeypatch.setattr(
+        tools._RootFS,
+        "files",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("snapshot must not materialize the file tree")
+        ),
+    )
+    result = _payload(await tools.backup_appdaemon_files(_hass(), {}))
+    assert result["success"] and sorted(result["files"]) == ["one.py", "two.py"]
+
+
+@pytest.mark.asyncio
+async def test_restore_skips_unsupported_files_and_reports_them(apps_root: Path):
+    py_file = apps_root / "app.py"
+    text_file = apps_root / "README.md"
+    py_file.write_text("original")
+    text_file.write_text("original notes")
+    stamp = _payload(await tools.backup_appdaemon_files(_hass(), {}))["backup"].split("/")[-1]
+    py_file.write_text("changed")
+    text_file.write_text("changed notes")
+    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    assert result["success"]
+    assert result["restored"] == ["app.py"]
+    assert result["skipped"] == ["README.md"]
+    assert py_file.read_text() == "original"
+    assert text_file.read_text() == "changed notes"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reserved_path",
+    [
+        (".mcp_appdaemon_backups", "injected.py"),
+        ("foo", ".mcp_appdaemon_backups", "injected.py"),
+    ],
+)
+async def test_restore_rejects_reserved_backup_paths(
+    apps_root: Path, reserved_path: tuple[str, ...]
+):
+    stamp = "2020-01-01_00-00-00-000000"
+    target = apps_root / "safe.py"
+    target.write_text("safe")
+    injected = apps_root / tools._BACKUP_DIR_NAME / stamp / Path(*reserved_path)
+    injected.parent.mkdir(parents=True)
+    injected.write_text("bad")
+    result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp})
+    assert "reserved backup-directory path" in result["content"][0]["text"]
+    assert target.read_text() == "safe"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_ignores_malformed_and_symlink_entries(apps_root: Path, tmp_path: Path):
+    backup_root = apps_root / tools._BACKUP_DIR_NAME
+    backup_root.mkdir()
+    malformed = backup_root / "2020-01-01_00-00-00-000000"
+    malformed.write_text("not a directory")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (backup_root / "2020-01-02_00-00-00-000000").symlink_to(outside, target_is_directory=True)
+    result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
+    assert result["content"][0]["text"] == "No backups found"
+    assert malformed.exists() and (backup_root / "2020-01-02_00-00-00-000000").is_symlink()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_missing_or_empty_backup_root_is_safe(apps_root: Path):
+    result = await tools.cleanup_appdaemon_backups(_hass(), {})
+    assert result["content"][0]["text"] == "No backups found"
+    (apps_root / tools._BACKUP_DIR_NAME).mkdir()
+    result = await tools.cleanup_appdaemon_backups(_hass(), {})
+    assert result["content"][0]["text"] == "No backups found"
+
+
+@pytest.mark.asyncio
 async def test_restore_creates_pre_restore_backup(apps_root: Path):
     file = apps_root / "solar.py"
     file.write_text("original\n")
@@ -334,7 +411,9 @@ async def test_restore_symlink_swap_of_source_fails_before_mutation(
 
     monkeypatch.setattr(tools.os, "open", swap_open)
     result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp})
-    assert "Error restoring" in result["content"][0]["text"]
+    payload = _payload(result)
+    assert not payload["success"]
+    assert payload["possibly_committed_paths"] == []
     assert target.read_text() == "current\n" and outside.read_text() == "outside\n"
 
 

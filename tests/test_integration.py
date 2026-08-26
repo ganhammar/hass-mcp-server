@@ -249,7 +249,7 @@ class TestMCPClientSession:
         # Step 2: Discover tools
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 72
+        assert len(tool_names) == 78
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool

@@ -12,6 +12,7 @@ A Home Assistant Custom Component that provides an MCP (Model Context Protocol) 
 - 🏠 Full Home Assistant API access (entities, services, areas, devices, history, statistics)
 - 🔧 Easy HACS installation
 - 📝 CRUD management of automations, scenes, scripts, and helper entities (input_boolean, counter, timer, schedule, and more)
+- 🔍 Automation & script **traces** — inspect why a run fired, didn't fire, or took the wrong branch, step by step (read-only)
 - 📋 Lovelace dashboard management (list, get/save/delete config, create/update/delete dashboards) with outline reads and JSON Patch edits so a single card can be changed without resending the whole dashboard
 - 🩺 System administration tools (error log, config validation, restart, system status)
 - 📁 YAML config file management — read, write, delete files with automatic backup before every change and built-in config validation (opt-in)
@@ -112,6 +113,10 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `get_history` | Get state history of an entity over a time range |
 | `get_logbook` | Fetch logbook entries for an entity or time range |
 | `get_statistics` | Fetch long-term statistics (energy, climate) with configurable period |
+| `list_statistic_ids` | List statistic IDs and their metadata (source, unit, whether they carry a mean/sum) |
+| `validate_statistics` | Report statistics issues the recorder detected — the Developer Tools "Fix issues" list |
+| `adjust_statistics` | Correct a statistic's sum from a point in time onward (spike/bad reset); sum statistics only |
+| `clear_statistics` | Permanently delete a statistic's history so it can start clean (irreversible; requires `confirm=true`) |
 | `render_template` | Evaluate a Jinja2 template |
 
 **Automations, Scenes & Scripts**
@@ -133,6 +138,8 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `create_script` | Create a new script |
 | `update_script` | Update an existing script |
 | `delete_script` | Delete a script |
+| `list_traces` | List recent execution traces for an automation/script (or a whole domain), newest first |
+| `get_trace` | Get the full step-by-step execution trace of one run — which trigger fired, which conditions passed/failed, and the variables at each step (`summary=true` for an outline of large traces) |
 
 **Helpers**
 

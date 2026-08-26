@@ -5,6 +5,7 @@ import json
 import os
 import re
 import stat
+import threading
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -32,6 +33,7 @@ _MAX_FILE_BYTES = 1_048_576
 _DEFAULT_MODE = 0o640
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 _WRITABLE_EXTENSIONS = frozenset({".py", ".yaml", ".yml", ".json"})
+_APPDAEMON_LOCK = threading.RLock()
 
 
 def _disabled() -> dict[str, Any]:
@@ -186,7 +188,9 @@ class _RootFS:
         finally:
             os.close(parent)
 
-    def write(self, parts: tuple[str, ...], content: bytes, mode: int) -> None:
+    def write(
+        self, parts: tuple[str, ...], content: bytes, mode: int, *, require_regular: bool = False
+    ) -> None:
         parent, name = self._parent(parts)
         temp = f".{name}.mcp_tmp_{uuid.uuid4().hex}"
         committed = False
@@ -203,6 +207,14 @@ class _RootFS:
                 os.fsync(fd)
             finally:
                 os.close(fd)
+            if require_regular:
+                try:
+                    info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    if not stat.S_ISREG(info.st_mode):
+                        raise ValueError("Target is not a regular file")
             # rename replaces the directory entry, never the target of a symlink.
             replace_started = True
             os.replace(temp, name, src_dir_fd=parent, dst_dir_fd=parent)
@@ -357,6 +369,8 @@ class _RootFS:
                         os.close(child_fd)
                 elif stat.S_ISREG(info.st_mode):
                     result.append(child)
+                elif strict:
+                    raise ValueError("Encountered a non-regular file while traversing")
 
         fd = self.dir(start)
         try:
@@ -410,27 +424,28 @@ class _RootFS:
 
     def snapshot(self) -> tuple[str, list[str]]:
         base = self.dir((_BACKUP_DIR_NAME,), create=True)
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+        staging = f".{stamp}.mcp_staging_{uuid.uuid4().hex}"
         try:
-            stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-            os.mkdir(stamp, 0o750, dir_fd=base)
-        finally:
-            os.close(base)
-        saved: list[str] = []
-        try:
+            os.mkdir(staging, 0o750, dir_fd=base)
+            saved: list[str] = []
             for rel in self.file_paths(strict=True):
-                target = (_BACKUP_DIR_NAME, stamp) + rel
+                target = (_BACKUP_DIR_NAME, staging) + rel
                 parent = target[:-1]
                 directory = self.dir(parent, create=True)
                 os.close(directory)
                 self.copy(rel, target)
                 saved.append("/".join(rel))
+            os.replace(staging, stamp, src_dir_fd=base, dst_dir_fd=base)
+            return stamp, saved
         except Exception:
             try:
-                _remove_tree(self, (_BACKUP_DIR_NAME, stamp))
+                _remove_tree(self, (_BACKUP_DIR_NAME, staging))
             except OSError:
                 pass
             raise
-        return stamp, saved
+        finally:
+            os.close(base)
 
 
 def _backup_path(stamp: str) -> str:
@@ -535,7 +550,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
                 data, mode = fs.read(source_prefix + rel, limit=_MAX_FILE_BYTES)
                 parent = fs.dir(rel[:-1], create=True)
                 os.close(parent)
-                fs.write(rel, data, mode)
+                fs.write(rel, data, mode, require_regular=True)
             except _WriteFailure as exc:
                 if exc.possibly_committed:
                     possibly_committed.append(rel)
@@ -560,7 +575,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
                     except FileNotFoundError:
                         pass
                 else:
-                    fs.write(rel, old[0], old[1])
+                    fs.write(rel, old[0], old[1], require_regular=True)
                 rolled_back.append("/".join(rel))
             except Exception as rollback_error:  # explicit, never concealed
                 rollback_errors.append(f"{'/'.join(rel)}: {rollback_error}")
@@ -590,7 +605,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         "possibly_committed_paths": ["/".join(item) for item in possibly_committed],
         "rolled_back_paths": [],
         "rollback_failed_paths": [],
-        "restored": ["/".join(item) for item in attempted],
+        "restored": ["/".join(item) for item in planned],
         "skipped": ["/".join(item) for item in skipped],
         "removed": ["/".join(item) for item in remove_paths],
     }
@@ -675,13 +690,22 @@ async def save_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) ->
             raise ValueError("Content is too large (maximum 1 MB)")
 
         def work():
-            with _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
                 try:
                     before, mode = fs.read(parts, limit=_MAX_FILE_BYTES)
                 except FileNotFoundError:
                     before, mode = None, _DEFAULT_MODE
                 stamp, _ = fs.snapshot()
-                fs.write(parts, content, mode)
+                try:
+                    fs.write(parts, content, mode)
+                except _WriteFailure as exc:
+                    return {
+                        "success": False,
+                        "path": "/".join(parts),
+                        "backup": _backup_path(stamp),
+                        "mutation_result": f"failed: {exc}",
+                        "possibly_committed": exc.possibly_committed,
+                    }
                 return {
                     "success": True,
                     "path": "/".join(parts),
@@ -712,7 +736,7 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
         parts = _writable_parts(arguments["path"])
 
         def work():
-            with _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
                 before, _mode = fs.read(parts, limit=_MAX_FILE_BYTES)
                 stamp, _ = fs.snapshot()
                 fs.unlink(parts)
@@ -745,7 +769,7 @@ async def backup_appdaemon_files(hass: HomeAssistant, arguments: dict[str, Any])
     try:
 
         def work():
-            with _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
                 stamp, files = fs.snapshot()
                 return {"success": True, "backup": _backup_path(stamp), "files": files}
 
@@ -820,7 +844,7 @@ async def list_appdaemon_backups(hass: HomeAssistant, arguments: dict[str, Any])
             }
         },
     },
-    ANNOTATION_NON_IDEMPOTENT,
+    ANNOTATION_DESTRUCTIVE,
 )
 async def cleanup_appdaemon_backups(
     hass: HomeAssistant, arguments: dict[str, Any]
@@ -835,7 +859,7 @@ async def cleanup_appdaemon_backups(
     try:
 
         def work():
-            with _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
                 return _cleanup_snapshots(fs, older_than_days)
 
         result = await hass.async_add_executor_job(work)
@@ -870,7 +894,7 @@ async def restore_appdaemon_backup(
             raise ValueError("Invalid backup timestamp")
 
         def work():
-            with _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
                 return _restore(fs, timestamp)
 
         return {

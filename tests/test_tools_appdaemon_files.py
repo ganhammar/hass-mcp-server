@@ -192,7 +192,7 @@ async def test_restore_rejects_existing_destination_symlink(apps_root: Path, tmp
     outside.write_text("outside")
     source.symlink_to(outside)
     result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp})
-    assert "not a regular file" in result["content"][0]["text"]
+    assert "non-regular file" in result["content"][0]["text"]
     assert source.is_symlink() and outside.read_text() == "outside"
 
 
@@ -475,12 +475,12 @@ async def test_restore_failure_rolls_back_modified_targets(apps_root: Path, monk
     original_write = tools._RootFS.write
     failed = False
 
-    def fail_second(self, parts, content, mode):
+    def fail_second(self, parts, content, mode, **kwargs):
         nonlocal failed
         if parts == ("two.py",) and not failed:
             failed = True
             raise OSError("injected mutation failure")
-        return original_write(self, parts, content, mode)
+        return original_write(self, parts, content, mode, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "write", fail_second)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
@@ -506,12 +506,12 @@ async def test_restore_failure_removes_file_that_was_previously_absent(
     original_write = tools._RootFS.write
     failed = False
 
-    def fail_second(self, parts, content, mode):
+    def fail_second(self, parts, content, mode, **kwargs):
         nonlocal failed
         if parts == ("two.py",) and not failed:
             failed = True
             raise OSError("injected mutation failure")
-        return original_write(self, parts, content, mode)
+        return original_write(self, parts, content, mode, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "write", fail_second)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
@@ -595,14 +595,14 @@ async def test_restore_destination_component_swap_fails_without_external_write(
     victim.write_text("external\n")
     original_write, swapped = tools._RootFS.write, False
 
-    def swap_before_destination_write(self, parts, content, mode):
+    def swap_before_destination_write(self, parts, content, mode, **kwargs):
         nonlocal swapped
         if parts == ("nested", "app.py") and not swapped:
             swapped = True
             target.unlink()
             nested.rmdir()
             nested.symlink_to(outside, target_is_directory=True)
-        return original_write(self, parts, content, mode)
+        return original_write(self, parts, content, mode, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "write", swap_before_destination_write)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
@@ -622,14 +622,14 @@ async def test_restore_reports_rollback_failure(apps_root: Path, monkeypatch):
     two.write_text("new two\n")
     original_write, calls = tools._RootFS.write, []
 
-    def fail_mutation_and_rollback(self, parts, content, mode):
+    def fail_mutation_and_rollback(self, parts, content, mode, **kwargs):
         if parts == ("two.py",):
             raise OSError("mutation failure")
         if parts == ("one.py",) and calls:
             raise OSError("rollback failure")
         if parts == ("one.py",):
             calls.append(parts)
-        return original_write(self, parts, content, mode)
+        return original_write(self, parts, content, mode, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "write", fail_mutation_and_rollback)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))

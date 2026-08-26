@@ -19,6 +19,10 @@ from . import (
 _LOGGER = logging.getLogger(__name__)
 
 _VALID_PERIODS = {"5minute", "hour", "day", "week", "month"}
+
+# Row keys asked of recorder.get_statistics. The service requires the list
+# explicitly; get_statistics shapes the rows down to these plus start and end.
+_STATISTIC_TYPES = ["mean", "min", "max", "sum", "state"]
 _VALID_STATISTIC_TYPES = {"mean", "sum"}
 
 # clear_statistics posts a job to the recorder's queue and does not block; we wait
@@ -63,9 +67,6 @@ _CLEAR_STATISTICS_TIMEOUT = 10
 )
 async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Fetch long-term statistics for an entity."""
-    from homeassistant.components.recorder import get_instance
-    from homeassistant.components.recorder.statistics import statistics_during_period
-
     entity_id = arguments["entity_id"]
     start_time = dt.fromisoformat(arguments["start_time"])
     end_time_str = arguments.get("end_time")
@@ -86,18 +87,25 @@ async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
         }
 
     try:
-        stats = await get_instance(hass).async_add_executor_job(
-            statistics_during_period,
-            hass,
-            start_time,
-            end_time,
-            {entity_id},
-            period,
-            None,
-            {"mean", "min", "max", "sum", "state"},
+        # recorder.get_statistics is the supported way in. It is declared
+        # SupportsResponse.ONLY and keys its response by statistic ID, the same
+        # shape statistics_during_period returns, with start and end already
+        # rendered as ISO strings rather than epoch floats.
+        stats = await hass.services.async_call(
+            "recorder",
+            "get_statistics",
+            {
+                "start_time": start_time,
+                "end_time": end_time,
+                "statistic_ids": [entity_id],
+                "period": period,
+                "types": _STATISTIC_TYPES,
+            },
+            blocking=True,
+            return_response=True,
         )
 
-        entity_stats = stats.get(entity_id, [])
+        entity_stats = (stats or {}).get(entity_id, [])
         result = []
         for stat in entity_stats:
             entry = {}

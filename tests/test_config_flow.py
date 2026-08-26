@@ -13,6 +13,7 @@ from custom_components.mcp_server_http_transport.config_flow import (
 )
 from custom_components.mcp_server_http_transport.const import (
     CONF_APPDAEMON_APPS_ROOT,
+    CONF_APPDAEMON_FILE_ACCESS,
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
@@ -81,11 +82,31 @@ class TestMCPServerConfigFlow:
         flow.hass = mock_hass
 
         result = await flow.async_step_user(
-            user_input={CONF_NATIVE_AUTH: True, CONF_APPDAEMON_APPS_ROOT: "/config/apps"}
+            user_input={
+                CONF_NATIVE_AUTH: True,
+                CONF_APPDAEMON_FILE_ACCESS: True,
+                CONF_APPDAEMON_APPS_ROOT: "/config/apps",
+            }
         )
 
         assert result["type"] == data_entry_flow.FlowResultType.FORM
-        assert result["errors"]["base"] == "invalid_appdaemon_apps_root"
+        assert result["errors"][CONF_APPDAEMON_APPS_ROOT] == "invalid_appdaemon_apps_root"
+
+    async def test_user_flow_ignores_invalid_appdaemon_root_when_disabled(self):
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=[])
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(
+            user_input={
+                CONF_NATIVE_AUTH: True,
+                CONF_APPDAEMON_FILE_ACCESS: False,
+                CONF_APPDAEMON_APPS_ROOT: "/config/apps",
+            }
+        )
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
 
     async def test_user_flow_schema_is_home_assistant_serializable(self):
         """The frontend can render the user-flow schema."""
@@ -306,21 +327,40 @@ class TestMCPServerOptionsFlow:
     async def test_init_step_rejects_invalid_root_without_updating_entry(self):
         """Invalid roots are rejected before config-entry mutation."""
         flow = self._create_flow(
-            data={CONF_NATIVE_AUTH: True, CONF_APPDAEMON_APPS_ROOT: DEFAULT_APPDAEMON_APPS_ROOT}
+            data={
+                CONF_NATIVE_AUTH: True,
+                CONF_APPDAEMON_FILE_ACCESS: True,
+                CONF_APPDAEMON_APPS_ROOT: DEFAULT_APPDAEMON_APPS_ROOT,
+            }
         )
 
         result = await flow.async_step_init(
-            user_input={CONF_NATIVE_AUTH: True, CONF_APPDAEMON_APPS_ROOT: "/share/../config"}
+            user_input={
+                CONF_NATIVE_AUTH: True,
+                CONF_APPDAEMON_FILE_ACCESS: True,
+                CONF_APPDAEMON_APPS_ROOT: "/share/../config",
+            }
         )
 
         assert result["type"] == data_entry_flow.FlowResultType.FORM
-        assert result["errors"]["base"] == "invalid_appdaemon_apps_root"
+        assert result["errors"][CONF_APPDAEMON_APPS_ROOT] == "invalid_appdaemon_apps_root"
         assert result["data_schema"].schema
         root_key = next(
             key for key in result["data_schema"].schema if str(key) == CONF_APPDAEMON_APPS_ROOT
         )
         assert root_key.default() == "/share/../config"
         flow.hass.config_entries.async_update_entry.assert_not_called()
+
+    async def test_init_step_ignores_invalid_appdaemon_root_when_disabled(self):
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True, CONF_APPDAEMON_FILE_ACCESS: False})
+        result = await flow.async_step_init(
+            user_input={
+                CONF_NATIVE_AUTH: True,
+                CONF_APPDAEMON_FILE_ACCESS: False,
+                CONF_APPDAEMON_APPS_ROOT: "/config/apps",
+            }
+        )
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
 
     @pytest.mark.parametrize(
         "root",

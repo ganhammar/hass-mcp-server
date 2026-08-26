@@ -6,7 +6,7 @@ import os
 import re
 import stat
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,7 @@ _BACKUP_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d+$")
 _MAX_FILE_BYTES = 1_048_576
 _DEFAULT_MODE = 0o640
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+_WRITABLE_EXTENSIONS = frozenset({".py", ".yaml", ".yml", ".json"})
 
 
 def _disabled() -> dict[str, Any]:
@@ -79,6 +80,13 @@ def _parts(value: str, *, allow_backup: bool = False) -> tuple[str, ...]:
         raise ValueError("Path contains an invalid component")
     if not allow_backup and _BACKUP_DIR_NAME in parts:
         raise ValueError("Backup snapshots are managed; use list/restore AppDaemon backups")
+    return parts
+
+
+def _writable_parts(value: str) -> tuple[str, ...]:
+    parts = _parts(value)
+    if Path(parts[-1]).suffix.lower() not in _WRITABLE_EXTENSIONS:
+        raise ValueError("Only .py, .yaml, .yml, and .json files may be written or deleted")
     return parts
 
 
@@ -152,15 +160,15 @@ class _RootFS:
                 info = os.fstat(fd)
                 if not stat.S_ISREG(info.st_mode):
                     raise ValueError("File does not exist or is not regular")
-                data = b""
+                data = bytearray()
                 while True:
                     block = os.read(fd, 131072)
                     if not block:
                         break
-                    data += block
+                    data.extend(block)
                     if limit is not None and len(data) > limit:
                         raise ValueError("File is too large (maximum 1 MB)")
-                return data, stat.S_IMODE(info.st_mode)
+                return bytes(data), stat.S_IMODE(info.st_mode)
             finally:
                 os.close(fd)
         finally:
@@ -214,10 +222,11 @@ class _RootFS:
                 raise _WriteFailure(exc, possibly_committed=committed) from exc
 
     def unlink(self, parts: tuple[str, ...]) -> None:
-        # Read through O_NOFOLLOW first, then unlink only the in-root entry.
-        self.read(parts)
         parent, name = self._parent(parts)
         try:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("File does not exist or is not regular")
             os.unlink(name, dir_fd=parent)
         finally:
             os.close(parent)
@@ -250,6 +259,7 @@ class _RootFS:
                     finally:
                         os.close(child_fd)
                 elif stat.S_ISREG(info.st_mode):
+                    child_fd = -1
                     try:
                         data, mode = self.read(start + child)
                     except (FileNotFoundError, OSError, ValueError):
@@ -259,6 +269,47 @@ class _RootFS:
                     result.append((child, data, mode))
 
         fd = self.dir(start)
+        try:
+            walk(fd, ())
+        finally:
+            os.close(fd)
+        return result
+
+    def metadata(self) -> list[tuple[tuple[str, ...], int, str]]:
+        result: list[tuple[tuple[str, ...], int, str]] = []
+
+        def walk(fd: int, rel: tuple[str, ...]) -> None:
+            for name in sorted(os.listdir(fd)):
+                if not rel and name == _BACKUP_DIR_NAME:
+                    continue
+                try:
+                    info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                child = rel + (name,)
+                if stat.S_ISDIR(info.st_mode):
+                    try:
+                        child_fd = os.open(name, _DIR_FLAGS, dir_fd=fd)
+                    except OSError:
+                        continue
+                    try:
+                        walk(child_fd, child)
+                    finally:
+                        os.close(child_fd)
+                elif stat.S_ISREG(info.st_mode):
+                    try:
+                        child_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+                        digest = hashlib.sha256()
+                        while block := os.read(child_fd, 131072):
+                            digest.update(block)
+                    except (FileNotFoundError, OSError):
+                        continue
+                    finally:
+                        if child_fd >= 0:
+                            os.close(child_fd)
+                    result.append((child, info.st_size, digest.hexdigest()))
+
+        fd = self.dir(())
         try:
             walk(fd, ())
         finally:
@@ -287,6 +338,55 @@ def _backup_path(stamp: str) -> str:
     return f"{_BACKUP_DIR_NAME}/{stamp}"
 
 
+def _remove_tree(fs: _RootFS, parts: tuple[str, ...]) -> None:
+    """Remove a snapshot using only descriptors rooted below the AppDaemon root."""
+    directory = fs.dir(parts)
+    try:
+        for name in os.listdir(directory):
+            child = parts + (name,)
+            info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                _remove_tree(fs, child)
+            else:
+                os.unlink(name, dir_fd=directory)
+    finally:
+        os.close(directory)
+    parent = fs.dir(parts[:-1])
+    try:
+        os.rmdir(parts[-1], dir_fd=parent)
+    finally:
+        os.close(parent)
+
+
+def _cleanup_snapshots(fs: _RootFS, older_than_days: int) -> dict[str, list[str]] | None:
+    try:
+        base = fs.dir((_BACKUP_DIR_NAME,))
+    except FileNotFoundError:
+        return None
+    cutoff = datetime.now() - timedelta(days=older_than_days)
+    deleted: list[str] = []
+    kept: list[str] = []
+    try:
+        names = os.listdir(base)
+    finally:
+        os.close(base)
+    for stamp in names:
+        if not _BACKUP_TS_RE.fullmatch(stamp):
+            continue
+        try:
+            timestamp = datetime.strptime(stamp, "%Y-%m-%d_%H-%M-%S-%f")
+        except ValueError:
+            continue
+        if timestamp < cutoff:
+            _remove_tree(fs, (_BACKUP_DIR_NAME, stamp))
+            deleted.append(stamp)
+        else:
+            kept.append(stamp)
+    if not deleted and not kept:
+        return None
+    return {"deleted": deleted, "kept": kept}
+
+
 def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
     source_prefix = (_BACKUP_DIR_NAME, timestamp)
     # Opening this directory via no-follow is source validation at use time.
@@ -297,15 +397,16 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         # An empty snapshot is legitimate, but the timestamp must be a controlled directory.
         pass
     planned = [(rel, data, mode) for rel, data, mode in sources]
+    if any(
+        Path(rel[-1]).suffix.lower() not in _WRITABLE_EXTENSIONS for rel, _data, _mode in planned
+    ):
+        raise ValueError("Backup contains a file extension that is not writable")
     previous: dict[tuple[str, ...], tuple[bytes, int] | None] = {}
     for rel, _data, _mode in planned:
         try:
             previous[rel] = fs.read(rel)
         except FileNotFoundError:
             previous[rel] = None
-        # Ensure every existing intermediate directory is opened no-follow before mutation.
-        parent = fs.dir(rel[:-1])
-        os.close(parent)
     pre, _ = fs.snapshot()
     attempted: list[tuple[str, ...]] = []
     possibly_committed: list[tuple[str, ...]] = []
@@ -313,6 +414,8 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         for rel, data, mode in planned:
             attempted.append(rel)
             try:
+                parent = fs.dir(rel[:-1], create=True)
+                os.close(parent)
                 fs.write(rel, data, mode)
             except _WriteFailure as exc:
                 if exc.possibly_committed:
@@ -379,8 +482,8 @@ async def list_appdaemon_files(hass: HomeAssistant, arguments: dict[str, Any]) -
         def work():
             with _RootFS(_root(hass)) as fs:
                 return [
-                    {"path": "/".join(rel), "size": len(data), "sha256": _sha(data)}
-                    for rel, data, _mode in fs.files()
+                    {"path": "/".join(rel), "size": size, "sha256": digest}
+                    for rel, size, digest in fs.metadata()
                 ]
 
         return {
@@ -439,7 +542,7 @@ async def save_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) ->
     if not _enabled(hass):
         return _disabled()
     try:
-        parts, content = _parts(arguments["path"]), arguments["content"].encode("utf-8")
+        parts, content = _writable_parts(arguments["path"]), arguments["content"].encode("utf-8")
         if len(content) > _MAX_FILE_BYTES:
             raise ValueError("Content is too large (maximum 1 MB)")
 
@@ -478,7 +581,7 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
     if not _enabled(hass):
         return _disabled()
     try:
-        parts = _parts(arguments["path"])
+        parts = _writable_parts(arguments["path"])
 
         def work():
             with _RootFS(_root(hass)) as fs:
@@ -575,6 +678,48 @@ async def list_appdaemon_backups(hass: HomeAssistant, arguments: dict[str, Any])
         }
     except Exception as exc:
         return _error("listing AppDaemon backups", exc)
+
+
+@register_tool(
+    "cleanup_appdaemon_backups",
+    "Delete AppDaemon rollback snapshots older than a given number of days (default 30).",
+    {
+        "type": "object",
+        "properties": {
+            "older_than_days": {
+                "type": "integer",
+                "description": "Delete backups older than this many days (default: 30, minimum: 1)",
+            }
+        },
+    },
+    ANNOTATION_DESTRUCTIVE,
+)
+async def cleanup_appdaemon_backups(
+    hass: HomeAssistant, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    if not _enabled(hass):
+        return _disabled()
+    older_than_days = arguments.get("older_than_days", 30)
+    if not isinstance(older_than_days, int) or older_than_days < 1:
+        return _error(
+            "cleaning up AppDaemon backups", ValueError("older_than_days must be an integer >= 1")
+        )
+    try:
+
+        def work():
+            with _RootFS(_root(hass)) as fs:
+                return _cleanup_snapshots(fs, older_than_days)
+
+        result = await hass.async_add_executor_job(work)
+        if result is None:
+            return {"content": [{"type": "text", "text": "No backups found"}]}
+        deleted, kept = result["deleted"], result["kept"]
+        lines = [f"Deleted {len(deleted)} backup(s) older than {older_than_days} day(s)."]
+        lines.extend(f"  - {name}" for name in sorted(deleted))
+        lines.append(f"{len(kept)} backup(s) remaining.")
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+    except Exception as exc:
+        return _error("cleaning up AppDaemon backups", exc)
 
 
 @register_tool(

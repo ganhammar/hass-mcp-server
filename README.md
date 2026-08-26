@@ -175,6 +175,7 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `delete_appdaemon_file` | Delete one AppDaemon app file after creating a rollback snapshot |
 | `backup_appdaemon_files` | Create a controlled snapshot of the AppDaemon apps tree |
 | `list_appdaemon_backups` | List available AppDaemon snapshots |
+| `cleanup_appdaemon_backups` | Delete AppDaemon snapshots older than N days (default 30) |
 | `restore_appdaemon_backup` | Restore a named AppDaemon snapshot with rollback protection |
 
 **Dashboards**
@@ -537,9 +538,11 @@ Some tools use internal Home Assistant APIs that are not publicly exposed and ma
 <details>
 <summary>How does bounded AppDaemon app-file access work?</summary>
 
-AppDaemon file access is disabled by default and is independent of shell or
-add-on process control. Enable it only after reviewing the contents and
-secrets of the apps tree. The `appdaemon_apps_root` option defaults to the
+AppDaemon file access is disabled by default. Enabling write access allows an
+AI/MCP client to modify executable AppDaemon Python code, granting
+code-execution-equivalent capability inside the AppDaemon environment and
+whatever Home Assistant API access AppDaemon has. Enable it only after
+reviewing the contents and secrets of the apps tree. The `appdaemon_apps_root` option defaults to the
 legacy AppDaemon private apps path, `/addon_configs/a0d7b954_appdaemon/apps`,
 for compatibility. On installations where Home Assistant Core cannot see an
 add-on-private mount, configure the AppDaemon add-on and this integration to
@@ -550,7 +553,11 @@ Absolute paths, malformed components, `..` traversal, symlink components, and
 paths escaping the configured root are rejected. All list, read, save, delete,
 backup, and restore operations use the same validated root. Mutating operations
 create controlled snapshots, and saves use atomic replacement where supported.
-This capability does not provide shell access or restart/process control.
+Only `.py`, `.yaml`, `.yml`, and `.json` files can be created, written, or
+deleted. Backups are bounded by the AppDaemon root and can be pruned with
+`cleanup_appdaemon_backups`. This capability does not provide shell access or
+AppDaemon process control, but that does not reduce the code-execution risk of
+writing AppDaemon Python files.
 </details>
 
 ## License

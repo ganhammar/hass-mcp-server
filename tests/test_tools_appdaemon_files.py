@@ -90,6 +90,45 @@ async def test_delete_creates_backup_and_reports_hash(apps_root: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("extension", [".py", ".yaml", ".yml", ".json"])
+async def test_writable_appdaemon_extensions_are_allowed(apps_root: Path, extension: str):
+    result = _payload(
+        await tools.save_appdaemon_file(_hass(), {"path": f"app{extension}", "content": "x"})
+    )
+    assert result["success"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extension", [".txt", ".sh", ".md", ""])
+async def test_non_appdaemon_extensions_are_rejected_for_writes(apps_root: Path, extension: str):
+    result = await tools.save_appdaemon_file(_hass(), {"path": f"app{extension}", "content": "x"})
+    assert "Only .py, .yaml, .yml, and .json" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_non_appdaemon_extensions_are_rejected_for_deletes(apps_root: Path):
+    target = apps_root / "notes.txt"
+    target.write_text("keep")
+    result = await tools.delete_appdaemon_file(_hass(), {"path": "notes.txt"})
+    assert "Only .py, .yaml, .yml, and .json" in result["content"][0]["text"]
+    assert target.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_appdaemon_backups_removes_only_old_snapshots(apps_root: Path):
+    backup_root = apps_root / tools._BACKUP_DIR_NAME
+    backup_root.mkdir()
+    old = backup_root / "2020-01-01_00-00-00-000000"
+    new = backup_root / "2099-01-01_00-00-00-000000"
+    (old / "nested").mkdir(parents=True)
+    (old / "nested" / "app.py").write_text("old")
+    new.mkdir()
+    result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
+    assert "Deleted 1 backup(s)" in result["content"][0]["text"]
+    assert not old.exists() and new.exists()
+
+
+@pytest.mark.asyncio
 async def test_restore_creates_pre_restore_backup(apps_root: Path):
     file = apps_root / "solar.py"
     file.write_text("original\n")
@@ -98,6 +137,20 @@ async def test_restore_creates_pre_restore_backup(apps_root: Path):
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": backup}))
     assert result["success"] and file.read_text() == "original\n"
     assert (apps_root / result["pre_restore_backup"] / "solar.py").read_text() == "changed\n"
+
+
+@pytest.mark.asyncio
+async def test_restore_recreates_deleted_snapshot_subdirectory(apps_root: Path):
+    file = apps_root / "some" / "subdirectory" / "file.py"
+    file.parent.mkdir(parents=True)
+    file.write_text("original\n")
+    stamp = _payload(await tools.backup_appdaemon_files(_hass(), {}))["backup"].split("/")[-1]
+    file.unlink()
+    file.parent.rmdir()
+    file.parent.parent.rmdir()
+    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    assert result["success"]
+    assert file.read_text() == "original\n"
 
 
 @pytest.mark.asyncio

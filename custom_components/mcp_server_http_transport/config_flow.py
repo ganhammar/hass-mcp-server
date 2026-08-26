@@ -53,12 +53,13 @@ class MCPServerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
             native_auth = user_input.get(CONF_NATIVE_AUTH, False)
 
-            try:
-                validate_appdaemon_apps_root(
-                    user_input.get(CONF_APPDAEMON_APPS_ROOT, DEFAULT_APPDAEMON_APPS_ROOT)
-                )
-            except ValueError:
-                errors["base"] = "invalid_appdaemon_apps_root"
+            if user_input.get(CONF_APPDAEMON_FILE_ACCESS, False):
+                try:
+                    validate_appdaemon_apps_root(
+                        user_input.get(CONF_APPDAEMON_APPS_ROOT, DEFAULT_APPDAEMON_APPS_ROOT)
+                    )
+                except ValueError:
+                    errors[CONF_APPDAEMON_APPS_ROOT] = "invalid_appdaemon_apps_root"
 
             # OIDC provider is only required when native auth is disabled
             if errors:
@@ -112,10 +113,14 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
             submitted_appdaemon_apps_root = user_input.get(
                 CONF_APPDAEMON_APPS_ROOT, current_appdaemon_apps_root
             )
-            try:
-                validate_appdaemon_apps_root(submitted_appdaemon_apps_root)
-            except ValueError:
-                errors["base"] = "invalid_appdaemon_apps_root"
+            submitted_appdaemon_file_access = user_input.get(
+                CONF_APPDAEMON_FILE_ACCESS, current_appdaemon_file_access
+            )
+            if submitted_appdaemon_file_access:
+                try:
+                    validate_appdaemon_apps_root(submitted_appdaemon_apps_root)
+                except ValueError:
+                    errors[CONF_APPDAEMON_APPS_ROOT] = "invalid_appdaemon_apps_root"
 
             native_auth = user_input.get(CONF_NATIVE_AUTH, False)
 

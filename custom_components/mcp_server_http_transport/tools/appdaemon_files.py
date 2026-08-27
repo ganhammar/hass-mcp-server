@@ -281,7 +281,12 @@ class _RootFS:
                 raise _WriteFailure(exc, possibly_committed=committed) from exc
 
     def copy(self, source: tuple[str, ...], target: tuple[str, ...]) -> None:
-        """Copy one regular file through rooted descriptors without retaining its contents."""
+        """Copy one regular file through rooted descriptors without retaining its contents.
+
+        Backup copies deliberately have no MCP payload-size limit. The copy is still
+        bounded by one fixed-size block and is committed only after source identity,
+        size, and timestamps remain stable.
+        """
         source_parent = target_parent = -1
         source_fd = target_fd = -1
         committed = False
@@ -294,8 +299,6 @@ class _RootFS:
             info = os.fstat(source_fd)
             if not stat.S_ISREG(info.st_mode):
                 raise ValueError("File does not exist or is not regular")
-            if info.st_size > _MAX_FILE_BYTES:
-                raise ValueError("File is too large (maximum 1 MB)")
             target_fd = os.open(
                 temp,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -305,8 +308,6 @@ class _RootFS:
             copied = 0
             while block := os.read(source_fd, 131072):
                 copied += len(block)
-                if copied > _MAX_FILE_BYTES:
-                    raise ValueError("File is too large (maximum 1 MB)")
                 view = memoryview(block)
                 while view:
                     view = view[os.write(target_fd, view) :]
@@ -672,10 +673,9 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
             try:
                 if fs.regular_signature(rel) != target_signatures[rel]:
                     raise ValueError(f"Restore target changed: {'/'.join(rel)}")
-                data, mode = fs.read(source_prefix + rel, limit=_MAX_FILE_BYTES)
                 parent = fs.dir(rel[:-1], create=True)
                 os.close(parent)
-                fs.write(rel, data, mode, require_regular=True)
+                fs.copy(source_prefix + rel, rel)
             except _WriteFailure as exc:
                 if exc.possibly_committed:
                     possibly_committed.append(rel)
@@ -705,15 +705,14 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
                 expected = None if rel in remove_signatures else target_signatures[rel]
                 if fs.regular_signature(rel) != expected:
                     raise ValueError(f"Rollback target changed: {'/'.join(rel)}")
-                try:
-                    old = fs.read((_BACKUP_DIR_NAME, pre) + rel, limit=_MAX_FILE_BYTES)
-                except FileNotFoundError:
+                old = fs.regular_signature((_BACKUP_DIR_NAME, pre) + rel)
+                if old is None:
                     try:
                         fs.unlink(rel)
                     except FileNotFoundError:
                         pass
                 else:
-                    fs.write(rel, old[0], old[1], require_regular=True)
+                    fs.copy((_BACKUP_DIR_NAME, pre) + rel, rel)
                 rolled_back.append("/".join(rel))
             except Exception as rollback_error:  # explicit, never concealed
                 rollback_errors.append(f"{'/'.join(rel)}: {rollback_error}")
@@ -841,7 +840,7 @@ async def save_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) ->
         def work():
             with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
                 try:
-                    sha_before, mode = fs.hash_regular(parts, limit=_MAX_FILE_BYTES)
+                    sha_before, mode = fs.hash_regular(parts)
                 except FileNotFoundError:
                     sha_before, mode = None, _DEFAULT_MODE
                 stamp, _ = fs.snapshot()
@@ -886,7 +885,7 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
 
         def work():
             with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
-                sha_before, _mode = fs.hash_regular(parts, limit=_MAX_FILE_BYTES)
+                sha_before, _mode = fs.hash_regular(parts)
                 stamp, _ = fs.snapshot()
                 fs.unlink(parts)
                 return {

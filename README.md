@@ -178,6 +178,12 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 | `cleanup_appdaemon_backups` | Delete AppDaemon snapshots older than N days (default 30) |
 | `restore_appdaemon_backup` | Restore a named AppDaemon snapshot with rollback protection |
 
+AppDaemon file reads and save payloads are limited to 1 MB. Rollback snapshots
+use a separate streaming-copy path with bounded memory and no per-file payload
+limit, so an existing large history/data file does not make an unrelated save
+or delete unusable. A snapshot is published only after every regular file has
+been copied and source identity/metadata checked for changes during copying.
+
 **Dashboards**
 
 | Tool | Description |

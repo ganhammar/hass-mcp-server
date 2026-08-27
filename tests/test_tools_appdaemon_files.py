@@ -1,6 +1,7 @@
 """Security and lifecycle tests for bounded AppDaemon file access."""
 
 import json
+import tracemalloc
 from hashlib import sha256
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -204,12 +205,51 @@ async def test_restore_rejects_existing_destination_symlink(apps_root: Path, tmp
 
 
 @pytest.mark.asyncio
-async def test_snapshot_rejects_oversized_file_and_removes_partial_backup(apps_root: Path):
-    (apps_root / "large.py").write_bytes(b"x" * (tools._MAX_FILE_BYTES + 1))
-    result = await tools.backup_appdaemon_files(_hass(), {})
-    assert "too large" in result["content"][0]["text"]
-    backup_root = apps_root / tools._BACKUP_DIR_NAME
-    assert not backup_root.exists() or not any(backup_root.iterdir())
+async def test_large_unrelated_file_does_not_block_small_save_and_restore(apps_root: Path):
+    large = apps_root / "history.json"
+    target = apps_root / "small.py"
+    large_bytes = (b"0123456789abcdef" * 131072) + b"!"
+    large.write_bytes(large_bytes)
+    target.write_text("old\n")
+
+    tracemalloc.start()
+    try:
+        result = _payload(
+            await tools.save_appdaemon_file(
+                _hass(), {"path": "small.py", "content": "new\n"}
+            )
+        )
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result["success"] and target.read_text() == "new\n"
+    assert peak < 4 * 131072
+    backup_file = apps_root / result["backup"] / "history.json"
+    assert backup_file.stat().st_size == len(large_bytes)
+    assert backup_file.read_bytes() == large_bytes
+
+    target.write_text("changed\n")
+    restored = _payload(
+        await tools.restore_appdaemon_backup(
+            _hass(), {"timestamp": result["backup"].split("/")[-1]}
+        )
+    )
+    assert restored["success"]
+    assert target.read_text() == "old\n" and large.read_bytes() == large_bytes
+
+
+@pytest.mark.asyncio
+async def test_large_unrelated_file_does_not_block_small_delete(apps_root: Path):
+    large = apps_root / "history.json"
+    target = apps_root / "small.py"
+    large_bytes = b"x" * (tools._MAX_FILE_BYTES + 1)
+    large.write_bytes(large_bytes)
+    target.write_text("delete me\n")
+
+    result = _payload(await tools.delete_appdaemon_file(_hass(), {"path": "small.py"}))
+
+    assert result["success"] and not target.exists()
+    assert (apps_root / result["backup"] / "history.json").read_bytes() == large_bytes
 
 
 @pytest.mark.asyncio
@@ -504,17 +544,17 @@ async def test_restore_failure_rolls_back_modified_targets(apps_root: Path, monk
     stamp = _payload(await tools.backup_appdaemon_files(_hass(), {}))["backup"].split("/")[-1]
     one.write_text("changed one\n")
     two.write_text("changed two\n")
-    original_write = tools._RootFS.write
+    original_copy = tools._RootFS.copy
     failed = False
 
-    def fail_second(self, parts, content, mode, **kwargs):
+    def fail_second(self, source, target):
         nonlocal failed
-        if parts == ("two.py",) and not failed:
+        if target == ("two.py",) and not failed:
             failed = True
             raise OSError("injected mutation failure")
-        return original_write(self, parts, content, mode, **kwargs)
+        return original_copy(self, source, target)
 
-    monkeypatch.setattr(tools._RootFS, "write", fail_second)
+    monkeypatch.setattr(tools._RootFS, "copy", fail_second)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"] and result["rollback_attempted"]
     assert result["rollback_result"] == "succeeded"
@@ -535,17 +575,17 @@ async def test_restore_failure_removes_file_that_was_previously_absent(
     stamp = _payload(await tools.backup_appdaemon_files(_hass(), {}))["backup"].split("/")[-1]
     one.unlink()
     two.write_text("current two\n")
-    original_write = tools._RootFS.write
+    original_copy = tools._RootFS.copy
     failed = False
 
-    def fail_second(self, parts, content, mode, **kwargs):
+    def fail_second(self, source, target):
         nonlocal failed
-        if parts == ("two.py",) and not failed:
+        if target == ("two.py",) and not failed:
             failed = True
             raise OSError("injected mutation failure")
-        return original_write(self, parts, content, mode, **kwargs)
+        return original_copy(self, source, target)
 
-    monkeypatch.setattr(tools._RootFS, "write", fail_second)
+    monkeypatch.setattr(tools._RootFS, "copy", fail_second)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"] and result["rollback_result"] == "succeeded"
     assert not one.exists() and two.read_text() == "current two\n"
@@ -561,10 +601,10 @@ async def test_restore_failure_removes_directories_created_for_partial_tree(
     (apps_root / "nested" / "one.py").unlink()
     (apps_root / "nested").rmdir()
 
-    def fail_restore(self, parts, content, mode, **kwargs):
+    def fail_restore(self, source, target):
         raise OSError("injected mutation failure")
 
-    monkeypatch.setattr(tools._RootFS, "write", fail_restore)
+    monkeypatch.setattr(tools._RootFS, "copy", fail_restore)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"]
     assert not (apps_root / "nested").exists()
@@ -644,18 +684,18 @@ async def test_restore_destination_component_swap_fails_without_external_write(
     outside.mkdir()
     victim = outside / "app.py"
     victim.write_text("external\n")
-    original_write, swapped = tools._RootFS.write, False
+    original_copy, swapped = tools._RootFS.copy, False
 
-    def swap_before_destination_write(self, parts, content, mode, **kwargs):
+    def swap_before_destination_write(self, source, target_path):
         nonlocal swapped
-        if parts == ("nested", "app.py") and not swapped:
+        if target_path == ("nested", "app.py") and not swapped:
             swapped = True
             target.unlink()
             nested.rmdir()
             nested.symlink_to(outside, target_is_directory=True)
-        return original_write(self, parts, content, mode, **kwargs)
+        return original_copy(self, source, target_path)
 
-    monkeypatch.setattr(tools._RootFS, "write", swap_before_destination_write)
+    monkeypatch.setattr(tools._RootFS, "copy", swap_before_destination_write)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"]
     assert result["possibly_committed_paths"] == []
@@ -671,18 +711,18 @@ async def test_restore_reports_rollback_failure(apps_root: Path, monkeypatch):
     stamp = _payload(await tools.backup_appdaemon_files(_hass(), {}))["backup"].split("/")[-1]
     one.write_text("new one\n")
     two.write_text("new two\n")
-    original_write, calls = tools._RootFS.write, []
+    original_copy, calls = tools._RootFS.copy, []
 
-    def fail_mutation_and_rollback(self, parts, content, mode, **kwargs):
-        if parts == ("two.py",):
+    def fail_mutation_and_rollback(self, source, target):
+        if target == ("two.py",):
             raise OSError("mutation failure")
-        if parts == ("one.py",) and calls:
+        if target == ("one.py",) and calls:
             raise OSError("rollback failure")
-        if parts == ("one.py",):
-            calls.append(parts)
-        return original_write(self, parts, content, mode, **kwargs)
+        if target == ("one.py",):
+            calls.append(target)
+        return original_copy(self, source, target)
 
-    monkeypatch.setattr(tools._RootFS, "write", fail_mutation_and_rollback)
+    monkeypatch.setattr(tools._RootFS, "copy", fail_mutation_and_rollback)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"] and result["rollback_result"] == "failed"
     assert result["rollback_errors"]

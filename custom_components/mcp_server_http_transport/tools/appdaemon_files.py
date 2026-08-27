@@ -819,9 +819,10 @@ async def list_appdaemon_files(hass: HomeAssistant, arguments: dict[str, Any]) -
     if not _enabled(hass):
         return _disabled()
     try:
+        root = _root(hass)
 
         def work():
-            with _RootFS(_root(hass)) as fs:
+            with _RootFS(root) as fs:
                 return [
                     {"path": "/".join(rel), "size": size, "sha256": digest}
                     for rel, size, digest in fs.metadata()
@@ -850,9 +851,10 @@ async def get_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         return _disabled()
     try:
         parts = _parts(arguments["path"])
+        root = _root(hass)
 
         def work():
-            with _RootFS(_root(hass)) as fs:
+            with _RootFS(root) as fs:
                 data, _mode = fs.read(parts, limit=_MAX_FILE_BYTES)
                 return {
                     "path": "/".join(parts),
@@ -886,9 +888,10 @@ async def save_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) ->
         parts, content = _writable_parts(arguments["path"]), arguments["content"].encode("utf-8")
         if len(content) > _MAX_FILE_BYTES:
             raise ValueError("Content is too large (maximum 1 MB)")
+        root = _root(hass)
 
         def work():
-            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(root) as fs:
                 try:
                     sha_before, mode = fs.hash_regular(parts)
                 except FileNotFoundError:
@@ -933,9 +936,10 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
         return _disabled()
     try:
         parts = _writable_parts(arguments["path"])
+        root = _root(hass)
 
         def work():
-            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(root) as fs:
                 sha_before, _mode = fs.hash_regular(parts)
                 expected = fs.regular_signature(parts)
                 stamp, _ = fs.snapshot()
@@ -983,9 +987,10 @@ async def backup_appdaemon_files(hass: HomeAssistant, arguments: dict[str, Any])
     if not _enabled(hass):
         return _disabled()
     try:
+        root = _root(hass)
 
         def work():
-            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(root) as fs:
                 stamp, files = fs.snapshot()
                 return {"success": True, "backup": _backup_path(stamp), "files": files}
 
@@ -1008,9 +1013,10 @@ async def list_appdaemon_backups(hass: HomeAssistant, arguments: dict[str, Any])
     if not _enabled(hass):
         return _disabled()
     try:
+        root = _root(hass)
 
         def work():
-            with _RootFS(_root(hass)) as fs:
+            with _RootFS(root) as fs:
                 try:
                     base = fs.dir((_BACKUP_DIR_NAME,))
                 except FileNotFoundError:
@@ -1073,9 +1079,10 @@ async def cleanup_appdaemon_backups(
             "cleaning up AppDaemon backups", ValueError("older_than_days must be an integer >= 1")
         )
     try:
+        root = _root(hass)
 
         def work():
-            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(root) as fs:
                 return _cleanup_snapshots(fs, older_than_days)
 
         result = await hass.async_add_executor_job(work)
@@ -1108,9 +1115,10 @@ async def restore_appdaemon_backup(
         timestamp = arguments["timestamp"]
         if not isinstance(timestamp, str) or not _BACKUP_TS_RE.fullmatch(timestamp):
             raise ValueError("Invalid backup timestamp")
+        root = _root(hass)
 
         def work():
-            with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
+            with _APPDAEMON_LOCK, _RootFS(root) as fs:
                 return _restore(fs, timestamp)
 
         return {

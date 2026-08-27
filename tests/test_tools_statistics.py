@@ -51,7 +51,8 @@ class TestToolsStatistics:
                 },
             ]
         }
-        mock_hass.services.async_call = AsyncMock(return_value=mock_stats)
+        # recorder.get_statistics wraps its payload under a "statistics" key.
+        mock_hass.services.async_call = AsyncMock(return_value={"statistics": mock_stats})
 
         request = Mock()
         request.headers = {"Authorization": "Bearer valid_token"}

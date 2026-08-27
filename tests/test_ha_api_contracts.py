@@ -12,15 +12,22 @@ alternative; the docstrings say which, and what to do when one breaks.
 
 import dataclasses
 import inspect
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, Mock
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
 from homeassistant.components.recorder import Recorder
+from homeassistant.components.recorder.services import (
+    SERVICE_GET_STATISTICS,
+    _async_handle_get_statistics_service,
+)
 from homeassistant.components.recorder.statistics import (
     list_statistic_ids,
     validate_statistics,
 )
 from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.helpers.recorder import DATA_INSTANCE
 
 
 def _params(func) -> list[str]:
@@ -78,12 +85,73 @@ class TestCalendarContracts:
         assert not {"uid", "rrule", "recurrence_id"} & LIST_EVENT_FIELDS
 
 
+class TestRecorderGetStatisticsService:
+    """Contracts for the public service get_statistics reads through.
+
+    A service is supported API, but its response shape is still an assumption
+    this repo makes, and mocking the service in a tool test only asserts the
+    shape the tool already believes in. These drive the real handler.
+    """
+
+    def test_service_exists(self):
+        """The service get_statistics calls.
+
+        Added in HA 2025.6, which is why hacs.json declares that as the minimum
+        and the CI matrix starts there. On anything older this import fails and
+        the tool would answer ServiceNotFound for every query.
+        """
+        assert SERVICE_GET_STATISTICS == "get_statistics"
+
+    async def test_response_wraps_rows_under_a_statistics_key(self):
+        """The response is {"statistics": {statistic_id: [rows]}}.
+
+        get_statistics reads through that envelope. Without it the lookup
+        misses silently and the tool reports no data rather than failing.
+        """
+        rows = {"sensor.energy": [{"start": 1704067200.0, "end": 1704070800.0, "mean": 1.5}]}
+        hass = Mock()
+        hass.data = {DATA_INSTANCE: Mock(async_add_executor_job=AsyncMock(return_value=rows))}
+        call = Mock(
+            hass=hass,
+            data={
+                "start_time": datetime(2024, 1, 1, tzinfo=UTC),
+                "statistic_ids": ["sensor.energy"],
+                "period": "hour",
+                "types": ["mean"],
+            },
+        )
+
+        response = await _async_handle_get_statistics_service(call)
+
+        assert set(response) == {"statistics"}
+        assert list(response["statistics"]) == ["sensor.energy"]
+        assert response["statistics"]["sensor.energy"][0]["mean"] == 1.5
+
+    async def test_response_renders_start_and_end_as_iso_strings(self):
+        """get_statistics passes start and end through to the caller verbatim."""
+        rows = {"sensor.energy": [{"start": 1704067200.0, "end": 1704070800.0, "mean": 1.5}]}
+        hass = Mock()
+        hass.data = {DATA_INSTANCE: Mock(async_add_executor_job=AsyncMock(return_value=rows))}
+        call = Mock(
+            hass=hass,
+            data={
+                "start_time": datetime(2024, 1, 1, tzinfo=UTC),
+                "statistic_ids": ["sensor.energy"],
+                "period": "hour",
+                "types": ["mean"],
+            },
+        )
+
+        row = (await _async_handle_get_statistics_service(call))["statistics"]["sensor.energy"][0]
+
+        assert row["start"] == "2024-01-01T00:00:00+00:00"
+        assert row["end"] == "2024-01-01T01:00:00+00:00"
+
+
 class TestRecorderContracts:
     """Contracts for tools/statistics.py.
 
-    get_statistics needs nothing here: it goes through the public
-    recorder.get_statistics service. The recorder exposes no service
-    equivalent for the four below.
+    The recorder exposes no service equivalent for the four below.
     """
 
     def test_list_statistic_ids_signature(self):

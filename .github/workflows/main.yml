@@ -77,9 +77,6 @@ jobs:
             ha-version: "2025.10.1"
             ha-test-helper: "0.13.286"
             extra-deps: "pycares<5"
-          - python-version: "3.13"
-            ha-version: "2025.4.4"
-            ha-test-helper: "0.13.236"
 
     steps:
     - uses: actions/checkout@v5

@@ -88,9 +88,9 @@ async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
 
     try:
         # recorder.get_statistics is the supported way in. It is declared
-        # SupportsResponse.ONLY and keys its response by statistic ID, the same
-        # shape statistics_during_period returns, with start and end already
-        # rendered as ISO strings rather than epoch floats.
+        # SupportsResponse.ONLY and wraps its payload in a "statistics" key,
+        # under which rows are keyed by statistic ID. start and end arrive as
+        # ISO strings where statistics_during_period returned epoch floats.
         stats = await hass.services.async_call(
             "recorder",
             "get_statistics",
@@ -105,7 +105,7 @@ async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
             return_response=True,
         )
 
-        entity_stats = (stats or {}).get(entity_id, [])
+        entity_stats = (stats or {}).get("statistics", {}).get(entity_id, [])
         result = []
         for stat in entity_stats:
             entry = {}

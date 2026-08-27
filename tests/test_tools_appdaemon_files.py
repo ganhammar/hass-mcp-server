@@ -205,7 +205,9 @@ async def test_restore_rejects_existing_destination_symlink(apps_root: Path, tmp
 
 
 @pytest.mark.asyncio
-async def test_large_unrelated_file_does_not_block_small_save_and_restore(apps_root: Path):
+async def test_large_unrelated_file_does_not_block_small_save_and_restore(
+    apps_root: Path,
+):
     large = apps_root / "history.json"
     target = apps_root / "small.py"
     large_bytes = (b"0123456789abcdef" * 131072) + b"!"
@@ -215,9 +217,7 @@ async def test_large_unrelated_file_does_not_block_small_save_and_restore(apps_r
     tracemalloc.start()
     try:
         result = _payload(
-            await tools.save_appdaemon_file(
-                _hass(), {"path": "small.py", "content": "new\n"}
-            )
+            await tools.save_appdaemon_file(_hass(), {"path": "small.py", "content": "new\n"})
         )
         _current, peak = tracemalloc.get_traced_memory()
     finally:

@@ -145,6 +145,28 @@ async def test_snapshot_copies_incrementally_without_tree_byte_list(apps_root: P
 
 
 @pytest.mark.asyncio
+async def test_snapshot_rejects_source_replacement_without_omitting_original(
+    apps_root: Path, monkeypatch
+):
+    target = apps_root / "app.py"
+    target.write_text("original")
+    original_copy = tools._RootFS.copy
+    replaced = False
+
+    def replace_before_copy(self, source, destination, **kwargs):
+        nonlocal replaced
+        if source == ("app.py",) and not replaced:
+            replaced = True
+            target.write_text("replacement")
+        return original_copy(self, source, destination, **kwargs)
+
+    monkeypatch.setattr(tools._RootFS, "copy", replace_before_copy)
+    result = await tools.backup_appdaemon_files(_hass(), {})
+    assert "Source changed before it was copied" in result["content"][0]["text"]
+    assert not list((apps_root / tools._BACKUP_DIR_NAME).glob("20*"))
+
+
+@pytest.mark.asyncio
 async def test_listing_skips_files_over_size_limit(apps_root: Path):
     (apps_root / "large.py").write_bytes(b"x" * (tools._MAX_FILE_BYTES + 1))
     result = _payload(await tools.list_appdaemon_files(_hass(), {}))
@@ -547,12 +569,12 @@ async def test_restore_failure_rolls_back_modified_targets(apps_root: Path, monk
     original_copy = tools._RootFS.copy
     failed = False
 
-    def fail_second(self, source, target):
+    def fail_second(self, source, target, **kwargs):
         nonlocal failed
         if target == ("two.py",) and not failed:
             failed = True
             raise OSError("injected mutation failure")
-        return original_copy(self, source, target)
+        return original_copy(self, source, target, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "copy", fail_second)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
@@ -578,12 +600,12 @@ async def test_restore_failure_removes_file_that_was_previously_absent(
     original_copy = tools._RootFS.copy
     failed = False
 
-    def fail_second(self, source, target):
+    def fail_second(self, source, target, **kwargs):
         nonlocal failed
         if target == ("two.py",) and not failed:
             failed = True
             raise OSError("injected mutation failure")
-        return original_copy(self, source, target)
+        return original_copy(self, source, target, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "copy", fail_second)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
@@ -601,7 +623,7 @@ async def test_restore_failure_removes_directories_created_for_partial_tree(
     (apps_root / "nested" / "one.py").unlink()
     (apps_root / "nested").rmdir()
 
-    def fail_restore(self, source, target):
+    def fail_restore(self, source, target, **kwargs):
         raise OSError("injected mutation failure")
 
     monkeypatch.setattr(tools._RootFS, "copy", fail_restore)
@@ -686,14 +708,14 @@ async def test_restore_destination_component_swap_fails_without_external_write(
     victim.write_text("external\n")
     original_copy, swapped = tools._RootFS.copy, False
 
-    def swap_before_destination_write(self, source, target_path):
+    def swap_before_destination_write(self, source, target_path, **kwargs):
         nonlocal swapped
         if target_path == ("nested", "app.py") and not swapped:
             swapped = True
             target.unlink()
             nested.rmdir()
             nested.symlink_to(outside, target_is_directory=True)
-        return original_copy(self, source, target_path)
+        return original_copy(self, source, target_path, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "copy", swap_before_destination_write)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
@@ -713,14 +735,14 @@ async def test_restore_reports_rollback_failure(apps_root: Path, monkeypatch):
     two.write_text("new two\n")
     original_copy, calls = tools._RootFS.copy, []
 
-    def fail_mutation_and_rollback(self, source, target):
+    def fail_mutation_and_rollback(self, source, target, **kwargs):
         if target == ("two.py",):
             raise OSError("mutation failure")
         if target == ("one.py",) and calls:
             raise OSError("rollback failure")
         if target == ("one.py",):
             calls.append(target)
-        return original_copy(self, source, target)
+        return original_copy(self, source, target, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "copy", fail_mutation_and_rollback)
     result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))

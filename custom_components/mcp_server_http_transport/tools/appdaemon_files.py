@@ -34,6 +34,7 @@ _MAX_FILE_BYTES = 1_048_576
 _DEFAULT_MODE = 0o640
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 _WRITABLE_EXTENSIONS = frozenset({".py", ".yaml", ".yml", ".json"})
+_MAX_SNAPSHOT_FILES = 10000
 _APPDAEMON_LOCK = threading.RLock()
 
 
@@ -280,7 +281,14 @@ class _RootFS:
                 # Closing after replacement cannot undo the replacement.
                 raise _WriteFailure(exc, possibly_committed=committed) from exc
 
-    def copy(self, source: tuple[str, ...], target: tuple[str, ...]) -> None:
+    def copy(
+        self,
+        source: tuple[str, ...],
+        target: tuple[str, ...],
+        *,
+        expected_source: tuple[int, ...] | None = None,
+        expected_target: tuple[int, ...] | None = None,
+    ) -> None:
         """Copy one regular file through rooted descriptors without retaining its contents.
 
         Backup copies deliberately have no MCP payload-size limit. The copy is still
@@ -299,6 +307,15 @@ class _RootFS:
             info = os.fstat(source_fd)
             if not stat.S_ISREG(info.st_mode):
                 raise ValueError("File does not exist or is not regular")
+            source_signature = (
+                info.st_dev,
+                info.st_ino,
+                info.st_size,
+                info.st_mtime_ns,
+                info.st_ctime_ns,
+            )
+            if expected_source is not None and source_signature != expected_source:
+                raise ValueError(f"Source changed before it was copied: {'/'.join(source)}")
             target_fd = os.open(
                 temp,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -312,20 +329,22 @@ class _RootFS:
                 while view:
                     view = view[os.write(target_fd, view) :]
             final_info = os.fstat(source_fd)
-            if (
+            final_signature = (
                 final_info.st_dev,
                 final_info.st_ino,
                 final_info.st_size,
                 final_info.st_mtime_ns,
                 final_info.st_ctime_ns,
-            ) != (
-                info.st_dev,
-                info.st_ino,
-                info.st_size,
-                info.st_mtime_ns,
-                info.st_ctime_ns,
-            ):
+            )
+            if final_signature != source_signature:
                 raise ValueError("Source file changed while it was being copied")
+            if expected_target is not None:
+                if self.regular_signature(target) != expected_target:
+                    raise ValueError(
+                        f"Target changed while it was being copied: {'/'.join(target)}"
+                    )
+            elif self.regular_signature(target) is not None:
+                raise ValueError(f"Target appeared while it was being copied: {'/'.join(target)}")
             os.fchmod(target_fd, stat.S_IMODE(info.st_mode))
             os.fsync(target_fd)
             os.close(target_fd)
@@ -345,13 +364,16 @@ class _RootFS:
                 if fd >= 0:
                     os.close(fd)
 
-    def unlink(self, parts: tuple[str, ...]) -> None:
+    def unlink(self, parts: tuple[str, ...], *, expected: tuple[int, ...] | None = None) -> None:
         parent, name = self._parent(parts)
         unlinked = False
         try:
             info = os.stat(name, dir_fd=parent, follow_symlinks=False)
             if not stat.S_ISREG(info.st_mode):
                 raise ValueError("File does not exist or is not regular")
+            actual = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+            if expected is not None and actual != expected:
+                raise ValueError(f"Target changed before removal: {'/'.join(parts)}")
             os.unlink(name, dir_fd=parent)
             unlinked = True
         except Exception as exc:
@@ -412,6 +434,7 @@ class _RootFS:
         *,
         include_backups: bool = False,
         strict: bool = False,
+        max_files: int | None = None,
     ) -> list[tuple[str, ...]]:
         """Return regular-file paths without reading their contents."""
         result: list[tuple[str, ...]] = []
@@ -440,6 +463,8 @@ class _RootFS:
                         os.close(child_fd)
                 elif stat.S_ISREG(info.st_mode):
                     result.append(child)
+                    if max_files is not None and len(result) > max_files:
+                        raise ValueError(f"Tree contains more than {max_files} files")
                 elif strict:
                     raise ValueError("Encountered a non-regular file while traversing")
 
@@ -522,13 +547,17 @@ class _RootFS:
         try:
             os.mkdir(staging, 0o750, dir_fd=base)
             saved: list[str] = []
-            for rel in self.file_paths(strict=True):
+            initial_paths = self.file_paths(strict=True, max_files=_MAX_SNAPSHOT_FILES)
+            initial_signatures = {rel: self.regular_signature(rel) for rel in initial_paths}
+            for rel in initial_paths:
                 target = (_BACKUP_DIR_NAME, staging) + rel
                 parent = target[:-1]
                 directory = self.dir(parent, create=True)
                 os.close(directory)
-                self.copy(rel, target)
+                self.copy(rel, target, expected_source=initial_signatures[rel])
                 saved.append("/".join(rel))
+            if self.file_paths(strict=True, max_files=_MAX_SNAPSHOT_FILES) != initial_paths:
+                raise ValueError("AppDaemon file tree changed while it was being snapshotted")
             os.replace(staging, stamp, src_dir_fd=base, dst_dir_fd=base)
             return stamp, saved
         except Exception:
@@ -632,7 +661,12 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
     # Opening this directory via no-follow is source validation at use time.
     source_fd = fs.dir(source_prefix)
     os.close(source_fd)
-    source_paths = fs.file_paths(source_prefix, include_backups=True, strict=True)
+    source_paths = fs.file_paths(
+        source_prefix,
+        include_backups=True,
+        strict=True,
+        max_files=_MAX_SNAPSHOT_FILES,
+    )
     if not source_paths:
         # An empty snapshot is legitimate, but the timestamp must be a controlled directory.
         pass
@@ -640,7 +674,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         raise ValueError("Backup contains a reserved backup-directory path")
     planned = [rel for rel in source_paths if Path(rel[-1]).suffix.lower() in _WRITABLE_EXTENSIONS]
     skipped = [rel for rel in source_paths if rel not in planned]
-    current_paths = fs.file_paths(strict=True)
+    current_paths = fs.file_paths(strict=True, max_files=_MAX_SNAPSHOT_FILES)
     remove_paths = [
         rel
         for rel in current_paths
@@ -675,7 +709,11 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
                     raise ValueError(f"Restore target changed: {'/'.join(rel)}")
                 parent = fs.dir(rel[:-1], create=True)
                 os.close(parent)
-                fs.copy(source_prefix + rel, rel)
+                fs.copy(
+                    source_prefix + rel,
+                    rel,
+                    expected_target=target_signatures[rel],
+                )
             except _WriteFailure as exc:
                 if exc.possibly_committed:
                     possibly_committed.append(rel)
@@ -708,11 +746,15 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
                 old = fs.regular_signature((_BACKUP_DIR_NAME, pre) + rel)
                 if old is None:
                     try:
-                        fs.unlink(rel)
+                        fs.unlink(rel, expected=expected)
                     except FileNotFoundError:
                         pass
                 else:
-                    fs.copy((_BACKUP_DIR_NAME, pre) + rel, rel)
+                    fs.copy(
+                        (_BACKUP_DIR_NAME, pre) + rel,
+                        rel,
+                        expected_target=expected,
+                    )
                 rolled_back.append("/".join(rel))
             except Exception as rollback_error:  # explicit, never concealed
                 rollback_errors.append(f"{'/'.join(rel)}: {rollback_error}")

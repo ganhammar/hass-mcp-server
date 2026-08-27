@@ -556,7 +556,11 @@ class _RootFS:
                 os.close(directory)
                 self.copy(rel, target, expected_source=initial_signatures[rel])
                 saved.append("/".join(rel))
-            if self.file_paths(strict=True, max_files=_MAX_SNAPSHOT_FILES) != initial_paths:
+            final_paths = self.file_paths(strict=True, max_files=_MAX_SNAPSHOT_FILES)
+            final_signatures = {rel: self.regular_signature(rel) for rel in final_paths}
+            if final_paths != initial_paths or any(
+                final_signatures[rel] != initial_signatures[rel] for rel in initial_paths
+            ):
                 raise ValueError("AppDaemon file tree changed while it was being snapshotted")
             os.replace(staging, stamp, src_dir_fd=base, dst_dir_fd=base)
             return stamp, saved
@@ -682,6 +686,9 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
     ]
     remove_signatures = {rel: fs.regular_signature(rel) for rel in remove_paths}
     target_signatures = {rel: fs.regular_signature(rel) for rel in planned}
+    source_signatures = {
+        rel: fs.regular_signature(source_prefix + rel) for rel in planned
+    }
     created_dirs: set[tuple[str, ...]] = set()
     for rel in planned:
         for index in range(1, len(rel)):
@@ -712,6 +719,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
                 fs.copy(
                     source_prefix + rel,
                     rel,
+                    expected_source=source_signatures[rel],
                     expected_target=target_signatures[rel],
                 )
             except _WriteFailure as exc:
@@ -753,6 +761,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
                     fs.copy(
                         (_BACKUP_DIR_NAME, pre) + rel,
                         rel,
+                        expected_source=fs.regular_signature((_BACKUP_DIR_NAME, pre) + rel),
                         expected_target=expected,
                     )
                 rolled_back.append("/".join(rel))
@@ -928,8 +937,9 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
         def work():
             with _APPDAEMON_LOCK, _RootFS(_root(hass)) as fs:
                 sha_before, _mode = fs.hash_regular(parts)
+                expected = fs.regular_signature(parts)
                 stamp, _ = fs.snapshot()
-                fs.unlink(parts)
+                fs.unlink(parts, expected=expected)
                 return {
                     "success": True,
                     "path": "/".join(parts),

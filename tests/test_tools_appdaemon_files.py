@@ -144,6 +144,13 @@ async def test_snapshot_copies_incrementally_without_tree_byte_list(apps_root: P
 
 
 @pytest.mark.asyncio
+async def test_listing_skips_files_over_size_limit(apps_root: Path):
+    (apps_root / "large.py").write_bytes(b"x" * (tools._MAX_FILE_BYTES + 1))
+    result = _payload(await tools.list_appdaemon_files(_hass(), {}))
+    assert result == []
+
+
+@pytest.mark.asyncio
 async def test_restore_skips_unsupported_files_and_reports_them(apps_root: Path):
     py_file = apps_root / "app.py"
     text_file = apps_root / "README.md"
@@ -235,6 +242,22 @@ async def test_cleanup_removes_stale_snapshot_staging_directory(apps_root: Path)
     result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
     assert "Deleted 1 backup(s)" in result["content"][0]["text"]
     assert not staging.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_ignores_snapshot_disappearing_during_removal(apps_root: Path, monkeypatch):
+    backup_root = apps_root / tools._BACKUP_DIR_NAME
+    old = backup_root / "2020-01-01_00-00-00-000000"
+    old.mkdir(parents=True)
+    original_remove = tools._remove_tree
+
+    def disappearing(fs, parts):
+        old.rmdir()
+        return original_remove(fs, parts)
+
+    monkeypatch.setattr(tools, "_remove_tree", disappearing)
+    result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
+    assert result["content"][0]["text"] == "No backups found"
 
 
 @pytest.mark.asyncio

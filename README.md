@@ -555,9 +555,10 @@ backup, and restore operations use the same validated root. Mutating operations
 create controlled snapshots, and saves use atomic replacement where supported.
 Only `.py`, `.yaml`, `.yml`, and `.json` files can be created, written, or
 deleted. Backups are bounded by the AppDaemon root and can be pruned with
-`cleanup_appdaemon_backups`. This capability does not provide shell access or
-AppDaemon process control, but that does not reduce the code-execution risk of
-writing AppDaemon Python files. Existing files with other extensions are
+`cleanup_appdaemon_backups`. There is no direct MCP shell or AppDaemon
+process-control tool, but writing AppDaemon Python files remains
+code-execution-equivalent within the AppDaemon environment and its available
+Home Assistant API permissions. Existing files with other extensions are
 captured in backups but are reported as skipped during restore; they are never
 made writable by restore.
 </details>

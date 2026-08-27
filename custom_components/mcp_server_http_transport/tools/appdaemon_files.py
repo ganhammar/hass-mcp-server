@@ -100,6 +100,14 @@ class _WriteFailure(OSError):
         self.possibly_committed = possibly_committed
 
 
+class _UnlinkFailure(OSError):
+    """An unlink failure that says whether removal may already have happened."""
+
+    def __init__(self, cause: Exception, *, possibly_committed: bool) -> None:
+        super().__init__(str(cause))
+        self.possibly_committed = possibly_committed
+
+
 class _RootFS:
     """Filesystem operations rooted at an O_NOFOLLOW directory descriptor.
 
@@ -213,7 +221,10 @@ class _RootFS:
 
     def regular_signature(self, parts: tuple[str, ...]) -> tuple[int, ...] | None:
         """Return identity/metadata for a regular entry without following symlinks."""
-        parent, name = self._parent(parts)
+        try:
+            parent, name = self._parent(parts)
+        except FileNotFoundError:
+            return None
         try:
             try:
                 info = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -335,13 +346,20 @@ class _RootFS:
 
     def unlink(self, parts: tuple[str, ...]) -> None:
         parent, name = self._parent(parts)
+        unlinked = False
         try:
             info = os.stat(name, dir_fd=parent, follow_symlinks=False)
             if not stat.S_ISREG(info.st_mode):
                 raise ValueError("File does not exist or is not regular")
             os.unlink(name, dir_fd=parent)
+            unlinked = True
+        except Exception as exc:
+            raise _UnlinkFailure(exc, possibly_committed=unlinked) from exc
         finally:
-            os.close(parent)
+            try:
+                os.close(parent)
+            except Exception as exc:
+                raise _UnlinkFailure(exc, possibly_committed=unlinked) from exc
 
     def files(
         self,
@@ -455,12 +473,34 @@ class _RootFS:
                 elif stat.S_ISREG(info.st_mode):
                     child_fd = -1
                     try:
+                        if info.st_size > _MAX_FILE_BYTES:
+                            continue
                         child_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+                        initial = os.fstat(child_fd)
                         digest = hashlib.sha256()
+                        total = 0
                         while block := os.read(child_fd, 131072):
+                            total += len(block)
+                            if total > _MAX_FILE_BYTES:
+                                raise ValueError("File is too large (maximum 1 MB)")
                             digest.update(block)
-                        size = os.fstat(child_fd).st_size
-                    except (FileNotFoundError, OSError):
+                        final = os.fstat(child_fd)
+                        if (
+                            initial.st_dev,
+                            initial.st_ino,
+                            initial.st_size,
+                            initial.st_mtime_ns,
+                            initial.st_ctime_ns,
+                        ) != (
+                            final.st_dev,
+                            final.st_ino,
+                            final.st_size,
+                            final.st_mtime_ns,
+                            final.st_ctime_ns,
+                        ):
+                            continue
+                        size = final.st_size
+                    except (FileNotFoundError, OSError, ValueError):
                         continue
                     finally:
                         if child_fd >= 0:
@@ -555,7 +595,10 @@ def _cleanup_snapshots(fs: _RootFS, older_than_days: int) -> dict[str, list[str]
                 continue
             os.close(staging_fd)
             if timestamp < cutoff:
-                _remove_tree(fs, (_BACKUP_DIR_NAME, stamp))
+                try:
+                    _remove_tree(fs, (_BACKUP_DIR_NAME, stamp))
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
                 deleted.append(stamp)
             continue
         if not _BACKUP_TS_RE.fullmatch(stamp):
@@ -571,7 +614,10 @@ def _cleanup_snapshots(fs: _RootFS, older_than_days: int) -> dict[str, list[str]
                 continue
             else:
                 os.close(snapshot_fd)
-                _remove_tree(fs, (_BACKUP_DIR_NAME, stamp))
+                try:
+                    _remove_tree(fs, (_BACKUP_DIR_NAME, stamp))
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
                 deleted.append(stamp)
         else:
             kept.append(stamp)
@@ -600,6 +646,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         if rel not in source_paths and Path(rel[-1]).suffix.lower() in _WRITABLE_EXTENSIONS
     ]
     remove_signatures = {rel: fs.regular_signature(rel) for rel in remove_paths}
+    target_signatures = {rel: fs.regular_signature(rel) for rel in planned}
     created_dirs: set[tuple[str, ...]] = set()
     for rel in planned:
         for index in range(1, len(rel)):
@@ -623,6 +670,8 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         for rel in planned:
             attempted.append(rel)
             try:
+                if fs.regular_signature(rel) != target_signatures[rel]:
+                    raise ValueError(f"Restore target changed: {'/'.join(rel)}")
                 data, mode = fs.read(source_prefix + rel, limit=_MAX_FILE_BYTES)
                 parent = fs.dir(rel[:-1], create=True)
                 os.close(parent)
@@ -630,15 +679,22 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
             except _WriteFailure as exc:
                 if exc.possibly_committed:
                     possibly_committed.append(rel)
+                    target_signatures[rel] = fs.regular_signature(rel)
                 raise
             else:
                 # A normal return means os.replace completed.
                 possibly_committed.append(rel)
+                target_signatures[rel] = fs.regular_signature(rel)
         for rel in remove_paths:
             attempted.append(rel)
             if fs.regular_signature(rel) != remove_signatures[rel]:
                 raise ValueError(f"Restore removal target changed: {'/'.join(rel)}")
-            fs.unlink(rel)
+            try:
+                fs.unlink(rel)
+            except _UnlinkFailure as exc:
+                if exc.possibly_committed:
+                    possibly_committed.append(rel)
+                raise
             possibly_committed.append(rel)
             removed_paths.append(rel)
     except Exception as mutation_error:
@@ -646,6 +702,9 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
         rolled_back: list[str] = []
         for rel in reversed(possibly_committed):
             try:
+                expected = None if rel in remove_signatures else target_signatures[rel]
+                if fs.regular_signature(rel) != expected:
+                    raise ValueError(f"Rollback target changed: {'/'.join(rel)}")
                 try:
                     old = fs.read((_BACKUP_DIR_NAME, pre) + rel, limit=_MAX_FILE_BYTES)
                 except FileNotFoundError:
@@ -844,6 +903,22 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
             ]
         }
     except Exception as exc:
+        if isinstance(exc, _UnlinkFailure) and exc.possibly_committed:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "success": False,
+                                "mutation_result": "delete may have committed before an error",
+                                "possibly_committed": True,
+                                "error": str(exc),
+                            }
+                        ),
+                    }
+                ]
+            }
         return _error("deleting AppDaemon file", exc)
 
 

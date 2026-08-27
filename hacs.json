@@ -1,5 +1,6 @@
 {
   "name": "MCP Server (HTTP Transport)",
+  "homeassistant": "2025.6.0",
   "render_readme": true,
   "zip_release": true,
   "filename": "mcp_server_http_transport.zip"

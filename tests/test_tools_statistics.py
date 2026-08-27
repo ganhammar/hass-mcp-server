@@ -36,22 +36,23 @@ class TestToolsStatistics:
         mock_stats = {
             "sensor.energy": [
                 {
-                    "start": "2024-01-01T00:00:00",
+                    "start": "2024-01-01T00:00:00+00:00",
+                    "end": "2024-01-01T01:00:00+00:00",
                     "mean": 100.5,
                     "min": 90.0,
                     "max": 110.0,
                 },
                 {
-                    "start": "2024-01-01T01:00:00",
+                    "start": "2024-01-01T01:00:00+00:00",
+                    "end": "2024-01-01T02:00:00+00:00",
                     "mean": 105.0,
                     "min": 95.0,
                     "max": 115.0,
                 },
             ]
         }
-
-        mock_recorder = Mock()
-        mock_recorder.async_add_executor_job = AsyncMock(return_value=mock_stats)
+        # recorder.get_statistics wraps its payload under a "statistics" key.
+        mock_hass.services.async_call = AsyncMock(return_value={"statistics": mock_stats})
 
         request = Mock()
         request.headers = {"Authorization": "Bearer valid_token"}
@@ -70,13 +71,7 @@ class TestToolsStatistics:
             }
         )
 
-        with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
-            patch(
-                "homeassistant.components.recorder.get_instance",
-                return_value=mock_recorder,
-            ),
-        ):
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
             response = await view.post(request)
 
         assert response.status == 200
@@ -84,6 +79,15 @@ class TestToolsStatistics:
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 2
         assert data[0]["mean"] == 100.5
+        assert data[0]["start"] == "2024-01-01T00:00:00+00:00"
+
+        domain, service, service_data = mock_hass.services.async_call.call_args.args
+        kwargs = mock_hass.services.async_call.call_args.kwargs
+        assert (domain, service) == ("recorder", "get_statistics")
+        assert service_data["statistic_ids"] == ["sensor.energy"]
+        assert service_data["period"] == "hour"
+        assert set(service_data["types"]) == {"mean", "min", "max", "sum", "state"}
+        assert kwargs == {"blocking": True, "return_response": True}
 
     async def test_post_tools_call_get_statistics_invalid_period(self, view, mock_hass):
         """Test POST with tools/call for get_statistics with invalid period."""
@@ -114,9 +118,12 @@ class TestToolsStatistics:
         assert "Invalid period" in text
 
     async def test_post_tools_call_get_statistics_error(self, view, mock_hass):
-        """Test get_statistics when recorder raises."""
-        mock_recorder = Mock()
-        mock_recorder.async_add_executor_job = AsyncMock(side_effect=Exception("Recorder error"))
+        """Test get_statistics when the recorder service raises.
+
+        Covers the recorder not being loaded at all, which surfaces as
+        ServiceNotFound from async_call rather than a KeyError on the instance.
+        """
+        mock_hass.services.async_call = AsyncMock(side_effect=Exception("Recorder error"))
 
         request = Mock()
         request.headers = {"Authorization": "Bearer valid_token"}
@@ -135,13 +142,7 @@ class TestToolsStatistics:
             }
         )
 
-        with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
-            patch(
-                "homeassistant.components.recorder.get_instance",
-                return_value=mock_recorder,
-            ),
-        ):
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
             response = await view.post(request)
 
         assert response.status == 200

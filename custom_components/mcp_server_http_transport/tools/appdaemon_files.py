@@ -238,7 +238,12 @@ class _RootFS:
             os.close(parent)
 
     def write(
-        self, parts: tuple[str, ...], content: bytes, mode: int, *, require_regular: bool = False
+        self,
+        parts: tuple[str, ...],
+        content: bytes,
+        mode: int,
+        *,
+        expected: tuple[int, ...] | None = None,
     ) -> None:
         parent, name = self._parent(parts)
         temp = f".{name}.mcp_tmp_{uuid.uuid4().hex}"
@@ -256,14 +261,8 @@ class _RootFS:
                 os.fsync(fd)
             finally:
                 os.close(fd)
-            if require_regular:
-                try:
-                    info = os.stat(name, dir_fd=parent, follow_symlinks=False)
-                except FileNotFoundError:
-                    pass
-                else:
-                    if not stat.S_ISREG(info.st_mode):
-                        raise ValueError("Target is not a regular file")
+            if self.regular_signature(parts) != expected:
+                raise ValueError(f"Target changed while it was being written: {'/'.join(parts)}")
             # rename replaces the directory entry, never the target of a symlink.
             replace_started = True
             os.replace(temp, name, src_dir_fd=parent, dst_dir_fd=parent)
@@ -894,9 +893,10 @@ async def save_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) ->
                     sha_before, mode = fs.hash_regular(parts)
                 except FileNotFoundError:
                     sha_before, mode = None, _DEFAULT_MODE
+                expected = fs.regular_signature(parts)
                 stamp, _ = fs.snapshot()
                 try:
-                    fs.write(parts, content, mode)
+                    fs.write(parts, content, mode, expected=expected)
                 except _WriteFailure as exc:
                     return {
                         "success": False,

@@ -77,6 +77,11 @@ jobs:
             ha-version: "2025.10.1"
             ha-test-helper: "0.13.286"
             extra-deps: "pycares<5"
+          # The declared minimum in hacs.json. recorder.get_statistics, which
+          # tools/statistics.py reads through, landed in this release.
+          - python-version: "3.13"
+            ha-version: "2025.6.0"
+            ha-test-helper: "0.13.251"
 
     steps:
     - uses: actions/checkout@v5

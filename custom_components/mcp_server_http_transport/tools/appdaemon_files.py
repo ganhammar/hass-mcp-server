@@ -685,9 +685,7 @@ def _restore(fs: _RootFS, timestamp: str) -> dict[str, Any]:
     ]
     remove_signatures = {rel: fs.regular_signature(rel) for rel in remove_paths}
     target_signatures = {rel: fs.regular_signature(rel) for rel in planned}
-    source_signatures = {
-        rel: fs.regular_signature(source_prefix + rel) for rel in planned
-    }
+    source_signatures = {rel: fs.regular_signature(source_prefix + rel) for rel in planned}
     created_dirs: set[tuple[str, ...]] = set()
     for rel in planned:
         for index in range(1, len(rel)):

@@ -406,6 +406,60 @@ async def test_disabled_gate_performs_no_filesystem_access(apps_root: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handler, arguments",
+    [
+        (tools.list_appdaemon_files, {}),
+        (tools.save_appdaemon_file, {"path": "app.py", "content": "x"}),
+        (tools.delete_appdaemon_file, {"path": "app.py"}),
+        (tools.backup_appdaemon_files, {}),
+        (tools.list_appdaemon_backups, {}),
+        (tools.cleanup_appdaemon_backups, {}),
+        (tools.restore_appdaemon_backup, {"timestamp": "invalid"}),
+    ],
+)
+async def test_all_mutating_and_listing_tools_honor_disabled_gate(
+    apps_root: Path, handler, arguments
+):
+    result = await handler(_disabled_hass(), arguments)
+    assert "disabled" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_tool_errors_report_configured_root_and_argument_failures(apps_root: Path):
+    result = await tools.list_appdaemon_files(_configured_hass("/tmp/apps"), {})
+    assert "Error listing AppDaemon files" in result["content"][0]["text"]
+    result = await tools.save_appdaemon_file(
+        _hass(), {"path": "app.py", "content": "x" * (tools._MAX_FILE_BYTES + 1)}
+    )
+    assert "Content is too large" in result["content"][0]["text"]
+    result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 0})
+    assert "older_than_days must be an integer" in result["content"][0]["text"]
+    result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": "invalid"})
+    assert "Invalid backup timestamp" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_save_and_delete_report_post_mutation_uncertainty(apps_root: Path, monkeypatch):
+    target = apps_root / "app.py"
+    target.write_text("old")
+
+    def fail_write(self, parts, content, mode, **kwargs):
+        raise tools._WriteFailure(OSError("close failed"), possibly_committed=True)
+
+    monkeypatch.setattr(tools._RootFS, "write", fail_write)
+    saved = _payload(await tools.save_appdaemon_file(_hass(), {"path": "app.py", "content": "new"}))
+    assert not saved["success"] and saved["possibly_committed"]
+
+    def fail_unlink(self, parts, **kwargs):
+        raise tools._UnlinkFailure(OSError("close failed"), possibly_committed=True)
+
+    monkeypatch.setattr(tools._RootFS, "unlink", fail_unlink)
+    deleted = _payload(await tools.delete_appdaemon_file(_hass(), {"path": "app.py"}))
+    assert not deleted["success"] and deleted["possibly_committed"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["", ".", "a/./b", "a//b", "a\\b", "a/../b", "a\x00b"])
 async def test_rejects_unusual_relative_forms(apps_root: Path, path: str):
     text = (await tools.get_appdaemon_file(_hass(), {"path": path}))["content"][0]["text"]
@@ -443,6 +497,241 @@ def test_rejects_unapproved_or_escaping_roots(root: str):
 
 def test_configured_shared_root_is_used():
     assert tools._root(_configured_hass("/share/appdaemon/apps")) == Path("/share/appdaemon/apps")
+
+
+def test_path_and_failure_helpers_preserve_their_contract():
+    assert tools._parts(".mcp_appdaemon_backups/x.py", allow_backup=True) == (
+        ".mcp_appdaemon_backups",
+        "x.py",
+    )
+    write_failure = tools._WriteFailure(ValueError("write"), possibly_committed=True)
+    unlink_failure = tools._UnlinkFailure(ValueError("unlink"), possibly_committed=False)
+    assert str(write_failure) == "write" and write_failure.possibly_committed
+    assert str(unlink_failure) == "unlink" and not unlink_failure.possibly_committed
+    with pytest.raises(ValueError, match="Backup snapshots"):
+        tools._parts(".mcp_appdaemon_backups/x.py")
+
+
+def test_descriptor_helpers_reject_non_regular_and_oversized_files(apps_root: Path):
+    directory = apps_root / "directory.py"
+    directory.mkdir()
+    oversized = apps_root / "large.py"
+    oversized.write_bytes(b"x" * (tools._MAX_FILE_BYTES + 1))
+    with tools._RootFS(apps_root) as fs:
+        with pytest.raises(ValueError, match="not regular"):
+            fs.read(("directory.py",))
+        with pytest.raises(ValueError, match="not regular"):
+            fs.hash_regular(("directory.py",))
+        with pytest.raises(ValueError, match="not a regular"):
+            fs.exists_regular(("directory.py",))
+        with pytest.raises(ValueError, match="not a regular"):
+            fs.regular_signature(("directory.py",))
+        with pytest.raises(ValueError, match="too large"):
+            fs.read(("large.py",), limit=tools._MAX_FILE_BYTES)
+        with pytest.raises(ValueError, match="too large"):
+            fs.hash_regular(("large.py",), limit=tools._MAX_FILE_BYTES)
+        assert fs.regular_signature(("missing.py",)) is None
+
+
+def test_copy_rejects_non_regular_source_and_directory_creation_is_bounded(apps_root: Path):
+    (apps_root / "directory.py").mkdir()
+    with tools._RootFS(apps_root) as fs:
+        with pytest.raises(tools._WriteFailure, match="not regular"):
+            fs.copy(("directory.py",), ("copy.py",))
+        created = fs.dir(("new", "nested"), create=True)
+        tools.os.close(created)
+    assert (apps_root / "new" / "nested").is_dir()
+
+
+def test_files_and_file_paths_handle_nested_files_backup_and_limits(apps_root: Path):
+    (apps_root / "nested").mkdir()
+    (apps_root / "nested" / "app.py").write_text("app")
+    (apps_root / "notes.txt").write_text("notes")
+    (apps_root / tools._BACKUP_DIR_NAME).mkdir()
+    (apps_root / tools._BACKUP_DIR_NAME / "hidden.py").write_text("hidden")
+    (apps_root / "link.py").symlink_to(apps_root / "nested" / "app.py")
+    with tools._RootFS(apps_root) as fs:
+        files = fs.files()
+        assert [(path, data) for path, data, _mode in files] == [
+            (("nested", "app.py"), b"app"),
+            (("notes.txt",), b"notes"),
+        ]
+        assert all(mode & 0o600 == 0o600 for _path, _data, mode in files)
+        assert fs.file_paths() == [("nested", "app.py"), ("notes.txt",)]
+        with pytest.raises(ValueError, match="more than 1"):
+            fs.file_paths(max_files=1)
+        with pytest.raises(ValueError, match="non-regular"):
+            fs.file_paths(strict=True)
+
+
+def test_write_cleanup_tolerates_temp_disappearing_during_error(apps_root: Path, monkeypatch):
+    target = apps_root / "race.py"
+    target.write_text("old")
+    original_signature = tools._RootFS.regular_signature
+    original_unlink = tools.os.unlink
+    calls = 0
+
+    def changed_signature(self, parts):
+        nonlocal calls
+        signature = original_signature(self, parts)
+        if parts == ("race.py",):
+            calls += 1
+            if calls > 1:
+                return None
+        return signature
+
+    def disappearing_temp(name, *args, **kwargs):
+        if isinstance(name, str) and name.startswith(".race.py.mcp_tmp_"):
+            original_unlink(name, *args, **kwargs)
+            raise FileNotFoundError(name)
+        return original_unlink(name, *args, **kwargs)
+
+    monkeypatch.setattr(tools._RootFS, "regular_signature", changed_signature)
+    monkeypatch.setattr(tools.os, "unlink", disappearing_temp)
+    with tools._RootFS(apps_root) as fs:
+        expected = fs.regular_signature(("race.py",))
+        with pytest.raises(tools._WriteFailure, match="Target changed"):
+            fs.write(("race.py",), b"new", 0o640, expected=expected)
+    assert not list(apps_root.glob(".race.py.mcp_tmp_*"))
+
+
+def test_write_detects_target_race_and_removes_temp_file(apps_root: Path, monkeypatch):
+    target = apps_root / "race.py"
+    target.write_text("old")
+    original_signature = tools._RootFS.regular_signature
+    calls = 0
+
+    def changed_signature(self, parts):
+        nonlocal calls
+        signature = original_signature(self, parts)
+        if parts == ("race.py",):
+            calls += 1
+            if calls > 1:
+                return None
+        return signature
+
+    monkeypatch.setattr(tools._RootFS, "regular_signature", changed_signature)
+    with tools._RootFS(apps_root) as fs:
+        expected = fs.regular_signature(("race.py",))
+        with pytest.raises(tools._WriteFailure, match="Target changed") as error:
+            fs.write(("race.py",), b"new", 0o640, expected=expected)
+    assert not list(apps_root.glob(".race.py.mcp_tmp_*"))
+    assert target.read_text() == "old"
+    assert not error.value.possibly_committed
+
+
+def test_copy_detects_source_change_and_cleans_staging_file(apps_root: Path, monkeypatch):
+    source = apps_root / "source.py"
+    target = apps_root / "target.py"
+    source.write_text("source")
+    original_read = tools.os.read
+    changed = False
+
+    def mutate_source(fd, size):
+        nonlocal changed
+        block = original_read(fd, size)
+        if block and not changed:
+            changed = True
+            source.write_text("source changed")
+        return block
+
+    monkeypatch.setattr(tools.os, "read", mutate_source)
+    with tools._RootFS(apps_root) as fs:
+        with pytest.raises(tools._WriteFailure, match="changed while"):
+            fs.copy(("source.py",), ("target.py",))
+    assert not target.exists()
+    assert not list(apps_root.glob(".target.py.mcp_tmp_*"))
+
+
+def test_copy_detects_target_appearing_and_changing(apps_root: Path, monkeypatch):
+    source = apps_root / "source.py"
+    target = apps_root / "target.py"
+    source.write_text("source")
+    original_signature = tools._RootFS.regular_signature
+    mode = {"target": "appeared"}
+
+    def target_signature(self, parts):
+        signature = original_signature(self, parts)
+        if parts == ("target.py",) and mode["target"] == "appeared":
+            target.write_text("appeared")
+            mode["target"] = "changed"
+            return original_signature(self, parts)
+        return signature
+
+    monkeypatch.setattr(tools._RootFS, "regular_signature", target_signature)
+    with tools._RootFS(apps_root) as fs:
+        with pytest.raises(tools._WriteFailure, match="appeared"):
+            fs.copy(("source.py",), ("target.py",))
+    assert target.read_text() == "appeared"
+    assert not list(apps_root.glob(".target.py.mcp_tmp_*"))
+
+
+def test_copy_detects_existing_target_change_and_source_disappearance(apps_root: Path, monkeypatch):
+    source = apps_root / "source.py"
+    target = apps_root / "target.py"
+    source.write_text("source")
+    target.write_text("target")
+    original_signature = tools._RootFS.regular_signature
+    with tools._RootFS(apps_root) as fs:
+        expected_target = fs.regular_signature(("target.py",))
+
+    def changed_target(self, parts):
+        signature = original_signature(self, parts)
+        if parts == ("target.py",):
+            return tuple(
+                value + 1 if index == 2 else value for index, value in enumerate(signature)
+            )
+        return signature
+
+    monkeypatch.setattr(tools._RootFS, "regular_signature", changed_target)
+    with tools._RootFS(apps_root) as fs:
+        with pytest.raises(tools._WriteFailure, match="Target changed"):
+            fs.copy(("source.py",), ("target.py",), expected_target=expected_target)
+    assert target.read_text() == "target"
+    assert not list(apps_root.glob(".target.py.mcp_tmp_*"))
+
+    real_open = tools.os.open
+
+    def disappearing_source(name, flags, *args, **kwargs):
+        if name == "source.py" and flags & tools.os.O_NOFOLLOW:
+            source.unlink()
+        return real_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(tools.os, "open", disappearing_source)
+    with tools._RootFS(apps_root) as fs:
+        with pytest.raises(tools._WriteFailure, match="source.py"):
+            fs.copy(("source.py",), ("new.py",))
+    assert not list(apps_root.glob(".new.py.mcp_tmp_*"))
+
+
+def test_unlink_detects_nonregular_and_identity_race(apps_root: Path):
+    directory = apps_root / "directory.py"
+    directory.mkdir()
+    target = apps_root / "target.py"
+    target.write_text("target")
+    with tools._RootFS(apps_root) as fs:
+        with pytest.raises(tools._UnlinkFailure, match="not regular"):
+            fs.unlink(("directory.py",))
+        with pytest.raises(tools._UnlinkFailure, match="changed"):
+            fs.unlink(("target.py",), expected=(0, 0, 0, 0, 0))
+    assert target.exists()
+
+
+def test_snapshot_failure_attempts_staging_cleanup(apps_root: Path, monkeypatch):
+    (apps_root / "app.py").write_text("app")
+    monkeypatch.setattr(
+        tools,
+        "_remove_tree",
+        lambda fs, parts: (_ for _ in ()).throw(OSError("cleanup failed")),
+    )
+    with tools._RootFS(apps_root) as fs:
+        with pytest.raises(ValueError, match="snapshotted"):
+            monkeypatch.setattr(
+                tools._RootFS,
+                "file_paths",
+                lambda self, *args, **kwargs: (_ for _ in ()).throw(ValueError("snapshotted")),
+            )
+            fs.snapshot()
 
 
 @pytest.mark.asyncio

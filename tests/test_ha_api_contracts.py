@@ -15,6 +15,7 @@ import inspect
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 
+import pytest
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
 from homeassistant.components.recorder import Recorder
@@ -28,6 +29,29 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.recorder import DATA_INSTANCE
+
+# The KNX contracts below need the integration and its telegram store importable,
+# which takes KNX's own requirements (xknx, knx-frontend, knx-telegram-store) on
+# top of Home Assistant. They are installed on the KNX leg in CI and skipped
+# everywhere else, including on Home Assistant versions predating the store.
+try:
+    from homeassistant.components.knx.const import (
+        CONF_KNX_TELEGRAM_DB_LOAD_HOURS,
+        KNX_MODULE_KEY,
+        KNX_TELEGRAM_LOAD_HOURS_DEFAULT,
+    )
+    from homeassistant.components.knx.telegrams import TelegramDict, Telegrams
+    from homeassistant.components.knx.websocket import ws_group_monitor_info
+    from knx_telegram_store import (
+        BufferedSqliteStore,
+        KnxTelegramStoreException,
+        TelegramQuery,
+        TelegramQueryResult,
+    )
+
+    KNX_TELEGRAM_STORE_AVAILABLE = True
+except Exception:  # pragma: no cover - KNX or its telegram store not installed
+    KNX_TELEGRAM_STORE_AVAILABLE = False
 
 
 def _params(func) -> list[str]:
@@ -171,3 +195,72 @@ class TestRecorderContracts:
 
     def test_async_clear_statistics_signature(self):
         assert _params(Recorder.async_clear_statistics) == ["self", "statistic_ids", "on_done"]
+
+
+@pytest.mark.skipif(
+    not KNX_TELEGRAM_STORE_AVAILABLE, reason="KNX integration or its telegram store not installed"
+)
+class TestKnxTelegramStoreContracts:
+    """Contracts for the telegram history read in tools/knx.py.
+
+    The KNX integration exposes no service for telegram history, so the tool
+    queries the store behind `hass.data[KNX_MODULE_KEY].telegrams`, which is the
+    access path HA's own group-monitor websocket handler uses. Nothing here
+    carries a compatibility promise, so each assumption is pinned.
+    """
+
+    def test_module_key_resolves_the_runtime_module(self):
+        """_get_knx_module reads hass.data[KNX_MODULE_KEY]."""
+        assert KNX_MODULE_KEY == "knx"
+
+    def test_group_monitor_handler_still_reads_the_same_path(self):
+        """The tool copies ws_group_monitor_info: same store, same options key.
+
+        When this breaks, read that handler again before changing the tool: it
+        is the closest thing to supported API this history has.
+        """
+        source = inspect.getsource(ws_group_monitor_info)
+        assert "knx.telegrams.store.query(" in source
+        assert "CONF_KNX_TELEGRAM_DB_LOAD_HOURS" in source
+
+    def test_telegrams_holds_the_store_on_a_store_attribute(self):
+        assert "self.store" in inspect.getsource(Telegrams.__init__)
+
+    def test_query_signature(self):
+        """_load_recent_telegrams calls store.query(query, flush_first=True)."""
+        assert _params(BufferedSqliteStore.query) == ["self", "query", "flush_first"]
+
+    def test_query_raises_knx_telegram_store_exception(self):
+        """The tool reports a database error off this exception and nothing wider."""
+        assert issubclass(KnxTelegramStoreException, Exception)
+        assert KnxTelegramStoreException is not Exception
+
+    def test_telegram_query_takes_the_window_and_ordering_the_tool_sets(self):
+        fields = {f.name for f in dataclasses.fields(TelegramQuery)}
+        assert {"start_time", "order_descending", "limit"} <= fields
+
+    def test_telegram_query_caps_rows_by_default(self):
+        """A capped query is why the tool asks for newest first and reverses.
+
+        Were the default unbounded, ordering would only decide the order of the
+        answer; with a cap it decides which end of the window survives it.
+        """
+        limit = next(f for f in dataclasses.fields(TelegramQuery) if f.name == "limit")
+        assert isinstance(limit.default, int)
+        assert limit.default > 0
+
+    def test_query_result_carries_telegrams(self):
+        fields = {f.name for f in dataclasses.fields(TelegramQueryResult)}
+        assert "telegrams" in fields
+
+    def test_model_to_dict_converts_one_stored_telegram(self):
+        assert _params(Telegrams.model_to_dict) == ["self", "m"]
+
+    def test_telegram_dict_carries_the_filtered_and_spanned_fields(self):
+        """The tool filters on destination and destination_name, spans on timestamp."""
+        assert {"destination", "destination_name", "timestamp"} <= set(TelegramDict.__annotations__)
+
+    def test_load_hours_option_and_default(self):
+        """The window the tool reads off the config entry, and its fallback."""
+        assert CONF_KNX_TELEGRAM_DB_LOAD_HOURS == "telegram_db_load_hours"
+        assert KNX_TELEGRAM_LOAD_HOURS_DEFAULT == 24

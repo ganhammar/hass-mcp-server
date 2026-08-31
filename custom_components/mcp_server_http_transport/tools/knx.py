@@ -24,24 +24,31 @@ _LOGGER = logging.getLogger(__name__)
 # (same access path used by HA's own `knx/group_monitor_info` websocket command).
 # Imported defensively so the MCP server still loads when KNX isn't installed.
 try:
-    from homeassistant.components.knx.const import (
-        CONF_KNX_TELEGRAM_DB_LOAD_HOURS,
-        KNX_MODULE_KEY,
-    )
+    from homeassistant.components.knx.const import KNX_MODULE_KEY
 except Exception:  # pragma: no cover - KNX integration not available
-    CONF_KNX_TELEGRAM_DB_LOAD_HOURS = None
     KNX_MODULE_KEY = None
 
-# TelegramQuery/KnxTelegramStoreException back the DB-backed telegram store
-# that `knx.telegrams.store.query(...)` uses since the KNX integration moved
-# off the old in-memory `knx.telegrams.recent_telegrams` list (same backend
-# HA's own `knx/group_monitor_info` websocket handler queries — see
-# homeassistant/components/knx/websocket.py:ws_group_monitor_info). Imported
-# defensively: older HA/KNX versions may still only have the in-memory list,
-# handled via the AttributeError fallback in knx_recent_telegrams() below.
+# The telegram-history window, read off the KNX config entry. These constants
+# exist only where telegram history is DB-backed, so they import apart from
+# KNX_MODULE_KEY: sharing its try block would leave every KNX tool in this
+# module reporting KNX as not set up on installs that predate the store.
+try:
+    from homeassistant.components.knx.const import (
+        CONF_KNX_TELEGRAM_DB_LOAD_HOURS,
+        KNX_TELEGRAM_LOAD_HOURS_DEFAULT,
+    )
+except Exception:  # pragma: no cover - Home Assistant without the telegram store
+    CONF_KNX_TELEGRAM_DB_LOAD_HOURS = None
+    KNX_TELEGRAM_LOAD_HOURS_DEFAULT = 24
+
+# knx-telegram-store ships as a requirement of the KNX integration, so this
+# import succeeds exactly on installs whose telegram history is DB-backed, and
+# TelegramQuery being None marks one that still keeps history in memory. Both
+# names bind together, so the placeholder exception is never the one the store
+# branch in _load_recent_telegrams() catches.
 try:
     from knx_telegram_store import KnxTelegramStoreException, TelegramQuery
-except Exception:  # pragma: no cover - older KNX integration without the store
+except Exception:  # pragma: no cover - Home Assistant without the telegram store
     KnxTelegramStoreException = Exception
     TelegramQuery = None
 
@@ -58,35 +65,45 @@ def _destination(telegram: dict[str, Any]) -> str:
     return str(telegram.get("destination") or telegram.get("destination_address") or "")
 
 
-async def _load_recent_telegrams(knx) -> list[dict[str, Any]] | None:
-    """Return recent telegrams as dicts, or None if unavailable on this HA version.
+async def _load_recent_telegrams(knx) -> list[dict[str, Any]]:
+    """Return recent telegrams as dicts, oldest first.
 
-    Primary path: the DB-backed `knx.telegrams.store.query(...)` (current KNX
-    integration, same backend as the `knx/group_monitor_info` websocket
-    command). Falls back to the older in-memory `knx.telegrams.recent_telegrams`
-    list for older HA/KNX versions that don't have the store yet.
+    Reads the DB-backed telegram store, the same backend HA's own
+    `knx/group_monitor_info` websocket command queries. Where telegram history
+    is still held in memory it is read off `knx.telegrams.recent_telegrams`
+    instead.
+
+    Raises ValueError naming the cause when the history cannot be read.
     """
-    store = getattr(knx.telegrams, "store", None)
-    if store is not None and TelegramQuery is not None:
-        load_hours = 9
-        if CONF_KNX_TELEGRAM_DB_LOAD_HOURS is not None:
-            try:
-                load_hours = knx.entry.options[CONF_KNX_TELEGRAM_DB_LOAD_HOURS]
-            except (KeyError, AttributeError):
-                pass
-        start_time = dt_util.now() - timedelta(hours=load_hours)
-        query = TelegramQuery(start_time=start_time, order_descending=True)
+    if TelegramQuery is None:
         try:
-            result = await store.query(query, flush_first=True)
-        except KnxTelegramStoreException as err:
-            _LOGGER.warning("KNX telegram store query failed: %s", err)
-            return None
-        return [knx.telegrams.model_to_dict(t) for t in result.telegrams]
+            return [dict(t) for t in knx.telegrams.recent_telegrams]
+        except AttributeError:
+            raise ValueError(
+                "KNX telegram history is unavailable on this Home Assistant version."
+            ) from None
 
+    if getattr(knx.telegrams, "store", None) is None:
+        raise ValueError(
+            "KNX telegram storage is not initialized. Check Home Assistant's logs and "
+            "repairs for the initialization error."
+        )
+
+    load_hours = knx.entry.options.get(
+        CONF_KNX_TELEGRAM_DB_LOAD_HOURS, KNX_TELEGRAM_LOAD_HOURS_DEFAULT
+    )
+    query = TelegramQuery(
+        start_time=dt_util.now() - timedelta(hours=load_hours),
+        order_descending=True,
+    )
     try:
-        return [dict(t) for t in knx.telegrams.recent_telegrams]
-    except AttributeError:
-        return None
+        result = await knx.telegrams.store.query(query, flush_first=True)
+    except KnxTelegramStoreException as err:
+        raise ValueError(f"KNX telegram database error: {err}") from err
+
+    # Descending order keeps the newest telegrams when a query reaches the
+    # store's row cap; everything downstream of here reads oldest first.
+    return [knx.telegrams.model_to_dict(t) for t in reversed(result.telegrams)]
 
 
 @register_tool(
@@ -139,16 +156,10 @@ async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -
             ]
         }
 
-    telegrams = await _load_recent_telegrams(knx)
-    if telegrams is None:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "KNX telegram history is unavailable on this Home Assistant version.",
-                }
-            ]
-        }
+    try:
+        telegrams = await _load_recent_telegrams(knx)
+    except ValueError as err:
+        return {"content": [{"type": "text", "text": str(err)}]}
 
     try:
         ga_re = re.compile(arguments["filter_ga"]) if arguments.get("filter_ga") else None

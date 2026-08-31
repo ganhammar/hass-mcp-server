@@ -772,7 +772,7 @@ class TestMCPClientSession:
 
         assert response.status == 200
         body = json.loads(response.body)
-        assert body["error"]["code"] == -32603
+        assert body["error"]["code"] == -32602
         assert "Unknown tool" in body["error"]["message"]
 
     async def test_unknown_method_returns_proper_jsonrpc_error(self, view):

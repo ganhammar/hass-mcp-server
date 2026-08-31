@@ -74,10 +74,11 @@ jobs:
     steps:
     - uses: actions/checkout@v5
 
-    - name: Set up Python 3.13
+    # 0.13.357 pins HA 2026.8.3 and requires Python 3.14.
+    - name: Set up Python 3.14
       uses: actions/setup-python@v6
       with:
-        python-version: "3.13"
+        python-version: "3.14"
 
     - name: Install dependencies
       run: |

@@ -13,6 +13,7 @@ from custom_components.mcp_server_http_transport.http import (
     _get_issuer,
     _get_protected_resource_metadata,
 )
+from custom_components.mcp_server_http_transport.tools import TOOLS
 
 
 def test_get_base_url_with_forwarded_headers():
@@ -377,10 +378,110 @@ class TestMCPEndpointView:
         with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
             response = await view.post(request)
 
-        assert response.status == 500
+        assert response.status == 200
         body = json.loads(response.body)
         assert "error" in body
         assert "Unknown tool" in body["error"]["message"]
+
+
+class TestToolErrorHandling:
+    """Regression for #82: a failing tool must not break the HTTP response.
+
+    A client working from a cached copy of an older tool list keeps sending the
+    argument shape it last saw. That used to reach the handler unchecked, raise,
+    and leave the transport answering with a non-2xx status that proxies replace
+    with their own error page.
+    """
+
+    @pytest.fixture
+    def view(self):
+        hass = Mock()
+        hass.states = Mock()
+        hass.services = Mock()
+        return MCPEndpointView(hass, Mock())
+
+    async def _call(self, view, name, arguments, msg_id=1):
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+                "id": msg_id,
+            }
+        )
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        return response, json.loads(response.body)
+
+    async def test_missing_required_argument_returns_invalid_params(self, view):
+        """A stale-schema call names the property it left out."""
+        response, body = await self._call(
+            view,
+            "get_statistics",
+            {
+                "statistic_ids": ["sensor.example"],
+                "start_time": "2026-08-17T00:00:00",
+                "period": "hour",
+            },
+        )
+
+        assert response.status == 200
+        assert body["error"]["code"] == -32602
+        assert "entity_id" in body["error"]["message"]
+        assert body["id"] == 1
+
+    async def test_missing_arguments_lists_every_required_property(self, view):
+        response, body = await self._call(view, "get_statistics", {})
+
+        assert body["error"]["code"] == -32602
+        assert "entity_id" in body["error"]["message"]
+        assert "start_time" in body["error"]["message"]
+
+    async def test_null_arguments_are_treated_as_empty(self, view):
+        response, body = await self._call(view, "get_statistics", None)
+
+        assert response.status == 200
+        assert body["error"]["code"] == -32602
+
+    async def test_unhandled_handler_exception_becomes_is_error_result(self, view):
+        """An exception the handler does not catch is reported inside the result."""
+
+        async def boom(hass, arguments):
+            raise RuntimeError("recorder exploded")
+
+        with patch.dict(
+            TOOLS,
+            {"get_statistics": {"schema": TOOLS["get_statistics"]["schema"], "handler": boom}},
+        ):
+            response, body = await self._call(
+                view,
+                "get_statistics",
+                {"entity_id": "sensor.example", "start_time": "2026-08-17T00:00:00"},
+            )
+
+        assert response.status == 200
+        assert "error" not in body
+        assert body["result"]["isError"] is True
+        assert "recorder exploded" in body["result"]["content"][0]["text"]
+        assert body["id"] == 1
+
+    async def test_unparseable_body_returns_parse_error(self, view):
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(side_effect=ValueError("not json"))
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 400
+        body = json.loads(response.body)
+        assert body["error"]["code"] == -32700
 
 
 class TestIntegrationDisabledGate:

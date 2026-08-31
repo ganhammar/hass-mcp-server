@@ -12,7 +12,7 @@ from .completions import complete
 from .const import DOMAIN
 from .prompts import get_prompt, get_prompts
 from .resources import get_resources, read_resource
-from .tools import call_tool, get_tool_schemas
+from .tools import InvalidToolArguments, call_tool, get_tool_schemas
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -221,12 +221,26 @@ class MCPEndpointView(HomeAssistantView):
         if not token_payload:
             return self._unauthorized(request)
 
-        body = None
         try:
             # Parse JSON-RPC message
             body = await request.json()
-            _LOGGER.debug("Received MCP request: %s", body)
+        except Exception as e:
+            _LOGGER.error("Could not parse MCP request body: %s", e)
+            return web.json_response(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32700,
+                        "message": f"Parse error: {str(e)}",
+                    },
+                    "id": None,
+                },
+                status=400,
+            )
 
+        _LOGGER.debug("Received MCP request: %s", body)
+
+        try:
             # Process the message directly
             response_data = await self._handle_message(body)
 
@@ -239,6 +253,9 @@ class MCPEndpointView(HomeAssistantView):
 
         except Exception as e:
             _LOGGER.error("Error handling MCP request: %s", e, exc_info=True)
+            # A JSON-RPC error is a complete response, so it ships with 200.
+            # Under a non-2xx status intermediary proxies substitute their own
+            # error page and the client never sees what actually went wrong.
             return web.json_response(
                 {
                     "jsonrpc": "2.0",
@@ -248,7 +265,6 @@ class MCPEndpointView(HomeAssistantView):
                     },
                     "id": body.get("id") if isinstance(body, dict) else None,
                 },
-                status=500,
             )
 
     async def _handle_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
@@ -290,7 +306,18 @@ class MCPEndpointView(HomeAssistantView):
             name = params.get("name")
             arguments = params.get("arguments", {})
 
-            result = await self._call_tool(name, arguments)
+            try:
+                result = await self._call_tool(name, arguments)
+            except InvalidToolArguments as err:
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32602,
+                        "message": str(err),
+                    },
+                    "id": msg_id,
+                }
+
             return {
                 "jsonrpc": "2.0",
                 "result": result,

@@ -95,6 +95,7 @@ def test_get_protected_resource_metadata():
 
     assert metadata["resource"] == f"{base_url}/api/mcp"
     assert metadata["authorization_servers"] == [f"{base_url}/oidc"]
+    assert metadata["scopes_supported"] == ["openid"]
     assert metadata["bearer_methods_supported"] == ["header"]
     assert metadata["resource_signing_alg_values_supported"] == ["RS256"]
     assert metadata["resource_documentation"] == f"{base_url}/api/mcp"

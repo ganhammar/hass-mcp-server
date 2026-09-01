@@ -3,8 +3,10 @@
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.start import async_at_started
 from mcp.server import Server
 
 from .const import (
@@ -13,12 +15,11 @@ from .const import (
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
     DOMAIN,
+    ISSUE_ENDPOINT_CONFLICT,
+    MCP_HTTP_PATH,
+    MCP_PATH,
 )
-from .http import (
-    MCPEndpointView,
-    MCPProtectedResourceMetadataView,
-    MCPSubpathProtectedResourceMetadataView,
-)
+from .http import mcp_path_is_contested, register_mcp_views
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,14 +52,47 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register HTTP endpoints. The views are gated on hass.data[DOMAIN] so
     # requests stop being served the moment async_unload_entry clears it
     # (HA has no public register_view reverse — see #37).
-    hass.http.register_view(MCPProtectedResourceMetadataView(hass))
-    hass.http.register_view(MCPSubpathProtectedResourceMetadataView(hass))
-    hass.http.register_view(MCPEndpointView(hass, server, native_auth_enabled))
+    contested = register_mcp_views(hass, server, native_auth_enabled)
 
-    _LOGGER.info("MCP Server initialized at /api/mcp (native_auth=%s)", native_auth_enabled)
+    _LOGGER.info(
+        "MCP Server initialized at %s (native_auth=%s)",
+        MCP_HTTP_PATH if contested else f"{MCP_PATH} and {MCP_HTTP_PATH}",
+        native_auth_enabled,
+    )
 
+    # Another integration can claim MCP_PATH after this one has set up, so the
+    # conflict is reported once Home Assistant has started rather than here.
+    entry.async_on_unload(async_at_started(hass, _async_report_endpoint_conflict))
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+@callback
+def _async_report_endpoint_conflict(hass: HomeAssistant) -> None:
+    """Raise a repair issue while another integration also serves MCP_PATH."""
+    if not mcp_path_is_contested(hass):
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_ENDPOINT_CONFLICT)
+        return
+
+    _LOGGER.warning(
+        "Another integration also serves POST %s. Home Assistant routes that path to "
+        "whichever integration registered it first, so point MCP clients at %s, which "
+        "only this integration serves",
+        MCP_PATH,
+        MCP_HTTP_PATH,
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_ENDPOINT_CONFLICT,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_ENDPOINT_CONFLICT,
+        translation_placeholders={"path": MCP_PATH, "dedicated_path": MCP_HTTP_PATH},
+        learn_more_url=(
+            "https://github.com/ganhammar/hass-mcp-server" "#another-integration-also-serves-apimcp"
+        ),
+    )
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -69,4 +103,5 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     hass.data[DOMAIN].clear()
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_ENDPOINT_CONFLICT)
     return True

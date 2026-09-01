@@ -1,18 +1,27 @@
 """Tests for HTTP transport, auth, and JSON-RPC routing."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from custom_components.oidc_provider.token_validator import get_issuer_from_request
 
-from custom_components.mcp_server_http_transport.const import DOMAIN
+from custom_components.mcp_server_http_transport.const import (
+    DOMAIN,
+    MCP_HTTP_PATH,
+    MCP_PATH,
+    RESOURCE_METADATA_PREFIX,
+)
 from custom_components.mcp_server_http_transport.http import (
+    REGISTERED_ROUTES,
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
     MCPSubpathProtectedResourceMetadataView,
     _get_issuer,
     _get_protected_resource_metadata,
+    mcp_path_is_contested,
+    register_mcp_views,
 )
 from custom_components.mcp_server_http_transport.tools import TOOLS
 
@@ -143,6 +152,7 @@ class TestMCPSubpathProtectedResourceMetadataView:
         """Test GET returns protected resource metadata."""
         request = Mock()
         request.headers = {}
+        request.path = f"{RESOURCE_METADATA_PREFIX}{MCP_PATH}"
         request.url.origin.return_value = "https://homeassistant.local"
 
         view = MCPSubpathProtectedResourceMetadataView(Mock())
@@ -151,6 +161,21 @@ class TestMCPSubpathProtectedResourceMetadataView:
         assert response.status == 200
         body = json.loads(response.body)
         assert body["resource"] == "https://homeassistant.local/api/mcp"
+
+    async def test_get_describes_the_endpoint_the_path_names(self):
+        """Metadata for the dedicated path describes that path as the resource."""
+        request = Mock()
+        request.headers = {}
+        request.path = f"{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}"
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        view = MCPSubpathProtectedResourceMetadataView(Mock())
+        response = await view.get(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert body["resource"] == f"https://homeassistant.local{MCP_HTTP_PATH}"
+        assert body["resource_documentation"] == f"https://homeassistant.local{MCP_HTTP_PATH}"
 
     async def test_get_returns_404_when_oidc_unavailable(self):
         """Test GET returns 404 when OIDC provider is not installed."""
@@ -315,6 +340,7 @@ class TestMCPEndpointView:
         """Test GET without a token returns 401 carrying the metadata pointer."""
         request = Mock()
         request.headers = {}
+        request.path = MCP_PATH
         request.url.origin.return_value = "https://homeassistant.local"
 
         with patch(
@@ -329,6 +355,25 @@ class TestMCPEndpointView:
         assert (
             'resource_metadata="https://homeassistant.local:8123'
             '/.well-known/oauth-protected-resource/api/mcp"' in response.headers["WWW-Authenticate"]
+        )
+
+    async def test_challenge_points_at_the_metadata_for_the_path_used(self, view):
+        """A probe on the dedicated path is pointed at that path's metadata."""
+        request = Mock()
+        request.headers = {}
+        request.path = MCP_HTTP_PATH
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        with patch(
+            "custom_components.mcp_server_http_transport.http._get_issuer",
+            return_value="https://homeassistant.local:8123",
+        ):
+            response = await view.get(request)
+
+        assert response.status == 401
+        assert (
+            f'resource_metadata="https://homeassistant.local:8123'
+            f'{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}"' in response.headers["WWW-Authenticate"]
         )
 
     async def test_get_with_valid_token_returns_405(self, view):
@@ -759,6 +804,7 @@ class TestOidcAudienceBinding:
         import sys
 
         request = Mock()
+        request.path = MCP_PATH
         request.headers = {
             "Authorization": "Bearer t",
             "X-Forwarded-Proto": "https",
@@ -776,6 +822,29 @@ class TestOidcAudienceBinding:
         assert result == {"sub": "u"}
         _, kwargs = mv.validate_access_token.call_args
         assert kwargs.get("expected_audience") == "https://ha.example.com/api/mcp"
+
+    async def test_audience_follows_the_endpoint_the_client_called(self, view):
+        """A token for the dedicated path is bound to that path, not /api/mcp."""
+        import sys
+
+        request = Mock()
+        request.path = MCP_HTTP_PATH
+        request.headers = {
+            "Authorization": "Bearer t",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "ha.example.com",
+        }
+
+        mv = sys.modules["custom_components.oidc_provider.token_validator"]
+        mv.validate_access_token.reset_mock()
+        mv.validate_access_token.return_value = {"sub": "u"}
+        try:
+            await view._validate_token(request)
+        finally:
+            mv.validate_access_token.return_value = None
+
+        _, kwargs = mv.validate_access_token.call_args
+        assert kwargs.get("expected_audience") == f"https://ha.example.com{MCP_HTTP_PATH}"
 
     async def test_falls_back_to_legacy_signature_on_type_error(self, view):
         """An older OIDC provider without expected_audience still works."""
@@ -803,3 +872,110 @@ class TestOidcAudienceBinding:
             mv.validate_access_token.return_value = None
 
         assert result == {"sub": "legacy"}
+
+
+class _FakeRoute:
+    """A registered route, carrying only what the conflict check reads."""
+
+    def __init__(self, method: str, path: str) -> None:
+        self.method = method
+        self.resource = SimpleNamespace(canonical=path)
+
+
+class _FakeRouter:
+    """A router that records routes the way HomeAssistantView.register adds them."""
+
+    def __init__(self) -> None:
+        self._routes: list[_FakeRoute] = []
+
+    def routes(self) -> list[_FakeRoute]:
+        return list(self._routes)
+
+    def add_view(self, view) -> None:
+        for method in ("get", "post", "delete", "put", "patch", "head", "options"):
+            if not getattr(view, method, None):
+                continue
+            for url in [view.url, *view.extra_urls]:
+                self._routes.append(_FakeRoute(method.upper(), url))
+
+
+@pytest.fixture
+def routing_hass():
+    """A hass whose HTTP router records what gets registered on it."""
+    hass = Mock()
+    hass.data = {DOMAIN: {}}
+    router = _FakeRouter()
+    hass.http.app.router = router
+    hass.http.register_view = router.add_view
+    return hass
+
+
+def _paths(router: _FakeRouter, method: str = "POST") -> list[str]:
+    """Return the paths serving a method, in registration order."""
+    return [route.resource.canonical for route in router.routes() if route.method == method]
+
+
+class TestRegisterMCPViews:
+    """Test which paths the integration claims, and how it spots a conflict."""
+
+    def test_claims_both_paths_when_api_mcp_is_free(self, routing_hass, mock_server):
+        """With nothing else on /api/mcp, the endpoint serves both paths."""
+        contested = register_mcp_views(routing_hass, mock_server, False)
+
+        assert contested is False
+        assert _paths(routing_hass.http.app.router) == [MCP_PATH, MCP_HTTP_PATH]
+
+    def test_registers_the_metadata_views(self, routing_hass, mock_server):
+        """Both RFC 9728 metadata paths are served alongside the endpoint."""
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert _paths(routing_hass.http.app.router, "GET") == [
+            RESOURCE_METADATA_PREFIX,
+            f"{RESOURCE_METADATA_PREFIX}{MCP_PATH}",
+            f"{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}",
+            MCP_PATH,
+            MCP_HTTP_PATH,
+        ]
+
+    def test_stays_off_api_mcp_when_another_integration_serves_it(self, routing_hass, mock_server):
+        """A path already answering POST elsewhere is left alone entirely.
+
+        Home Assistant's built-in mcp_server registers no GET on /api/mcp, so
+        taking half the path would answer a client's discovery probe here while
+        its actual traffic went to the other integration.
+        """
+        router = routing_hass.http.app.router
+        router._routes.append(_FakeRoute("POST", MCP_PATH))
+
+        contested = register_mcp_views(routing_hass, mock_server, False)
+
+        assert contested is True
+        assert _paths(router) == [MCP_PATH, MCP_HTTP_PATH]  # the foreign one, then ours
+        assert MCP_PATH not in _paths(router, "GET")
+
+    def test_own_routes_are_not_mistaken_for_a_conflict(self, routing_hass, mock_server):
+        """A reload re-registers the views; that is not another integration."""
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert mcp_path_is_contested(routing_hass) is False
+
+        contested = register_mcp_views(routing_hass, mock_server, False)
+
+        assert contested is False
+
+    def test_conflict_is_seen_when_the_other_integration_arrives_later(
+        self, routing_hass, mock_server
+    ):
+        """A path claimed after setup still reports as contested."""
+        register_mcp_views(routing_hass, mock_server, False)
+        routing_hass.http.app.router._routes.append(_FakeRoute("POST", MCP_PATH))
+
+        assert mcp_path_is_contested(routing_hass) is True
+
+    def test_registered_routes_survive_an_unload(self, routing_hass, mock_server):
+        """The tracked routes live outside hass.data[DOMAIN], which unload clears."""
+        register_mcp_views(routing_hass, mock_server, False)
+        routing_hass.data[DOMAIN].clear()
+
+        assert routing_hass.data[REGISTERED_ROUTES]
+        assert mcp_path_is_contested(routing_hass) is False

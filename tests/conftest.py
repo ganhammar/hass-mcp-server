@@ -48,6 +48,9 @@ def mock_hass():
     hass.config.entries.async_domains = Mock(return_value=["oidc_provider"])
     hass.http = Mock()
     hass.http.register_view = Mock()
+    # register_mcp_views reads the router to see who else serves /api/mcp; an
+    # empty router stands for an instance where nothing else does.
+    hass.http.app.router.routes = Mock(return_value=[])
     return hass
 
 

@@ -32,7 +32,7 @@ class TestAsyncSetupEntry:
     """Test async_setup_entry function."""
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.register_mcp_views", return_value=False)
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_initializes_server(
         self,
         mock_register_views,
@@ -53,7 +53,7 @@ class TestAsyncSetupEntry:
         mock_server_class.assert_called_once_with("home-assistant-mcp-server")
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.register_mcp_views", return_value=False)
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_registers_views(
         self,
         mock_register_views,
@@ -71,7 +71,7 @@ class TestAsyncSetupEntry:
         mock_register_views.assert_called_once_with(mock_hass, mock_server, False)
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.register_mcp_views", return_value=False)
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_passes_native_auth_enabled(
         self,
         mock_register_views,
@@ -89,7 +89,7 @@ class TestAsyncSetupEntry:
         mock_register_views.assert_called_once_with(mock_hass, mock_server, True)
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.register_mcp_views", return_value=False)
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_image_access_defaults_off(
         self,
         mock_register_views,
@@ -104,7 +104,7 @@ class TestAsyncSetupEntry:
         assert mock_hass.data[DOMAIN]["image_file_access"] is False
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.register_mcp_views", return_value=False)
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_wires_image_access_flags(
         self,
         mock_register_views,

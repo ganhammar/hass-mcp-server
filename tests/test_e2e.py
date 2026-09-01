@@ -292,6 +292,41 @@ async def test_dedicated_path_metadata_is_still_served(
     assert (await resp.json())["resource"].endswith(MCP_HTTP_PATH)
 
 
+async def test_root_metadata_names_a_path_this_integration_answers(
+    contested_entry: MockConfigEntry,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """The bare well-known path is where a client falls back when the suffixed one 404s.
+
+    Home Assistant's auth component claims this path on the versions that have a
+    root view of its own; where it does not, this integration answers and must
+    not name the endpoint another integration is holding.
+    """
+    client = await hass_client_no_auth()
+
+    resp = await client.get(RESOURCE_METADATA_PREFIX)
+
+    if resp.status == 404:
+        pytest.skip("Home Assistant's auth component serves this path on this version")
+    assert resp.status == 200
+    assert (await resp.json())["resource"].endswith(MCP_HTTP_PATH)
+
+
+async def test_root_metadata_names_api_mcp_while_this_integration_holds_it(
+    loaded_entry: MockConfigEntry,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """An uncontested instance keeps advertising /api/mcp as the resource."""
+    client = await hass_client_no_auth()
+
+    resp = await client.get(RESOURCE_METADATA_PREFIX)
+
+    if resp.status == 404:
+        pytest.skip("Home Assistant's auth component serves this path on this version")
+    assert resp.status == 200
+    assert (await resp.json())["resource"].endswith(MCP_PATH)
+
+
 async def test_a_competitor_arriving_after_setup_raises_the_repair(
     loaded_entry: MockConfigEntry,
     hass: HomeAssistant,

@@ -67,7 +67,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         An integration claims its paths from its own async_setup, so one that
         loads after this entry, at boot or when the user adds it, would
-        otherwise take MCP_PATH with nothing said until the next restart.
+        otherwise take MCP_PATH with nothing said until the next restart. The
+        event fires per component rather than per config entry, so a second
+        entry for a domain that is already loaded goes unseen; nothing that
+        registers HTTP views does that today.
         """
         _async_report_endpoint_conflict(hass)
 

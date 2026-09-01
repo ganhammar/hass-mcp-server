@@ -141,18 +141,24 @@ class MCPProtectedResourceMetadataView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request) -> web.Response:
-        """Return protected resource metadata for MCP_PATH.
+        """Return protected resource metadata for the endpoint this server holds.
 
-        The root path carries no endpoint of its own, and Home Assistant's auth
-        component serves its own metadata here on the versions that have one, so
-        this answers only where nothing else does.
+        The root path names no endpoint of its own, and a client falls back to it
+        when the path-suffixed form 404s, so it has to describe a path this
+        integration actually answers: naming a contested MCP_PATH would send the
+        client here for a token the integration holding that path rejects.
+
+        Home Assistant's auth component serves its own metadata here on the
+        versions that have a root view, and wins the route by registering first,
+        so this answers only where nothing else does.
         """
         if not _integration_loaded(self.hass):
             return _service_unavailable()
         base_url = _get_issuer(request)
         if base_url is None:
             return web.json_response({"error": "OIDC provider not available"}, status=404)
-        metadata = _get_protected_resource_metadata(base_url, MCP_PATH)
+        resource_path = MCP_PATH if serves_mcp_path(self.hass) else MCP_HTTP_PATH
+        metadata = _get_protected_resource_metadata(base_url, resource_path)
         return web.json_response(metadata)
 
 
@@ -457,8 +463,8 @@ class MCPEndpointView(HomeAssistantView):
         return await call_tool(self.hass, name, arguments)
 
 
-def register_mcp_views(hass: HomeAssistant, server: Server, native_auth_enabled: bool) -> bool:
-    """Register the HTTP views and report whether MCP_PATH is claimed elsewhere.
+def register_mcp_views(hass: HomeAssistant, server: Server, native_auth_enabled: bool) -> None:
+    """Register the HTTP views this integration serves.
 
     MCP_PATH is skipped, endpoint and metadata alike, when something else
     already has it bound. Home Assistant's built-in mcp_server registers no GET
@@ -470,13 +476,12 @@ def register_mcp_views(hass: HomeAssistant, server: Server, native_auth_enabled:
     A reload updates the view the router already holds instead of registering a
     second one, which would sit behind the first and never be reached.
     """
-    contested = mcp_path_is_contested(hass)
-
     if (endpoint := hass.data.get(REGISTERED_ENDPOINT)) is not None:
         endpoint.server = server
         endpoint.native_auth_enabled = native_auth_enabled
-        return contested
+        return
 
+    contested = mcp_path_is_contested(hass)
     endpoint_paths = [MCP_HTTP_PATH] if contested else [MCP_PATH, MCP_HTTP_PATH]
     endpoint = MCPEndpointView(hass, server, native_auth_enabled, paths=endpoint_paths)
     metadata_paths = [f"{RESOURCE_METADATA_PREFIX}{path}" for path in endpoint_paths]
@@ -489,5 +494,3 @@ def register_mcp_views(hass: HomeAssistant, server: Server, native_auth_enabled:
 
     hass.data[REGISTERED_ROUTES] = {route for route in router.routes() if route not in before}
     hass.data[REGISTERED_ENDPOINT] = endpoint
-
-    return contested

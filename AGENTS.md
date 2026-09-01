@@ -51,5 +51,21 @@ when core changes underneath it.
 ## Conventions
 
 Black and Ruff at line length 100, both enforced in CI. Tools register through
-`@register_tool` and return `{"content": [{"type": "text", ...}]}`; errors come back
-as text in that same shape rather than as raised exceptions.
+`@register_tool` and return `{"content": [{"type": "text", ...}]}`; a failure a
+handler anticipates comes back as text in that same shape rather than as a raised
+exception.
+
+`call_tool` owns the two things a handler does not have to. It rejects a call the
+caller got wrong — an unknown name, a non-object `arguments`, a declared-required
+property that is absent or null — by raising `InvalidToolRequest`, which the
+transport reports as JSON-RPC `-32602`; a handler therefore never has to defend
+against a missing required key. Anything a handler raises that it did not expect
+is caught and returned as a result with `isError: true`, so a single failing tool
+cannot take down the JSON-RPC response.
+
+Two consequences worth knowing before you write a tool. Listing a property in
+`required` means the handler is guaranteed it, so any guidance the handler wants
+to give about that property being absent is unreachable — put the reason in the
+property's schema `description`, which the `-32602` message quotes back. And
+`isError` is currently set only by that wrapper, so a handler-caught failure still
+returns a success-shaped result whose text happens to describe an error.

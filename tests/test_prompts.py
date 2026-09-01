@@ -206,7 +206,7 @@ class TestPrompts:
         with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
             response = await view.post(request)
 
-        assert response.status == 500
+        assert response.status == 200
         body = json.loads(response.body)
         assert "Unknown prompt" in body["error"]["message"]
 

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from custom_components.oidc_provider.token_validator import get_issuer_from_request
 
+from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.http import (
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
@@ -13,6 +14,7 @@ from custom_components.mcp_server_http_transport.http import (
     _get_issuer,
     _get_protected_resource_metadata,
 )
+from custom_components.mcp_server_http_transport.tools import TOOLS
 
 
 def test_get_base_url_with_forwarded_headers():
@@ -164,26 +166,30 @@ class TestMCPSubpathProtectedResourceMetadataView:
         assert response.status == 404
 
 
+@pytest.fixture
+def mock_server():
+    """Create a mock MCP server."""
+    return Mock()
+
+
+@pytest.fixture
+def mock_hass():
+    """Create a mock Home Assistant instance with the integration loaded."""
+    hass = Mock()
+    hass.states = Mock()
+    hass.services = Mock()
+    hass.data = {DOMAIN: {"entry_id": Mock()}}
+    return hass
+
+
+@pytest.fixture
+def view(mock_hass, mock_server):
+    """Create an MCPEndpointView instance."""
+    return MCPEndpointView(mock_hass, mock_server)
+
+
 class TestMCPEndpointView:
     """Test the MCP endpoint view: auth, routing, and error handling."""
-
-    @pytest.fixture
-    def mock_server(self):
-        """Create a mock MCP server."""
-        return Mock()
-
-    @pytest.fixture
-    def mock_hass(self):
-        """Create a mock Home Assistant instance."""
-        hass = Mock()
-        hass.states = Mock()
-        hass.services = Mock()
-        return hass
-
-    @pytest.fixture
-    def view(self, mock_hass, mock_server):
-        """Create an MCPEndpointView instance."""
-        return MCPEndpointView(mock_hass, mock_server)
 
     async def test_post_without_token_returns_401(self, view):
         """Test POST without Authorization header returns 401."""
@@ -377,10 +383,154 @@ class TestMCPEndpointView:
         with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
             response = await view.post(request)
 
-        assert response.status == 500
+        assert response.status == 200
         body = json.loads(response.body)
-        assert "error" in body
+        assert body["error"]["code"] == -32602
         assert "Unknown tool" in body["error"]["message"]
+
+
+class TestToolErrorHandling:
+    """Regression for #82: a failing tool call still answers with a usable body.
+
+    A client working from a cached copy of an older tool list keeps sending the
+    argument shape it last saw, so the transport has to name what is wrong. A
+    JSON-RPC error is a complete response and ships at 200, because under a
+    non-2xx an intermediary proxy substitutes its own error page and the client
+    never sees the body.
+    """
+
+    async def _call(self, view, name, arguments, msg_id=1):
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+                "id": msg_id,
+            }
+        )
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        return response, json.loads(response.body)
+
+    async def test_missing_required_argument_returns_invalid_params(self, view):
+        """A stale-schema call names the property it left out."""
+        response, body = await self._call(
+            view,
+            "get_statistics",
+            {
+                "statistic_ids": ["sensor.example"],
+                "start_time": "2026-08-17T00:00:00",
+                "period": "hour",
+            },
+        )
+
+        assert response.status == 200
+        assert body["error"]["code"] == -32602
+        assert "entity_id" in body["error"]["message"]
+        assert body["id"] == 1
+
+    async def test_missing_arguments_lists_every_required_property(self, view):
+        response, body = await self._call(view, "get_statistics", {})
+
+        assert body["error"]["code"] == -32602
+        assert "entity_id" in body["error"]["message"]
+        assert "start_time" in body["error"]["message"]
+
+    async def test_explicit_null_counts_as_a_missing_property(self, view):
+        """Drift sends a null as readily as it drops the key; both are invalid."""
+        response, body = await self._call(
+            view,
+            "get_statistics",
+            {"entity_id": None, "start_time": None},
+        )
+
+        assert response.status == 200
+        assert body["error"]["code"] == -32602
+        assert "entity_id" in body["error"]["message"]
+        assert "start_time" in body["error"]["message"]
+
+    async def test_non_dict_arguments_are_rejected(self, view):
+        response, body = await self._call(view, "get_statistics", ["sensor.example"])
+
+        assert response.status == 200
+        assert body["error"]["code"] == -32602
+        assert "must be a JSON object" in body["error"]["message"]
+
+    async def test_non_dict_arguments_never_reach_a_tool_with_no_required_properties(self, view):
+        """restore_config_backup requires nothing, so a coerced {} would restore a backup."""
+        called = False
+
+        async def handler(hass, arguments):
+            nonlocal called
+            called = True
+            return {"content": []}
+
+        entry = TOOLS["restore_config_backup"]
+        with patch.dict(
+            TOOLS,
+            {"restore_config_backup": {"schema": entry["schema"], "handler": handler}},
+        ):
+            response, body = await self._call(view, "restore_config_backup", "2026-01-01")
+
+        assert called is False
+        assert body["error"]["code"] == -32602
+        assert "must be a JSON object" in body["error"]["message"]
+
+    async def test_missing_confirm_reports_why_it_is_required(self, view):
+        """The -32602 carries the schema description, so the safety reason survives."""
+        response, body = await self._call(
+            view, "clear_statistics", {"statistic_ids": ["sensor.energy"]}
+        )
+
+        assert body["error"]["code"] == -32602
+        assert "confirm" in body["error"]["message"]
+        assert "irreversible" in body["error"]["message"]
+
+    async def test_unknown_tool_is_a_caller_error(self, view):
+        response, body = await self._call(view, "get_statistcs", {})
+
+        assert body["error"]["code"] == -32602
+        assert "Unknown tool" in body["error"]["message"]
+
+    async def test_unhandled_handler_exception_becomes_is_error_result(self, view):
+        """An exception the handler does not catch is reported inside the result."""
+
+        async def boom(hass, arguments):
+            raise RuntimeError("recorder exploded")
+
+        with patch.dict(
+            TOOLS,
+            {"get_statistics": {"schema": TOOLS["get_statistics"]["schema"], "handler": boom}},
+        ):
+            response, body = await self._call(
+                view,
+                "get_statistics",
+                {"entity_id": "sensor.example", "start_time": "2026-08-17T00:00:00"},
+            )
+
+        assert response.status == 200
+        assert "error" not in body
+        assert body["result"]["isError"] is True
+        assert "recorder exploded" in body["result"]["content"][0]["text"]
+        assert body["id"] == 1
+
+    async def test_unparseable_body_returns_parse_error(self, view):
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(side_effect=ValueError("not json"))
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 400
+        body = json.loads(response.body)
+        assert body["error"]["code"] == -32700
 
 
 class TestIntegrationDisabledGate:

@@ -16,8 +16,10 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from aiohttp import web
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.recorder import Recorder
 from homeassistant.components.recorder.services import (
     SERVICE_GET_STATISTICS,
@@ -29,6 +31,17 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.recorder import DATA_INSTANCE
+
+from custom_components.mcp_server_http_transport.const import MCP_PATH
+
+# Core's built-in MCP server is what claims /api/mcp (#81). Importing it needs
+# aiohttp_sse, which only its own manifest pulls in, and the streamable endpoint
+# it collides on only exists from Home Assistant 2025.11; both absences raise
+# ImportError here and skip the contract rather than failing it.
+try:
+    from homeassistant.components.mcp_server.http import STREAMABLE_API
+except ImportError:
+    STREAMABLE_API = None
 
 # The KNX contracts below need the integration and its telegram store importable,
 # which takes KNX's own requirements (xknx, knx-frontend, knx-telegram-store) on
@@ -264,3 +277,77 @@ class TestKnxTelegramStoreContracts:
         """The window the tool reads off the config entry, and its fallback."""
         assert CONF_KNX_TELEGRAM_DB_LOAD_HOURS == "telegram_db_load_hours"
         assert KNX_TELEGRAM_LOAD_HOURS_DEFAULT == 24
+
+
+class _ContractView(HomeAssistantView):
+    """A view registered on two paths, standing in for the MCP endpoint."""
+
+    url = "/api/contract_test"
+    extra_urls = ["/api/contract_test_alt"]
+    name = "test:contract"
+    requires_auth = False
+
+    async def post(self, request: web.Request) -> web.Response:
+        """Serve nothing; only the registration is under test."""
+        return web.Response()
+
+
+def _register(view: HomeAssistantView, app: web.Application) -> None:
+    view.register(Mock(), app, app.router)
+
+
+class TestViewRegistrationContracts:
+    """Contracts for http.py, which reads the router to detect a path conflict.
+
+    Home Assistant exposes no way to ask who serves a path, or to unregister a
+    view, so register_mcp_views inspects hass.http.app.router directly. Nothing
+    promises that stays readable, and the conflict with core's mcp_server on
+    /api/mcp (#81) is invisible without it.
+    """
+
+    def test_register_serves_url_and_extra_urls(self):
+        """The endpoint reaches its second path through extra_urls."""
+        app = web.Application()
+
+        _register(_ContractView(), app)
+
+        assert [route.resource.canonical for route in app.router.routes()] == [
+            "/api/contract_test",
+            "/api/contract_test_alt",
+        ]
+
+    def test_routes_expose_method_and_canonical_path(self):
+        """The conflict check reads exactly these two attributes off a route."""
+        app = web.Application()
+
+        _register(_ContractView(), app)
+
+        route = next(iter(app.router.routes()))
+        assert route.method == "POST"
+        assert route.resource.canonical == "/api/contract_test"
+
+    def test_a_second_view_on_one_path_registers_rather_than_raising(self):
+        """Two integrations can hold one path, which is why #81 is silent.
+
+        HomeAssistantView.register adds routes without a name, so aiohttp raises
+        nothing on the duplicate. Were this to start raising, registering
+        MCP_PATH while core's mcp_server holds it would fail setup instead.
+        """
+        app = web.Application()
+
+        _register(_ContractView(), app)
+        _register(_ContractView(), app)
+
+        assert len(list(app.router.routes())) == 4
+
+    @pytest.mark.skipif(
+        STREAMABLE_API is None,
+        reason="core's streamable MCP endpoint is not importable on this install",
+    )
+    def test_core_streamable_endpoint_is_the_path_this_integration_serves(self):
+        """The conflict this integration works around is core serving MCP_PATH.
+
+        If a release moves core's streamable endpoint, MCP_PATH stops being
+        contested and the repair, and the second path it points at, can go.
+        """
+        assert MCP_PATH == STREAMABLE_API

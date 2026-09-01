@@ -3,10 +3,11 @@
 The MCP server is an OAuth protected resource (RFC 8707). For the OIDC path it
 delegates signature/issuer checking to the paired provider's
 ``validate_access_token``, but it owns one piece of the contract itself: it
-derives ``expected_audience = {issuer}/api/mcp`` from the request and rejects any
-token whose ``aud`` is not bound to that resource. That seam breaks silently if
-either repo changes how the resource URI is derived or how ``aud`` is shaped,
-because each repo's own suite stays green.
+derives ``expected_audience`` from the endpoint the request came in on, and
+rejects any token whose ``aud`` is not bound to that resource. The two endpoints
+are separate resources, so a token minted for one is not accepted on the other.
+That seam breaks silently if either repo changes how the resource URI is derived
+or how ``aud`` is shaped, because each repo's own suite stays green.
 
 This pins the seam by exercising the *real* ``validate_access_token`` (the
 function ``http.py`` imports), which lives in the paired ``oidc_provider``
@@ -15,7 +16,7 @@ file; when it isn't present (a normal local checkout) ``conftest.py`` stubs the
 module instead and these tests skip.
 
 No browser and no issuance flow: a token is signed directly with a provider
-keypair seeded into ``hass.data`` and POSTed to ``/api/mcp``.
+keypair seeded into ``hass.data`` and POSTed to the endpoint under test.
 """
 
 import time
@@ -31,7 +32,11 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
-from custom_components.mcp_server_http_transport.const import DOMAIN
+from custom_components.mcp_server_http_transport.const import (
+    DOMAIN,
+    MCP_HTTP_PATH,
+    MCP_PATH,
+)
 
 # Skip unless the real paired provider is vendored. When conftest.py installs the
 # stub instead, the imported module is a Mock and there is nothing real to pin.
@@ -55,7 +60,8 @@ OIDC_DOMAIN = "oidc_provider"
 FORWARDED = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "mcp.example.com"}
 ISSUER_BASE = "https://mcp.example.com"
 TOKEN_ISSUER = f"{ISSUER_BASE}/oidc"
-RESOURCE = f"{ISSUER_BASE}/api/mcp"
+RESOURCE = f"{ISSUER_BASE}{MCP_PATH}"
+RESOURCE_HTTP = f"{ISSUER_BASE}{MCP_HTTP_PATH}"
 
 
 @pytest.fixture
@@ -101,9 +107,9 @@ def _sign(
     return jwt.encode(payload, pem, algorithm="RS256")
 
 
-async def _post_initialize(client: ClientSessionGenerator, token: str):
+async def _post_initialize(client: ClientSessionGenerator, token: str, path: str = MCP_PATH):
     return await client.post(
-        "/api/mcp",
+        path,
         json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
         headers={**FORWARDED, "Authorization": f"Bearer {token}"},
     )
@@ -178,3 +184,61 @@ async def test_unauthenticated_get_advertises_resource_metadata(
         'Bearer realm="MCP Server",'
         f' resource_metadata="{ISSUER_BASE}/.well-known/oauth-protected-resource/api/mcp"'
     )
+
+
+async def test_dedicated_path_accepts_a_token_bound_to_it(
+    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """The path this integration serves alone is a resource in its own right."""
+    client = await hass_client_no_auth()
+    token = _sign(oidc_ready, aud=RESOURCE_HTTP)
+
+    resp = await _post_initialize(client, token, MCP_HTTP_PATH)
+
+    assert resp.status == 200
+    assert (await resp.json())["result"]["protocolVersion"] == "2024-11-05"
+
+
+async def test_dedicated_path_rejects_a_token_bound_to_the_other_endpoint(
+    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """The two endpoints are separate resources, so their tokens do not cross.
+
+    A client that moves to the dedicated path re-runs discovery, is handed that
+    path's metadata by the 401, and asks for a token bound to it.
+    """
+    client = await hass_client_no_auth()
+    token = _sign(oidc_ready, aud=RESOURCE)
+
+    resp = await _post_initialize(client, token, MCP_HTTP_PATH)
+
+    assert resp.status == 401
+
+
+async def test_dedicated_path_advertises_its_own_resource_metadata(
+    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """The challenge points at the metadata for the path the client called."""
+    client = await hass_client_no_auth()
+
+    resp = await client.get(MCP_HTTP_PATH, headers=FORWARDED)
+
+    assert resp.status == 401
+    assert resp.headers["WWW-Authenticate"] == (
+        'Bearer realm="MCP Server",'
+        f' resource_metadata="{ISSUER_BASE}/.well-known/oauth-protected-resource{MCP_HTTP_PATH}"'
+    )
+
+
+async def test_dedicated_path_metadata_names_itself_as_the_resource(
+    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """Following that pointer yields metadata for the dedicated path."""
+    client = await hass_client_no_auth()
+
+    resp = await client.get(
+        f"/.well-known/oauth-protected-resource{MCP_HTTP_PATH}", headers=FORWARDED
+    )
+
+    assert resp.status == 200
+    assert (await resp.json())["resource"] == RESOURCE_HTTP

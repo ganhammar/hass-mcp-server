@@ -3,18 +3,74 @@
 import logging
 from typing import Any
 
-from aiohttp import web
+from aiohttp import hdrs, web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from mcp.server import Server
 
 from .completions import complete
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    MCP_HTTP_PATH,
+    MCP_PATH,
+    RESOURCE_METADATA_PREFIX,
+)
 from .prompts import get_prompt, get_prompts
 from .resources import get_resources, read_resource
 from .tools import InvalidToolRequest, call_tool, get_tool_schemas
 
 _LOGGER = logging.getLogger(__name__)
+
+# hass.data keys holding the routes this integration registered and the endpoint
+# view serving them. They sit outside hass.data[DOMAIN] on purpose:
+# async_unload_entry clears that, while routes stay bound until Home Assistant
+# restarts and a reload has to find the view the router already holds.
+REGISTERED_ROUTES = f"{DOMAIN}_routes"
+REGISTERED_ENDPOINT = f"{DOMAIN}_endpoint_view"
+
+
+def _resource_path(request_path: str) -> str:
+    """Return which MCP endpoint a request is about.
+
+    The RFC 9728 metadata path is the endpoint path suffixed onto the well-known
+    prefix, so one suffix test covers both /api/mcp_http and
+    /.well-known/oauth-protected-resource/api/mcp_http.
+    """
+    return MCP_HTTP_PATH if request_path.endswith(MCP_HTTP_PATH) else MCP_PATH
+
+
+def _mcp_post_routes(hass: HomeAssistant) -> list[web.AbstractRoute]:
+    """Return every route answering a POST to MCP_PATH, in registration order.
+
+    aiohttp walks same-path resources linearly and hands the request to the
+    first one that has the method, so the head of this list is what a client
+    POSTing to MCP_PATH actually reaches. A wildcard route carries METH_ANY
+    rather than a method name and answers POST just the same.
+    """
+    return [
+        route
+        for route in hass.http.app.router.routes()
+        if route.method in (hdrs.METH_POST, hdrs.METH_ANY)
+        and (resource := route.resource) is not None
+        and resource.canonical == MCP_PATH
+    ]
+
+
+def mcp_path_is_contested(hass: HomeAssistant) -> bool:
+    """Return True when an integration other than this one has MCP_PATH bound."""
+    ours = hass.data.get(REGISTERED_ROUTES, set())
+    return any(route not in ours for route in _mcp_post_routes(hass))
+
+
+def serves_mcp_path(hass: HomeAssistant) -> bool:
+    """Return True when a POST to MCP_PATH reaches this integration.
+
+    Only the head of the list matters, and it can be a route from an earlier
+    load: routes cannot be unregistered, so the view that claimed MCP_PATH
+    before a competitor appeared keeps answering there until a restart.
+    """
+    routes = _mcp_post_routes(hass)
+    return bool(routes) and routes[0] in hass.data.get(REGISTERED_ROUTES, set())
 
 
 def _integration_loaded(hass: HomeAssistant) -> bool:
@@ -61,14 +117,15 @@ def _get_issuer(request: web.Request) -> str | None:
         return None
 
 
-def _get_protected_resource_metadata(base_url: str) -> dict[str, Any]:
+def _get_protected_resource_metadata(base_url: str, resource_path: str) -> dict[str, Any]:
     """Generate OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
+    resource = f"{base_url}{resource_path}"
     return {
-        "resource": f"{base_url}/api/mcp",
+        "resource": resource,
         "authorization_servers": [f"{base_url}/oidc"],
         "bearer_methods_supported": ["header"],
         "resource_signing_alg_values_supported": ["RS256"],
-        "resource_documentation": f"{base_url}/api/mcp",
+        "resource_documentation": resource,
     }
 
 
@@ -84,52 +141,73 @@ class MCPProtectedResourceMetadataView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request) -> web.Response:
-        """Return protected resource metadata."""
+        """Return protected resource metadata for the endpoint this server holds.
+
+        The root path names no endpoint of its own, and a client falls back to it
+        when the path-suffixed form 404s, so it has to describe a path this
+        integration actually answers: naming a contested MCP_PATH would send the
+        client here for a token the integration holding that path rejects.
+
+        Home Assistant's auth component serves its own metadata here on the
+        versions that have a root view, and wins the route by registering first,
+        so this answers only where nothing else does.
+        """
         if not _integration_loaded(self.hass):
             return _service_unavailable()
         base_url = _get_issuer(request)
         if base_url is None:
             return web.json_response({"error": "OIDC provider not available"}, status=404)
-        metadata = _get_protected_resource_metadata(base_url)
+        resource_path = MCP_PATH if serves_mcp_path(self.hass) else MCP_HTTP_PATH
+        metadata = _get_protected_resource_metadata(base_url, resource_path)
         return web.json_response(metadata)
 
 
 class MCPSubpathProtectedResourceMetadataView(HomeAssistantView):
-    """OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728) with /mcp suffix."""
+    """OAuth 2.0 Protected Resource Metadata (RFC 9728) for each endpoint path."""
 
-    url = "/.well-known/oauth-protected-resource/api/mcp"
+    url = f"{RESOURCE_METADATA_PREFIX}{MCP_PATH}"
+    extra_urls = [f"{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}"]
     name = "api:mcp:metadata:mcp"
     requires_auth = False
 
-    def __init__(self, hass: HomeAssistant) -> None:
-        """Initialize the metadata view."""
+    def __init__(self, hass: HomeAssistant, paths: list[str] | None = None) -> None:
+        """Initialize the metadata view, optionally narrowing the paths served."""
         self.hass = hass
+        if paths is not None:
+            self.url, self.extra_urls = paths[0], list(paths[1:])
 
     async def get(self, request: web.Request) -> web.Response:
-        """Return protected resource metadata with /mcp suffix."""
+        """Return protected resource metadata for the endpoint the path names."""
         if not _integration_loaded(self.hass):
             return _service_unavailable()
         base_url = _get_issuer(request)
         if base_url is None:
             return web.json_response({"error": "OIDC provider not available"}, status=404)
-        metadata = _get_protected_resource_metadata(base_url)
+        metadata = _get_protected_resource_metadata(base_url, _resource_path(request.path))
         return web.json_response(metadata)
 
 
 class MCPEndpointView(HomeAssistantView):
     """MCP HTTP endpoint view."""
 
-    url = "/api/mcp"
+    url = MCP_PATH
+    extra_urls = [MCP_HTTP_PATH]
     name = "api:mcp"
     requires_auth = False
 
     def __init__(
-        self, hass: HomeAssistant, server: Server, native_auth_enabled: bool = False
+        self,
+        hass: HomeAssistant,
+        server: Server,
+        native_auth_enabled: bool = False,
+        paths: list[str] | None = None,
     ) -> None:
-        """Initialize the MCP endpoint."""
+        """Initialize the MCP endpoint, optionally narrowing the paths served."""
         self.hass = hass
         self.server = server
         self.native_auth_enabled = native_auth_enabled
+        if paths is not None:
+            self.url, self.extra_urls = paths[0], list(paths[1:])
 
     async def _validate_token(self, request: web.Request) -> dict[str, Any] | None:
         """Validate the bearer token via OIDC (if available) then native HA auth."""
@@ -150,7 +228,7 @@ class MCPEndpointView(HomeAssistantView):
             # This MCP server is the protected resource (RFC 8707); its canonical
             # URI is the resource a compliant client (e.g. Claude) binds the token
             # to. Require the token's aud to match it.
-            expected_audience = f"{expected_issuer}/api/mcp"
+            expected_audience = f"{expected_issuer}{_resource_path(request.path)}"
             try:
                 result = validate_access_token(
                     self.hass, token, expected_issuer, expected_audience=expected_audience
@@ -182,7 +260,9 @@ class MCPEndpointView(HomeAssistantView):
         """
         base_url = _get_issuer(request)
         if base_url is not None:
-            resource_metadata_url = f"{base_url}/.well-known/oauth-protected-resource/api/mcp"
+            resource_metadata_url = (
+                f"{base_url}{RESOURCE_METADATA_PREFIX}{_resource_path(request.path)}"
+            )
             www_authenticate = (
                 f'Bearer realm="MCP Server",' f' resource_metadata="{resource_metadata_url}"'
             )
@@ -381,3 +461,36 @@ class MCPEndpointView(HomeAssistantView):
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call a tool by name."""
         return await call_tool(self.hass, name, arguments)
+
+
+def register_mcp_views(hass: HomeAssistant, server: Server, native_auth_enabled: bool) -> None:
+    """Register the HTTP views this integration serves.
+
+    MCP_PATH is skipped, endpoint and metadata alike, when something else
+    already has it bound. Home Assistant's built-in mcp_server registers no GET
+    on the endpoint and no metadata at all, so serving either half would answer
+    a client's discovery from this integration while its actual traffic went
+    elsewhere, sending it to this integration's authorization server for a token
+    the other one will reject. MCP_HTTP_PATH is always served.
+
+    A reload updates the view the router already holds instead of registering a
+    second one, which would sit behind the first and never be reached.
+    """
+    if (endpoint := hass.data.get(REGISTERED_ENDPOINT)) is not None:
+        endpoint.server = server
+        endpoint.native_auth_enabled = native_auth_enabled
+        return
+
+    contested = mcp_path_is_contested(hass)
+    endpoint_paths = [MCP_HTTP_PATH] if contested else [MCP_PATH, MCP_HTTP_PATH]
+    endpoint = MCPEndpointView(hass, server, native_auth_enabled, paths=endpoint_paths)
+    metadata_paths = [f"{RESOURCE_METADATA_PREFIX}{path}" for path in endpoint_paths]
+
+    router = hass.http.app.router
+    before = set(router.routes())
+    hass.http.register_view(MCPProtectedResourceMetadataView(hass))
+    hass.http.register_view(MCPSubpathProtectedResourceMetadataView(hass, paths=metadata_paths))
+    hass.http.register_view(endpoint)
+
+    hass.data[REGISTERED_ROUTES] = {route for route in router.routes() if route not in before}
+    hass.data[REGISTERED_ENDPOINT] = endpoint

@@ -4,9 +4,15 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.mcp_server_http_transport import (
     DOMAIN,
+    _async_report_endpoint_conflict,
     async_setup,
     async_setup_entry,
     async_unload_entry,
+)
+from custom_components.mcp_server_http_transport.const import (
+    ISSUE_ENDPOINT_CONFLICT,
+    MCP_HTTP_PATH,
+    MCP_PATH,
 )
 
 
@@ -26,14 +32,10 @@ class TestAsyncSetupEntry:
     """Test async_setup_entry function."""
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
-    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_initializes_server(
         self,
-        mock_subpath_view,
-        mock_metadata_view,
-        mock_endpoint_view,
+        mock_register_views,
         mock_server_class,
         mock_hass,
         mock_config_entry,
@@ -51,104 +53,46 @@ class TestAsyncSetupEntry:
         mock_server_class.assert_called_once_with("home-assistant-mcp-server")
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
-    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_registers_views(
         self,
-        mock_subpath_view,
-        mock_metadata_view,
-        mock_endpoint_view,
+        mock_register_views,
         mock_server_class,
         mock_hass,
         mock_config_entry,
     ):
-        """Test async_setup_entry registers HTTP views."""
-        result = await async_setup_entry(mock_hass, mock_config_entry)
-
-        assert result is True
-        assert mock_hass.http.register_view.call_count == 3
-
-    @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
-    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
-    async def test_async_setup_entry_registers_protected_resource_views(
-        self,
-        mock_subpath_view_class,
-        mock_metadata_view_class,
-        mock_endpoint_view,
-        mock_server_class,
-        mock_hass,
-        mock_config_entry,
-    ):
-        """Test async_setup_entry registers protected resource metadata views."""
-        mock_metadata_view = Mock()
-        mock_subpath_view = Mock()
-        mock_metadata_view_class.return_value = mock_metadata_view
-        mock_subpath_view_class.return_value = mock_subpath_view
-
-        result = await async_setup_entry(mock_hass, mock_config_entry)
-
-        assert result is True
-        mock_metadata_view_class.assert_called_once()
-        mock_subpath_view_class.assert_called_once()
-
-    @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
-    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
-    async def test_async_setup_entry_registers_endpoint_view(
-        self,
-        mock_subpath_view,
-        mock_metadata_view,
-        mock_endpoint_view_class,
-        mock_server_class,
-        mock_hass,
-        mock_config_entry,
-    ):
-        """Test async_setup_entry registers endpoint view with hass and server."""
+        """Test async_setup_entry registers the HTTP views."""
         mock_server = Mock()
         mock_server_class.return_value = mock_server
-        mock_endpoint_view = Mock()
-        mock_endpoint_view_class.return_value = mock_endpoint_view
 
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
         assert result is True
-        mock_endpoint_view_class.assert_called_once_with(mock_hass, mock_server, False)
+        mock_register_views.assert_called_once_with(mock_hass, mock_server, False)
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
-    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_passes_native_auth_enabled(
         self,
-        mock_subpath_view,
-        mock_metadata_view,
-        mock_endpoint_view_class,
+        mock_register_views,
         mock_server_class,
         mock_hass,
         mock_config_entry,
     ):
-        """Test async_setup_entry passes native_auth_enabled to endpoint view."""
+        """Test async_setup_entry passes native_auth_enabled on to registration."""
         mock_config_entry.data = {"native_auth_enabled": True}
         mock_server = Mock()
         mock_server_class.return_value = mock_server
 
         await async_setup_entry(mock_hass, mock_config_entry)
 
-        mock_endpoint_view_class.assert_called_once_with(mock_hass, mock_server, True)
+        mock_register_views.assert_called_once_with(mock_hass, mock_server, True)
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
-    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_image_access_defaults_off(
         self,
-        mock_subpath_view,
-        mock_metadata_view,
-        mock_endpoint_view,
+        mock_register_views,
         mock_server_class,
         mock_hass,
         mock_config_entry,
@@ -160,14 +104,10 @@ class TestAsyncSetupEntry:
         assert mock_hass.data[DOMAIN]["image_file_access"] is False
 
     @patch("custom_components.mcp_server_http_transport.Server")
-    @patch("custom_components.mcp_server_http_transport.MCPEndpointView")
-    @patch("custom_components.mcp_server_http_transport.MCPProtectedResourceMetadataView")
-    @patch("custom_components.mcp_server_http_transport.MCPSubpathProtectedResourceMetadataView")
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_wires_image_access_flags(
         self,
-        mock_subpath_view,
-        mock_metadata_view,
-        mock_endpoint_view,
+        mock_register_views,
         mock_server_class,
         mock_hass,
         mock_config_entry,
@@ -202,7 +142,8 @@ class TestUpdateListener:
 class TestAsyncUnloadEntry:
     """Test async_unload_entry function."""
 
-    async def test_async_unload_entry_clears_data(self, mock_hass, mock_config_entry):
+    @patch("custom_components.mcp_server_http_transport.ir")
+    async def test_async_unload_entry_clears_data(self, mock_ir, mock_hass, mock_config_entry):
         """Test async_unload_entry clears domain data."""
         mock_hass.data[DOMAIN] = {"server": Mock()}
 
@@ -210,3 +151,62 @@ class TestAsyncUnloadEntry:
 
         assert result is True
         assert len(mock_hass.data[DOMAIN]) == 0
+
+    @patch("custom_components.mcp_server_http_transport.ir")
+    async def test_async_unload_entry_keeps_the_conflict_issue(
+        self, mock_ir, mock_hass, mock_config_entry
+    ):
+        """Unloading binds nothing back: the routes hold the path until a restart."""
+        mock_hass.data[DOMAIN] = {"server": Mock()}
+
+        await async_unload_entry(mock_hass, mock_config_entry)
+
+        mock_ir.async_delete_issue.assert_not_called()
+
+
+class TestEndpointConflictIssue:
+    """Test the repair raised when another integration also serves /api/mcp."""
+
+    @patch("custom_components.mcp_server_http_transport.ir")
+    @patch("custom_components.mcp_server_http_transport.mcp_path_is_contested", return_value=True)
+    def test_conflict_raises_issue(self, mock_contested, mock_ir, mock_hass):
+        """A contested path raises a repair naming both paths."""
+        mock_ir.async_get.return_value.async_get_issue.return_value = None
+
+        _async_report_endpoint_conflict(mock_hass)
+
+        mock_ir.async_create_issue.assert_called_once()
+        args, kwargs = mock_ir.async_create_issue.call_args
+        assert args == (mock_hass, DOMAIN, ISSUE_ENDPOINT_CONFLICT)
+        assert kwargs["translation_key"] == ISSUE_ENDPOINT_CONFLICT
+        assert kwargs["translation_placeholders"] == {
+            "path": MCP_PATH,
+            "dedicated_path": MCP_HTTP_PATH,
+        }
+        assert kwargs["severity"] is mock_ir.IssueSeverity.WARNING
+        assert kwargs["is_fixable"] is False
+
+    @patch("custom_components.mcp_server_http_transport.ir")
+    @patch("custom_components.mcp_server_http_transport.mcp_path_is_contested", return_value=False)
+    def test_no_conflict_clears_issue(self, mock_contested, mock_ir, mock_hass):
+        """An uncontested path clears any issue left from an earlier check."""
+        _async_report_endpoint_conflict(mock_hass)
+
+        mock_ir.async_create_issue.assert_not_called()
+        mock_ir.async_delete_issue.assert_called_once_with(
+            mock_hass, DOMAIN, ISSUE_ENDPOINT_CONFLICT
+        )
+
+    @patch("custom_components.mcp_server_http_transport.ir")
+    @patch("custom_components.mcp_server_http_transport.mcp_path_is_contested", return_value=True)
+    def test_repeated_checks_warn_once(self, mock_contested, mock_ir, mock_hass, caplog):
+        """The check runs on every component load, so only a new conflict warns."""
+        mock_ir.async_get.return_value.async_get_issue.return_value = None
+        _async_report_endpoint_conflict(mock_hass)
+
+        mock_ir.async_get.return_value.async_get_issue.return_value = Mock()
+        caplog.clear()
+        _async_report_endpoint_conflict(mock_hass)
+
+        assert not caplog.records
+        assert mock_ir.async_create_issue.call_count == 2

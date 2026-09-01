@@ -1,25 +1,36 @@
 """Tests for HTTP transport, auth, and JSON-RPC routing."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from custom_components.oidc_provider.token_validator import get_issuer_from_request
 
-from custom_components.mcp_server_http_transport.const import DOMAIN
+from custom_components.mcp_server_http_transport.const import (
+    DOMAIN,
+    MCP_HTTP_PATH,
+    MCP_PATH,
+    RESOURCE_METADATA_PREFIX,
+)
 from custom_components.mcp_server_http_transport.http import (
+    REGISTERED_ENDPOINT,
+    REGISTERED_ROUTES,
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
     MCPSubpathProtectedResourceMetadataView,
     _get_issuer,
     _get_protected_resource_metadata,
+    mcp_path_is_contested,
+    register_mcp_views,
+    serves_mcp_path,
 )
 from custom_components.mcp_server_http_transport.tools import TOOLS
 
 
 def test_get_base_url_with_forwarded_headers():
     """Test get_issuer_from_request with X-Forwarded headers (proxy setup)."""
-    request = Mock()
+    request = Mock(path=MCP_PATH)
     request.headers = {
         "X-Forwarded-Proto": "https",
         "X-Forwarded-Host": "example.com",
@@ -34,7 +45,7 @@ def test_get_base_url_with_forwarded_headers():
 
 def test_get_base_url_without_forwarded_headers():
     """Test get_issuer_from_request without X-Forwarded headers (direct connection)."""
-    request = Mock()
+    request = Mock(path=MCP_PATH)
     request.headers = {}
     request.url.origin.return_value = "http://192.168.1.100:8123"
 
@@ -46,7 +57,7 @@ def test_get_base_url_without_forwarded_headers():
 
 def test_get_base_url_with_partial_forwarded_headers():
     """Test get_issuer_from_request with only one X-Forwarded header (should use fallback)."""
-    request = Mock()
+    request = Mock(path=MCP_PATH)
     request.headers = {
         "X-Forwarded-Proto": "https",
     }
@@ -62,7 +73,7 @@ def test_get_issuer_returns_none_when_oidc_unavailable():
     """Test _get_issuer returns None when oidc_provider import fails."""
     import sys
 
-    request = Mock()
+    request = Mock(path=MCP_PATH)
     # Temporarily remove the mocked oidc module so the import raises ImportError
     saved = sys.modules.pop("custom_components.oidc_provider.token_validator", None)
     saved_parent = sys.modules.pop("custom_components.oidc_provider", None)
@@ -80,7 +91,7 @@ def test_get_protected_resource_metadata():
     """Test _get_protected_resource_metadata returns correct structure."""
     base_url = "https://homeassistant.local"
 
-    metadata = _get_protected_resource_metadata(base_url)
+    metadata = _get_protected_resource_metadata(base_url, MCP_PATH)
 
     assert metadata["resource"] == f"{base_url}/api/mcp"
     assert metadata["authorization_servers"] == [f"{base_url}/oidc"]
@@ -92,13 +103,14 @@ def test_get_protected_resource_metadata():
 class TestMCPProtectedResourceMetadataView:
     """Test the MCP protected resource metadata view at root."""
 
-    async def test_get_returns_metadata(self):
+    async def test_get_returns_metadata(self, routing_hass, mock_server):
         """Test GET returns protected resource metadata."""
-        request = Mock()
+        register_mcp_views(routing_hass, mock_server, False)
+        request = Mock(path=MCP_PATH)
         request.headers = {}
         request.url.origin.return_value = "https://homeassistant.local"
 
-        view = MCPProtectedResourceMetadataView(Mock())
+        view = MCPProtectedResourceMetadataView(routing_hass)
         response = await view.get(request)
 
         assert response.status == 200
@@ -108,23 +120,46 @@ class TestMCPProtectedResourceMetadataView:
         assert body["resource"] == "https://homeassistant.local/api/mcp"
         assert body["authorization_servers"] == ["https://homeassistant.local/oidc"]
 
-    async def test_get_with_forwarded_headers(self):
+    async def test_get_with_forwarded_headers(self, routing_hass, mock_server):
         """Test GET with X-Forwarded headers."""
-        request = Mock()
+        register_mcp_views(routing_hass, mock_server, False)
+        request = Mock(path=MCP_PATH)
         request.headers = {
             "X-Forwarded-Proto": "https",
             "X-Forwarded-Host": "example.com",
         }
 
-        view = MCPProtectedResourceMetadataView(Mock())
+        view = MCPProtectedResourceMetadataView(routing_hass)
         response = await view.get(request)
 
         body = json.loads(response.body)
         assert body["resource"] == "https://example.com/api/mcp"
 
+    async def test_get_names_the_dedicated_path_when_api_mcp_is_contested(
+        self, routing_hass, mock_server
+    ):
+        """The root path describes an endpoint this integration actually answers.
+
+        A client falls back here when the path-suffixed metadata 404s, so naming
+        a contested /api/mcp would send it to this authorization server for a
+        token the integration holding that path rejects.
+        """
+        routing_hass.http.app.router._routes.append(_FakeRoute("POST", MCP_PATH))
+        register_mcp_views(routing_hass, mock_server, False)
+        request = Mock(path=RESOURCE_METADATA_PREFIX)
+        request.headers = {}
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        view = MCPProtectedResourceMetadataView(routing_hass)
+        response = await view.get(request)
+
+        assert json.loads(response.body)["resource"] == (
+            f"https://homeassistant.local{MCP_HTTP_PATH}"
+        )
+
     async def test_get_returns_404_when_oidc_unavailable(self):
         """Test GET returns 404 when OIDC provider is not installed."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
 
         view = MCPProtectedResourceMetadataView(Mock())
         with patch(
@@ -141,7 +176,7 @@ class TestMCPSubpathProtectedResourceMetadataView:
 
     async def test_get_returns_metadata(self):
         """Test GET returns protected resource metadata."""
-        request = Mock()
+        request = Mock(path=f"{RESOURCE_METADATA_PREFIX}{MCP_PATH}")
         request.headers = {}
         request.url.origin.return_value = "https://homeassistant.local"
 
@@ -152,9 +187,23 @@ class TestMCPSubpathProtectedResourceMetadataView:
         body = json.loads(response.body)
         assert body["resource"] == "https://homeassistant.local/api/mcp"
 
+    async def test_get_describes_the_endpoint_the_path_names(self):
+        """Metadata for the dedicated path describes that path as the resource."""
+        request = Mock(path=f"{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}")
+        request.headers = {}
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        view = MCPSubpathProtectedResourceMetadataView(Mock())
+        response = await view.get(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert body["resource"] == f"https://homeassistant.local{MCP_HTTP_PATH}"
+        assert body["resource_documentation"] == f"https://homeassistant.local{MCP_HTTP_PATH}"
+
     async def test_get_returns_404_when_oidc_unavailable(self):
         """Test GET returns 404 when OIDC provider is not installed."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
 
         view = MCPSubpathProtectedResourceMetadataView(Mock())
         with patch(
@@ -193,7 +242,7 @@ class TestMCPEndpointView:
 
     async def test_post_without_token_returns_401(self, view):
         """Test POST without Authorization header returns 401."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {}
         request.url.origin.return_value = "https://homeassistant.local"
 
@@ -206,7 +255,7 @@ class TestMCPEndpointView:
 
     async def test_post_with_invalid_token_returns_401(self, view):
         """Test POST with invalid token returns 401."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer invalid_token"}
         request.url.origin.return_value = "https://homeassistant.local"
 
@@ -219,7 +268,7 @@ class TestMCPEndpointView:
 
     async def test_post_initialize_request(self, view):
         """Test POST with initialize request."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 1})
 
@@ -235,7 +284,7 @@ class TestMCPEndpointView:
 
     async def test_post_initialize_advertises_capabilities(self, view):
         """Test POST initialize advertises resources and prompts capabilities."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 21})
 
@@ -250,7 +299,7 @@ class TestMCPEndpointView:
 
     async def test_post_tools_list_request(self, view):
         """Test POST with tools/list request."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "tools/list", "id": 2})
 
@@ -285,7 +334,7 @@ class TestMCPEndpointView:
 
     async def test_post_unknown_method_returns_error(self, view):
         """Test POST with unknown method returns error."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(
             return_value={"jsonrpc": "2.0", "method": "unknown_method", "id": 9}
@@ -302,7 +351,7 @@ class TestMCPEndpointView:
 
     async def test_post_notification_returns_202(self, view):
         """Test POST with notification (no id) returns 202."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "some_notification"})
 
@@ -313,7 +362,7 @@ class TestMCPEndpointView:
 
     async def test_get_without_token_returns_401_with_challenge(self, view):
         """Test GET without a token returns 401 carrying the metadata pointer."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {}
         request.url.origin.return_value = "https://homeassistant.local"
 
@@ -331,9 +380,27 @@ class TestMCPEndpointView:
             '/.well-known/oauth-protected-resource/api/mcp"' in response.headers["WWW-Authenticate"]
         )
 
+    async def test_challenge_points_at_the_metadata_for_the_path_used(self, view):
+        """A probe on the dedicated path is pointed at that path's metadata."""
+        request = Mock(path=MCP_HTTP_PATH)
+        request.headers = {}
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        with patch(
+            "custom_components.mcp_server_http_transport.http._get_issuer",
+            return_value="https://homeassistant.local:8123",
+        ):
+            response = await view.get(request)
+
+        assert response.status == 401
+        assert (
+            f'resource_metadata="https://homeassistant.local:8123'
+            f'{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}"' in response.headers["WWW-Authenticate"]
+        )
+
     async def test_get_with_valid_token_returns_405(self, view):
         """Test GET with a valid token is Method Not Allowed; there is no SSE stream."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
 
         with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
@@ -349,7 +416,7 @@ class TestMCPEndpointView:
         hass.data = {}
         view = MCPEndpointView(hass, mock_server)
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {}
 
         response = await view.get(request)
@@ -359,7 +426,7 @@ class TestMCPEndpointView:
 
     async def test_validate_token_without_bearer_prefix(self, view):
         """Test _validate_token without Bearer prefix returns None."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "invalid_format"}
 
         result = await view._validate_token(request)
@@ -368,7 +435,7 @@ class TestMCPEndpointView:
 
     async def test_post_tools_call_unknown_tool(self, view):
         """Test POST with tools/call for unknown tool."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(
             return_value={
@@ -400,7 +467,7 @@ class TestToolErrorHandling:
     """
 
     async def _call(self, view, name, arguments, msg_id=1):
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(
             return_value={
@@ -520,7 +587,7 @@ class TestToolErrorHandling:
         assert body["id"] == 1
 
     async def test_unparseable_body_returns_parse_error(self, view):
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(side_effect=ValueError("not json"))
         request.url.origin.return_value = "https://homeassistant.local"
@@ -545,7 +612,7 @@ class TestIntegrationDisabledGate:
         hass.data = {}
         view = MCPEndpointView(hass, Mock())
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
 
         response = await view.post(request)
@@ -559,7 +626,7 @@ class TestIntegrationDisabledGate:
         hass.data = {"mcp_server_http_transport": {}}  # matches async_unload_entry.clear()
         view = MCPEndpointView(hass, Mock())
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
 
         response = await view.post(request)
@@ -589,7 +656,7 @@ class TestIntegrationDisabledGate:
         hass.data = {"mcp_server_http_transport": {"server": Mock()}}
         view = MCPEndpointView(hass, Mock())
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {}  # no token → 401, not 503
 
         response = await view.post(request)
@@ -626,7 +693,7 @@ class TestNativeAuth:
         mock_refresh_token.user.id = "user_abc"
         mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_llat"}
 
         result = await view._validate_token(request)
@@ -636,7 +703,7 @@ class TestNativeAuth:
 
     async def test_llat_rejected_when_disabled(self, view_disabled, mock_hass):
         """Test that LLAT is not tried when native auth is disabled."""
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer some_token"}
 
         result = await view_disabled._validate_token(request)
@@ -648,7 +715,7 @@ class TestNativeAuth:
         """Test that an invalid LLAT returns None."""
         mock_hass.auth.async_validate_access_token.return_value = None
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer bad_token"}
 
         result = await view._validate_token(request)
@@ -659,7 +726,7 @@ class TestNativeAuth:
         """Test that OIDC validation is attempted before LLAT."""
         import sys
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer oidc_token"}
 
         mock_validator = sys.modules["custom_components.oidc_provider.token_validator"]
@@ -679,7 +746,7 @@ class TestNativeAuth:
         mock_refresh_token.user.id = "ha_user"
         mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer llat_token"}
 
         # OIDC will fail (ImportError from conftest mock returning None)
@@ -695,7 +762,7 @@ class TestNativeAuth:
         mock_refresh_token.user.id = "fallback_user"
         mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer some_token"}
 
         saved = sys.modules.pop("custom_components.oidc_provider.token_validator", None)
@@ -714,7 +781,7 @@ class TestNativeAuth:
         """Test 401 response uses plain Bearer when OIDC is not available."""
         mock_hass.auth.async_validate_access_token.return_value = None
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer bad_token"}
         request.url.origin.return_value = "http://localhost:8123"
 
@@ -734,7 +801,7 @@ class TestNativeAuth:
         mock_refresh_token.user.id = "user_xyz"
         mock_hass.auth.async_validate_access_token.return_value = mock_refresh_token
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer my_llat"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 1})
 
@@ -758,7 +825,7 @@ class TestOidcAudienceBinding:
         """_validate_token derives the resource URI and passes it as audience."""
         import sys
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {
             "Authorization": "Bearer t",
             "X-Forwarded-Proto": "https",
@@ -777,11 +844,33 @@ class TestOidcAudienceBinding:
         _, kwargs = mv.validate_access_token.call_args
         assert kwargs.get("expected_audience") == "https://ha.example.com/api/mcp"
 
+    async def test_audience_follows_the_endpoint_the_client_called(self, view):
+        """A token for the dedicated path is bound to that path, not /api/mcp."""
+        import sys
+
+        request = Mock(path=MCP_HTTP_PATH)
+        request.headers = {
+            "Authorization": "Bearer t",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "ha.example.com",
+        }
+
+        mv = sys.modules["custom_components.oidc_provider.token_validator"]
+        mv.validate_access_token.reset_mock()
+        mv.validate_access_token.return_value = {"sub": "u"}
+        try:
+            await view._validate_token(request)
+        finally:
+            mv.validate_access_token.return_value = None
+
+        _, kwargs = mv.validate_access_token.call_args
+        assert kwargs.get("expected_audience") == f"https://ha.example.com{MCP_HTTP_PATH}"
+
     async def test_falls_back_to_legacy_signature_on_type_error(self, view):
         """An older OIDC provider without expected_audience still works."""
         import sys
 
-        request = Mock()
+        request = Mock(path=MCP_PATH)
         request.headers = {
             "Authorization": "Bearer t",
             "X-Forwarded-Proto": "https",
@@ -803,3 +892,164 @@ class TestOidcAudienceBinding:
             mv.validate_access_token.return_value = None
 
         assert result == {"sub": "legacy"}
+
+
+class _FakeRoute:
+    """A registered route, carrying only what the conflict check reads."""
+
+    def __init__(self, method: str, path: str) -> None:
+        self.method = method
+        self.resource = SimpleNamespace(canonical=path)
+
+
+class _FakeRouter:
+    """A router that records routes the way HomeAssistantView.register adds them."""
+
+    def __init__(self) -> None:
+        self._routes: list[_FakeRoute] = []
+
+    def routes(self) -> list[_FakeRoute]:
+        return list(self._routes)
+
+    def add_view(self, view) -> None:
+        for method in ("get", "post", "delete", "put", "patch", "head", "options"):
+            if not getattr(view, method, None):
+                continue
+            for url in [view.url, *view.extra_urls]:
+                self._routes.append(_FakeRoute(method.upper(), url))
+
+
+@pytest.fixture
+def routing_hass():
+    """A hass whose HTTP router records what gets registered on it."""
+    hass = Mock()
+    hass.data = {DOMAIN: {"entry_id": Mock()}}
+    router = _FakeRouter()
+    hass.http.app.router = router
+    hass.http.register_view = router.add_view
+    return hass
+
+
+def _paths(router: _FakeRouter, method: str = "POST") -> list[str]:
+    """Return the paths serving a method, in registration order."""
+    return [route.resource.canonical for route in router.routes() if route.method == method]
+
+
+class TestRegisterMCPViews:
+    """Test which paths the integration claims, and how it spots a conflict."""
+
+    def test_claims_both_paths_when_api_mcp_is_free(self, routing_hass, mock_server):
+        """With nothing else on /api/mcp, the endpoint serves both paths."""
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert _paths(routing_hass.http.app.router) == [MCP_PATH, MCP_HTTP_PATH]
+
+    def test_registers_the_metadata_views(self, routing_hass, mock_server):
+        """Both RFC 9728 metadata paths are served alongside the endpoint."""
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert _paths(routing_hass.http.app.router, "GET") == [
+            RESOURCE_METADATA_PREFIX,
+            f"{RESOURCE_METADATA_PREFIX}{MCP_PATH}",
+            f"{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}",
+            MCP_PATH,
+            MCP_HTTP_PATH,
+        ]
+
+    def test_stays_off_api_mcp_when_another_integration_serves_it(self, routing_hass, mock_server):
+        """A path already answering POST elsewhere is left alone entirely.
+
+        Home Assistant's built-in mcp_server registers no GET on /api/mcp, so
+        taking half the path would answer a client's discovery probe here while
+        its actual traffic went to the other integration.
+        """
+        router = routing_hass.http.app.router
+        router._routes.append(_FakeRoute("POST", MCP_PATH))
+
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert _paths(router) == [MCP_PATH, MCP_HTTP_PATH]  # the foreign one, then ours
+        assert MCP_PATH not in _paths(router, "GET")
+
+    def test_metadata_for_a_contested_path_is_left_alone_too(self, routing_hass, mock_server):
+        """The RFC 9728 metadata follows the endpoint off a contested path.
+
+        Nothing else serves that metadata, so answering there would hand a
+        client this integration's authorization server for a token the
+        integration actually holding /api/mcp will reject.
+        """
+        router = routing_hass.http.app.router
+        router._routes.append(_FakeRoute("POST", MCP_PATH))
+
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert f"{RESOURCE_METADATA_PREFIX}{MCP_PATH}" not in _paths(router, "GET")
+        assert f"{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}" in _paths(router, "GET")
+
+    def test_a_wildcard_route_counts_as_a_competitor(self, routing_hass, mock_server):
+        """A route registered for every method answers POST as well."""
+        routing_hass.http.app.router._routes.append(_FakeRoute("*", MCP_PATH))
+
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert mcp_path_is_contested(routing_hass) is True
+        assert MCP_PATH not in _paths(routing_hass.http.app.router, "GET")
+
+    def test_own_routes_are_not_mistaken_for_a_conflict(self, routing_hass, mock_server):
+        """A reload does not make this integration its own competitor."""
+        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert mcp_path_is_contested(routing_hass) is False
+
+    def test_a_reload_updates_the_view_the_router_holds(self, routing_hass, mock_server):
+        """Registering again would sit behind the first view and never be reached."""
+        register_mcp_views(routing_hass, mock_server, False)
+        routes_after_first_load = routing_hass.http.app.router.routes()
+        endpoint = routing_hass.data[REGISTERED_ENDPOINT]
+
+        reloaded_server = Mock()
+        register_mcp_views(routing_hass, reloaded_server, True)
+
+        assert routing_hass.http.app.router.routes() == routes_after_first_load
+        assert endpoint.native_auth_enabled is True
+        assert endpoint.server is reloaded_server
+
+    def test_serves_mcp_path_reports_who_answers(self, routing_hass, mock_server):
+        """Only the first route on the path answers, whoever registered it."""
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert serves_mcp_path(routing_hass) is True
+
+        # A competitor arriving later queues behind the route already bound.
+        routing_hass.http.app.router._routes.append(_FakeRoute("POST", MCP_PATH))
+
+        assert mcp_path_is_contested(routing_hass) is True
+        assert serves_mcp_path(routing_hass) is True
+
+    def test_serves_mcp_path_is_false_when_another_integration_got_there_first(
+        self, routing_hass, mock_server
+    ):
+        """A path claimed before setup is answered by its holder, not this one."""
+        routing_hass.http.app.router._routes.append(_FakeRoute("POST", MCP_PATH))
+
+        register_mcp_views(routing_hass, mock_server, False)
+
+        assert serves_mcp_path(routing_hass) is False
+
+    def test_conflict_is_seen_when_the_other_integration_arrives_later(
+        self, routing_hass, mock_server
+    ):
+        """A path claimed after setup still reports as contested."""
+        register_mcp_views(routing_hass, mock_server, False)
+        routing_hass.http.app.router._routes.append(_FakeRoute("POST", MCP_PATH))
+
+        assert mcp_path_is_contested(routing_hass) is True
+
+    def test_registered_routes_survive_an_unload(self, routing_hass, mock_server):
+        """The tracked routes live outside hass.data[DOMAIN], which unload clears."""
+        register_mcp_views(routing_hass, mock_server, False)
+        routing_hass.data[DOMAIN].clear()
+
+        assert routing_hass.data[REGISTERED_ROUTES]
+        assert mcp_path_is_contested(routing_hass) is False

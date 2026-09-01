@@ -101,13 +101,11 @@ Home Assistant cannot share a path between two integrations: whichever registere
 
 This integration therefore also answers on **`/api/mcp_http`**, which nothing else claims. If `/api/mcp` is already taken when this integration starts, it stays off that path entirely and serves only `/api/mcp_http`. Either way it raises a repair naming the conflict. Point your MCP client at `https://your-home-assistant/api/mcp_http`.
 
-To tell whether the built-in server holds `/api/mcp` on a running instance, probe a path only that server registers:
+The repair is the reliable signal, and it is raised on every version. Failing that, look for **Model Context Protocol Server** under Settings > Devices & Services. A `405` from the probe below confirms it as well, but only from 2026.8 onwards, which is when the built-in server added its per-API paths; on 2025.11 to 2026.7 the probe returns `404` while the conflict is real, so a `404` proves nothing on its own. The `401` challenge on `/api/mcp` is no help either, because both servers use the same realm.
 
 ```bash
 curl -o /dev/null -w '%{http_code}\n' https://your-home-assistant/api/mcp/assist
 ```
-
-`405` means the built-in server is live (on Home Assistant 2026.8 and newer, which added these per-API paths); `404` means it is not. The `401` challenge on `/api/mcp` itself tells you nothing, because both servers use the same realm.
 
 Deleting the built-in integration's config entry does not release the path on its own: Home Assistant binds HTTP routes at startup and cannot unbind them, so restart afterwards.
 

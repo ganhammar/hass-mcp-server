@@ -3,10 +3,11 @@
 The MCP server is an OAuth protected resource (RFC 8707). For the OIDC path it
 delegates signature/issuer checking to the paired provider's
 ``validate_access_token``, but it owns one piece of the contract itself: it
-derives ``expected_audience = {issuer}/api/mcp`` from the request and rejects any
-token whose ``aud`` is not bound to that resource. That seam breaks silently if
-either repo changes how the resource URI is derived or how ``aud`` is shaped,
-because each repo's own suite stays green.
+derives ``expected_audience`` from the endpoint the request came in on, and
+rejects any token whose ``aud`` is not bound to that resource. The two endpoints
+are separate resources, so a token minted for one is not accepted on the other.
+That seam breaks silently if either repo changes how the resource URI is derived
+or how ``aud`` is shaped, because each repo's own suite stays green.
 
 This pins the seam by exercising the *real* ``validate_access_token`` (the
 function ``http.py`` imports), which lives in the paired ``oidc_provider``
@@ -15,7 +16,7 @@ file; when it isn't present (a normal local checkout) ``conftest.py`` stubs the
 module instead and these tests skip.
 
 No browser and no issuance flow: a token is signed directly with a provider
-keypair seeded into ``hass.data`` and POSTed to ``/api/mcp``.
+keypair seeded into ``hass.data`` and POSTed to the endpoint under test.
 """
 
 import time

@@ -22,9 +22,10 @@ import pytest
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import EVENT_COMPONENT_LOADED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.setup import async_setup_component
+from homeassistant.setup import ATTR_COMPONENT, async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
@@ -34,6 +35,7 @@ from custom_components.mcp_server_http_transport.const import (
     ISSUE_ENDPOINT_CONFLICT,
     MCP_HTTP_PATH,
     MCP_PATH,
+    RESOURCE_METADATA_PREFIX,
 )
 
 
@@ -258,3 +260,87 @@ async def test_contested_path_raises_a_repair(
         "path": MCP_PATH,
         "dedicated_path": MCP_HTTP_PATH,
     }
+
+
+async def test_contested_path_metadata_is_not_served_either(
+    contested_entry: MockConfigEntry,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """Nothing else serves this metadata, so answering would misdirect a client.
+
+    A client that gets a 401 from the integration holding /api/mcp builds the
+    RFC 9728 path-suffixed URL. Answering it here would name this integration's
+    authorization server for a token that integration will reject.
+    """
+    client = await hass_client_no_auth()
+
+    resp = await client.get(f"{RESOURCE_METADATA_PREFIX}{MCP_PATH}")
+
+    assert resp.status == 404
+
+
+async def test_dedicated_path_metadata_is_still_served(
+    contested_entry: MockConfigEntry,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """Discovery for the path this integration does serve keeps working."""
+    client = await hass_client_no_auth()
+
+    resp = await client.get(f"{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}")
+
+    assert resp.status == 200
+    assert (await resp.json())["resource"].endswith(MCP_HTTP_PATH)
+
+
+async def test_a_competitor_arriving_after_setup_raises_the_repair(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+) -> None:
+    """The user adding the built-in integration later is the likely path here."""
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ENDPOINT_CONFLICT) is None
+
+    hass.http.register_view(_CompetingMCPView())
+    # The check re-runs on any component load, so the event names one that is
+    # actually loaded here rather than the integration being stood in for.
+    hass.bus.async_fire(EVENT_COMPONENT_LOADED, {ATTR_COMPONENT: "http"})
+    await hass.async_block_till_done()
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ENDPOINT_CONFLICT) is not None
+
+
+async def test_a_competitor_arriving_after_setup_does_not_take_the_path(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """Routes registered first keep answering, so this integration still serves."""
+    hass.http.register_view(_CompetingMCPView())
+    client = await hass_client()
+
+    resp = await client.post(
+        MCP_PATH,
+        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+    )
+
+    assert resp.status == 200
+    assert (await resp.json())["result"]["protocolVersion"] == "2024-11-05"
+
+
+async def test_a_reload_keeps_serving_both_paths(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """A reload updates the registered view rather than queueing another one."""
+    assert await hass.config_entries.async_reload(loaded_entry.entry_id)
+    await hass.async_block_till_done()
+
+    client = await hass_client()
+    for path in (MCP_PATH, MCP_HTTP_PATH):
+        resp = await client.post(
+            path,
+            json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        )
+
+        assert resp.status == 200, path
+        assert (await resp.json())["result"]["protocolVersion"] == "2024-11-05"

@@ -153,17 +153,15 @@ class TestAsyncUnloadEntry:
         assert len(mock_hass.data[DOMAIN]) == 0
 
     @patch("custom_components.mcp_server_http_transport.ir")
-    async def test_async_unload_entry_drops_the_conflict_issue(
+    async def test_async_unload_entry_keeps_the_conflict_issue(
         self, mock_ir, mock_hass, mock_config_entry
     ):
-        """An unloaded integration no longer conflicts with anything."""
+        """Unloading binds nothing back: the routes hold the path until a restart."""
         mock_hass.data[DOMAIN] = {"server": Mock()}
 
         await async_unload_entry(mock_hass, mock_config_entry)
 
-        mock_ir.async_delete_issue.assert_called_once_with(
-            mock_hass, DOMAIN, ISSUE_ENDPOINT_CONFLICT
-        )
+        mock_ir.async_delete_issue.assert_not_called()
 
 
 class TestEndpointConflictIssue:
@@ -173,6 +171,8 @@ class TestEndpointConflictIssue:
     @patch("custom_components.mcp_server_http_transport.mcp_path_is_contested", return_value=True)
     def test_conflict_raises_issue(self, mock_contested, mock_ir, mock_hass):
         """A contested path raises a repair naming both paths."""
+        mock_ir.async_get.return_value.async_get_issue.return_value = None
+
         _async_report_endpoint_conflict(mock_hass)
 
         mock_ir.async_create_issue.assert_called_once()
@@ -189,10 +189,24 @@ class TestEndpointConflictIssue:
     @patch("custom_components.mcp_server_http_transport.ir")
     @patch("custom_components.mcp_server_http_transport.mcp_path_is_contested", return_value=False)
     def test_no_conflict_clears_issue(self, mock_contested, mock_ir, mock_hass):
-        """An uncontested path clears any issue left from an earlier run."""
+        """An uncontested path clears any issue left from an earlier check."""
         _async_report_endpoint_conflict(mock_hass)
 
         mock_ir.async_create_issue.assert_not_called()
         mock_ir.async_delete_issue.assert_called_once_with(
             mock_hass, DOMAIN, ISSUE_ENDPOINT_CONFLICT
         )
+
+    @patch("custom_components.mcp_server_http_transport.ir")
+    @patch("custom_components.mcp_server_http_transport.mcp_path_is_contested", return_value=True)
+    def test_repeated_checks_warn_once(self, mock_contested, mock_ir, mock_hass, caplog):
+        """The check runs on every component load, so only a new conflict warns."""
+        mock_ir.async_get.return_value.async_get_issue.return_value = None
+        _async_report_endpoint_conflict(mock_hass)
+
+        mock_ir.async_get.return_value.async_get_issue.return_value = Mock()
+        caplog.clear()
+        _async_report_endpoint_conflict(mock_hass)
+
+        assert not caplog.records
+        assert mock_ir.async_create_issue.call_count == 2

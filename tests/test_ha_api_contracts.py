@@ -34,6 +34,15 @@ from homeassistant.helpers.recorder import DATA_INSTANCE
 
 from custom_components.mcp_server_http_transport.const import MCP_PATH
 
+# Core's built-in MCP server is what claims /api/mcp (#81). Importing it needs
+# aiohttp_sse, which only its own manifest pulls in, and the streamable endpoint
+# it collides on only exists from Home Assistant 2025.11; both absences raise
+# ImportError here and skip the contract rather than failing it.
+try:
+    from homeassistant.components.mcp_server.http import STREAMABLE_API
+except ImportError:
+    STREAMABLE_API = None
+
 # The KNX contracts below need the integration and its telegram store importable,
 # which takes KNX's own requirements (xknx, knx-frontend, knx-telegram-store) on
 # top of Home Assistant. They are installed on the KNX leg in CI and skipped
@@ -331,11 +340,14 @@ class TestViewRegistrationContracts:
 
         assert len(list(app.router.routes())) == 4
 
-    def test_core_mcp_server_url_is_the_path_this_integration_serves(self):
-        """Core's built-in MCP server registers the path this one has used.
+    @pytest.mark.skipif(
+        STREAMABLE_API is None,
+        reason="core's streamable MCP endpoint is not importable on this install",
+    )
+    def test_core_streamable_endpoint_is_the_path_this_integration_serves(self):
+        """The conflict this integration works around is core serving MCP_PATH.
 
-        Importing it would need the integration installed, so the path is
-        asserted as a constant: if a future release moves core's streamable
-        endpoint, MCP_PATH is free again and the repair can be retired.
+        If a release moves core's streamable endpoint, MCP_PATH stops being
+        contested and the repair, and the second path it points at, can go.
         """
-        assert MCP_PATH == "/api/mcp"
+        assert MCP_PATH == STREAMABLE_API

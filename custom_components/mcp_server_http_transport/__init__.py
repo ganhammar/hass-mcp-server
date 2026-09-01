@@ -3,7 +3,8 @@
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_COMPONENT_LOADED
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.start import async_at_started
@@ -19,7 +20,7 @@ from .const import (
     MCP_HTTP_PATH,
     MCP_PATH,
 )
-from .http import mcp_path_is_contested, register_mcp_views
+from .http import mcp_path_is_contested, register_mcp_views, serves_mcp_path
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,35 +53,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register HTTP endpoints. The views are gated on hass.data[DOMAIN] so
     # requests stop being served the moment async_unload_entry clears it
     # (HA has no public register_view reverse — see #37).
-    contested = register_mcp_views(hass, server, native_auth_enabled)
+    register_mcp_views(hass, server, native_auth_enabled)
 
     _LOGGER.info(
         "MCP Server initialized at %s (native_auth=%s)",
-        MCP_HTTP_PATH if contested else f"{MCP_PATH} and {MCP_HTTP_PATH}",
+        f"{MCP_PATH} and {MCP_HTTP_PATH}" if serves_mcp_path(hass) else MCP_HTTP_PATH,
         native_auth_enabled,
     )
 
-    # Another integration can claim MCP_PATH after this one has set up, so the
-    # conflict is reported once Home Assistant has started rather than here.
+    @callback
+    def _async_component_loaded(event: Event) -> None:
+        """Re-check after any component loads.
+
+        An integration claims its paths from its own async_setup, so one that
+        loads after this entry, at boot or when the user adds it, would
+        otherwise take MCP_PATH with nothing said until the next restart.
+        """
+        _async_report_endpoint_conflict(hass)
+
     entry.async_on_unload(async_at_started(hass, _async_report_endpoint_conflict))
+    entry.async_on_unload(hass.bus.async_listen(EVENT_COMPONENT_LOADED, _async_component_loaded))
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
 @callback
 def _async_report_endpoint_conflict(hass: HomeAssistant) -> None:
-    """Raise a repair issue while another integration also serves MCP_PATH."""
+    """Raise a repair issue while another integration also has MCP_PATH bound.
+
+    Safe to call repeatedly: the issue is the state of the conflict, and the
+    warning goes out only when the conflict is newly seen.
+    """
     if not mcp_path_is_contested(hass):
         ir.async_delete_issue(hass, DOMAIN, ISSUE_ENDPOINT_CONFLICT)
         return
 
-    _LOGGER.warning(
-        "Another integration also serves POST %s. Home Assistant routes that path to "
-        "whichever integration registered it first, so point MCP clients at %s, which "
-        "only this integration serves",
-        MCP_PATH,
-        MCP_HTTP_PATH,
-    )
+    if ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ENDPOINT_CONFLICT) is None:
+        _LOGGER.warning(
+            "Another integration also has POST %s bound. Home Assistant routes that path "
+            "to whichever integration registered it first, so point MCP clients at %s, "
+            "which only this integration serves",
+            MCP_PATH,
+            MCP_HTTP_PATH,
+        )
+
     ir.async_create_issue(
         hass,
         DOMAIN,
@@ -101,7 +117,11 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload a config entry.
+
+    Any conflict issue stays up: the routes registered for this entry keep
+    MCP_PATH bound (answering 503) until Home Assistant restarts, so unloading
+    makes the conflict worse rather than resolving it.
+    """
     hass.data[DOMAIN].clear()
-    ir.async_delete_issue(hass, DOMAIN, ISSUE_ENDPOINT_CONFLICT)
     return True

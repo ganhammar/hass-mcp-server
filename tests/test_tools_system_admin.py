@@ -161,7 +161,7 @@ class TestToolsSystemAdmin:
         assert "confirm=true" in text
 
     async def test_post_tools_call_restart_ha_missing_confirm(self, view, mock_hass):
-        """Test POST with tools/call for restart_ha without confirm argument."""
+        """restart_ha declares confirm required, so omitting it is invalid params."""
         request = Mock()
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(
@@ -181,8 +181,8 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
-        text = body["result"]["content"][0]["text"]
-        assert "confirm=true" in text
+        assert body["error"]["code"] == -32602
+        assert "confirm" in body["error"]["message"]
 
     async def test_post_tools_call_get_system_status(self, view, mock_hass):
         """Test POST with tools/call for get_system_status."""

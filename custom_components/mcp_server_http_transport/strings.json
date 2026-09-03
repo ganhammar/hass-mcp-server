@@ -55,5 +55,11 @@
       "oidc_provider_required": "The OIDC Provider integration is required when native authentication is disabled. Install it or keep native authentication enabled.",
       "invalid_appdaemon_apps_root": "The AppDaemon apps root must be the legacy AppDaemon path or a path under /share or /media."
     }
+  },
+  "issues": {
+    "endpoint_conflict": {
+      "title": "Another integration also serves {path}",
+      "description": "Home Assistant's built-in **Model Context Protocol Server** integration registers the same `{path}` endpoint as this integration. Only one of them can serve it: whichever registered first when Home Assistant started answers every request there, and the other is silently unreachable on that path.\n\nThis integration always answers on `{dedicated_path}`, which nothing else claims. Point your MCP client at `{dedicated_path}` (for example `https://your-home-assistant:8123{dedicated_path}`).\n\nTo free up `{path}` instead, remove one of the two integrations and restart Home Assistant. Deleting the config entry on its own is not enough, because Home Assistant keeps HTTP routes until it restarts."
+    }
   }
 }

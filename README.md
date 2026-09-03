@@ -67,7 +67,7 @@ The MCP server uses OAuth 2.0 Dynamic Client Registration (DCR), which allows Cl
    - Click Settings (gear icon)
    - Navigate to "Connectors"
    - Click "Add custom connector"
-   - Enter your MCP server URL: `https://your-home-assistant.com/api/mcp`
+   - Enter your MCP server URL: `https://your-home-assistant.com/api/mcp`, or `https://your-home-assistant.com/api/mcp_http` if Home Assistant's built-in MCP Server integration is also installed (see [Another integration also serves /api/mcp](#another-integration-also-serves-apimcp))
    - Click "Connect"
 
 2. Claude will automatically:
@@ -89,7 +89,25 @@ For local agents or MCP clients that can't run an OAuth browser flow, you can au
 
 1. Enable native authentication: Settings > Devices & Services > MCP Server > Configure > check "Enable native Home Assistant authentication"
 2. Create a token: go to your Home Assistant user profile > Long-Lived Access Tokens > Create Token
-3. Configure your MCP client to send the token as a Bearer header to `http://your-home-assistant:8123/api/mcp`
+3. Configure your MCP client to send the token as a Bearer header to `http://your-home-assistant:8123/api/mcp` (or `/api/mcp_http`, see [Another integration also serves /api/mcp](#another-integration-also-serves-apimcp))
+
+## Troubleshooting
+
+### Another integration also serves /api/mcp
+
+Home Assistant's built-in **Model Context Protocol Server** integration (`mcp_server`) serves its streamable HTTP transport on `/api/mcp`, the same path this integration uses. It has done so since Home Assistant 2025.11.
+
+Home Assistant cannot share a path between two integrations: whichever registered it first at startup answers every request there, and the other is silently unreachable on that path. Nothing is logged, both integrations keep showing as healthy, and an MCP client connects successfully to whichever server won, so the only visible symptom is the client getting the wrong set of tools.
+
+This integration therefore also answers on **`/api/mcp_http`**, which nothing else claims. If `/api/mcp` is already taken when this integration starts, it stays off that path entirely and serves only `/api/mcp_http`. Either way it raises a repair naming the conflict. Point your MCP client at `https://your-home-assistant/api/mcp_http`.
+
+The repair is the reliable signal, and it is raised on every version. Failing that, look for **Model Context Protocol Server** under Settings > Devices & Services. A `405` from the probe below confirms it as well, but only from 2026.8 onwards, which is when the built-in server added its per-API paths; on 2025.11 to 2026.7 the probe returns `404` while the conflict is real, so a `404` proves nothing on its own. The `401` challenge on `/api/mcp` is no help either, because both servers use the same realm.
+
+```bash
+curl -o /dev/null -w '%{http_code}\n' https://your-home-assistant/api/mcp/assist
+```
+
+Deleting the built-in integration's config entry does not release the path on its own: Home Assistant binds HTTP routes at startup and cannot unbind them, so restart afterwards.
 
 ## MCP Capabilities
 

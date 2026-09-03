@@ -1,9 +1,11 @@
 """Tests for KNX telegram-history tools."""
 
 import json
+from datetime import timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.mcp_server_http_transport.tools import knx as knx_mod
 
@@ -56,11 +58,18 @@ def _unpack(result: dict) -> dict:
 
 
 class TestKnxRecentTelegrams:
-    """Test knx_recent_telegrams."""
+    """Test knx_recent_telegrams against the in-memory telegram list.
+
+    TelegramQuery is None on installs whose telegram history is not DB-backed,
+    which is what sends knx_recent_telegrams down this path.
+    """
 
     @pytest.fixture(autouse=True)
     def _patch_key(self):
-        with patch.object(knx_mod, "KNX_MODULE_KEY", _KEY):
+        with (
+            patch.object(knx_mod, "KNX_MODULE_KEY", _KEY),
+            patch.object(knx_mod, "TelegramQuery", None),
+        ):
             yield
 
     async def test_returns_not_setup_when_knx_missing(self):
@@ -135,6 +144,141 @@ class TestKnxRecentTelegrams:
         result = await knx_mod.knx_recent_telegrams(hass, {})
         assert "content" in result
         assert "unavailable" in result["content"][0]["text"]
+
+
+class TestKnxRecentTelegramsDbStore:
+    """Test knx_recent_telegrams against the DB-backed telegram store.
+
+    The store answers newest first over a window taken from the KNX config
+    entry, which is the same query HA's own `knx/group_monitor_info` websocket
+    handler issues. TestKnxRecentTelegrams above covers the in-memory list read
+    where history is not DB-backed.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _patch_key(self):
+        with patch.object(knx_mod, "KNX_MODULE_KEY", _KEY):
+            yield
+
+    def _hass_with_store(self, telegrams, query_side_effect=None):
+        """Mock hass whose KNX module answers from the store.
+
+        `telegrams` is passed oldest first and handed back newest first, the
+        order the query the tool builds asks for.
+        """
+        module = Mock()
+        module.entry.options = {}
+        query_result = Mock()
+        query_result.telegrams = list(reversed(telegrams))
+        module.telegrams.store = Mock()
+        if query_side_effect is not None:
+            module.telegrams.store.query = AsyncMock(side_effect=query_side_effect)
+        else:
+            module.telegrams.store.query = AsyncMock(return_value=query_result)
+        module.telegrams.model_to_dict = lambda t: t
+        hass = Mock()
+        hass.data = {_KEY: module}
+        return hass
+
+    @staticmethod
+    def _query_kwargs(hass):
+        """The kwargs the tool built its TelegramQuery from."""
+        return hass.data[_KEY].telegrams.store.query.await_args.args[0]
+
+    async def test_uses_store_when_available(self):
+        hass = self._hass_with_store(_TELEGRAMS)
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {})
+        data = _unpack(result)
+        assert data["buffer_size"] == 3
+        assert data["matched"] == 3
+        hass.data[_KEY].telegrams.store.query.assert_awaited_once()
+
+    async def test_returns_oldest_first(self):
+        """The store answers newest first; the payload reads oldest first."""
+        hass = self._hass_with_store(_TELEGRAMS)
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {})
+        data = _unpack(result)
+        assert [t["timestamp"] for t in data["telegrams"]] == [
+            "2026-05-29T21:00:00+02:00",
+            "2026-05-29T21:05:00+02:00",
+            "2026-05-29T21:06:00+02:00",
+        ]
+
+    async def test_limit_keeps_most_recent(self):
+        """A limit takes the newest telegrams, not the oldest in the window."""
+        hass = self._hass_with_store(_TELEGRAMS)
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {"limit": 1})
+        data = _unpack(result)
+        assert data["returned"] == 1
+        assert data["telegrams"][0]["timestamp"] == "2026-05-29T21:06:00+02:00"
+
+    async def test_query_asks_the_store_for_newest_first(self):
+        """Descending order is what keeps the newest rows under the store's cap."""
+        hass = self._hass_with_store(_TELEGRAMS)
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            await knx_mod.knx_recent_telegrams(hass, {})
+        assert self._query_kwargs(hass)["order_descending"] is True
+
+    async def test_window_defaults_to_the_group_monitor_default(self):
+        """Without the option set, the window matches HA's own default of 24h."""
+        hass = self._hass_with_store(_TELEGRAMS)
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            await knx_mod.knx_recent_telegrams(hass, {})
+        window = dt_util.now() - self._query_kwargs(hass)["start_time"]
+        assert timedelta(hours=23, minutes=59) < window < timedelta(hours=24, minutes=1)
+
+    async def test_window_comes_from_entry_options(self):
+        hass = self._hass_with_store(_TELEGRAMS)
+        hass.data[_KEY].entry.options = {"telegram_db_load_hours": 3}
+        with (
+            patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)),
+            patch.object(knx_mod, "CONF_KNX_TELEGRAM_DB_LOAD_HOURS", "telegram_db_load_hours"),
+        ):
+            await knx_mod.knx_recent_telegrams(hass, {})
+        window = dt_util.now() - self._query_kwargs(hass)["start_time"]
+        assert timedelta(hours=2, minutes=59) < window < timedelta(hours=3, minutes=1)
+
+    async def test_filter_ga_via_store(self):
+        hass = self._hass_with_store(_TELEGRAMS)
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {"filter_ga": "^0/0/249$"})
+        data = _unpack(result)
+        assert data["matched"] == 2
+        assert all(t["destination"] == "0/0/249" for t in data["telegrams"])
+
+    async def test_uninitialized_store_reports_initialization(self):
+        """Store init can fail; that is not the Home Assistant version being too old."""
+        hass = self._hass_with_store(_TELEGRAMS)
+        hass.data[_KEY].telegrams.store = None
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {})
+        text = result["content"][0]["text"]
+        assert "not initialized" in text
+        assert "version" not in text
+
+    async def test_store_query_error_reports_the_database_error(self):
+        hass = self._hass_with_store(
+            _TELEGRAMS, query_side_effect=knx_mod.KnxTelegramStoreException("db locked")
+        )
+        with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
+            result = await knx_mod.knx_recent_telegrams(hass, {})
+        text = result["content"][0]["text"]
+        assert "database error" in text
+        assert "db locked" in text
+        assert "version" not in text
+
+    async def test_falls_back_to_in_memory_list_when_store_library_missing(self):
+        """Without the store library the in-memory list is the history, store or not."""
+        hass = self._hass_with_store(_TELEGRAMS)
+        hass.data[_KEY].telegrams.recent_telegrams = _TELEGRAMS
+        with patch.object(knx_mod, "TelegramQuery", None):
+            result = await knx_mod.knx_recent_telegrams(hass, {})
+        data = _unpack(result)
+        assert data["buffer_size"] == 3
+        hass.data[_KEY].telegrams.store.query.assert_not_awaited()
 
 
 class TestKnxEntityTools:

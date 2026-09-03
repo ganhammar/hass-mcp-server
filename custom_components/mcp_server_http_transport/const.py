@@ -32,3 +32,15 @@ def validate_appdaemon_apps_root(value: str) -> str:
     if not normalized.startswith(APPDAEMON_SHARED_ROOTS):
         raise ValueError("AppDaemon apps root must be under /share or /media")
     return normalized
+
+
+# HTTP paths. Home Assistant's built-in mcp_server integration serves its
+# streamable transport on /api/mcp from 2025.11 onwards, and aiohttp resolves a
+# duplicated path to whichever integration registered it first, silently. This
+# integration therefore also answers on a path nothing else claims.
+MCP_PATH = "/api/mcp"
+MCP_HTTP_PATH = "/api/mcp_http"
+RESOURCE_METADATA_PREFIX = "/.well-known/oauth-protected-resource"
+
+# Repairs issue raised while another integration also serves MCP_PATH.
+ISSUE_ENDPOINT_CONFLICT = "endpoint_conflict"

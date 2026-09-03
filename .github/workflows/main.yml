@@ -63,6 +63,36 @@ jobs:
         file: ./coverage.xml
         fail_ci_if_error: false
 
+  knx-telegram-store-test:
+    runs-on: ubuntu-latest
+    name: knx telegram store (HA 2026.8.3)
+    # The KNX telegram store landed in HA 2026.7, above every version the other
+    # test jobs pin, and its contracts in test_ha_api_contracts.py skip without
+    # it. This leg installs the KNX integration's own requirements at the
+    # versions HA 2026.8.3 declares, so the store the tool queries is the real
+    # one. Bump deliberately to test newer releases.
+    steps:
+    - uses: actions/checkout@v5
+
+    # 0.13.357 pins HA 2026.8.3 and requires Python 3.14.
+    - name: Set up Python 3.14
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.14"
+
+    - name: Install dependencies
+      run: |
+        python -m venv .venv
+        .venv/bin/pip install "pytest-homeassistant-custom-component==0.13.357" mcp
+        .venv/bin/pip install \
+          "xknx==3.19.0" \
+          "xknxproject==3.10.0" \
+          "knx-frontend==2026.8.2.133643" \
+          "knx-telegram-store[sqlite]==0.11.2"
+
+    - name: Run KNX contract and tool tests
+      run: .venv/bin/pytest tests/test_ha_api_contracts.py tests/test_tools_knx.py -v
+
   integration-test:
     runs-on: ubuntu-latest
     name: integration (py${{ matrix.python-version }}, HA ${{ matrix.ha-version }})
@@ -77,9 +107,12 @@ jobs:
             ha-version: "2025.10.1"
             ha-test-helper: "0.13.286"
             extra-deps: "pycares<5"
+          # The declared minimum in hacs.json. recorder.get_statistics, which
+          # tools/statistics.py reads through, landed in this release.
           - python-version: "3.13"
-            ha-version: "2025.4.4"
-            ha-test-helper: "0.13.236"
+            ha-version: "2025.6.0"
+            ha-test-helper: "0.13.251"
+            extra-deps: "pycares<5"
 
     steps:
     - uses: actions/checkout@v5

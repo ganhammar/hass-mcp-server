@@ -13,6 +13,7 @@ alternative; the docstrings say which, and what to do when one breaks.
 import dataclasses
 import inspect
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -30,6 +31,7 @@ from homeassistant.components.recorder.statistics import (
     validate_statistics,
 )
 from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.helpers.json import json_encoder_default
 from homeassistant.helpers.recorder import DATA_INSTANCE
 
 from custom_components.mcp_server_http_transport.const import MCP_PATH
@@ -351,3 +353,25 @@ class TestViewRegistrationContracts:
         contested and the repair, and the second path it points at, can go.
         """
         assert MCP_PATH == STREAMABLE_API
+
+
+class TestJsonEncoderDefaultContract:
+    """``_HAJSONEncoder`` delegates to ``json_encoder_default`` for the value types
+    Home Assistant's own API accepts, then falls back to ``str()``.
+
+    The public alternative is ``homeassistant.helpers.json.json_dumps``, which is
+    orjson: no encoder hook for the trace tools' ``ExtendedJSONEncoder``, and it
+    neither sorts sets nor accepts frozensets. Were this to break, copy the Path
+    and ``as_dict`` branches into ``_HAJSONEncoder.default`` and drop the import.
+    """
+
+    def test_takes_one_value_and_maps_the_types_relied_on(self):
+        assert list(inspect.signature(json_encoder_default).parameters) == ["obj"]
+        assert json_encoder_default(Path("/config/www")) == "/config/www"
+        assert json_encoder_default({"a"}) == ["a"]
+
+    def test_raises_type_error_for_an_unknown_value(self):
+        # The str() fallback in _HAJSONEncoder only runs if HA raises TypeError,
+        # not some other exception, for a value it does not know.
+        with pytest.raises(TypeError):
+            json_encoder_default(object())

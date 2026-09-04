@@ -1,9 +1,11 @@
 """Tests for the shared JSON helpers."""
 
 import json
-from datetime import date, datetime
-
-import pytest
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
+from enum import Enum
+from pathlib import Path
+from uuid import UUID
 
 from custom_components.mcp_server_http_transport.json_utils import _HAJSONEncoder, dumps
 
@@ -48,12 +50,38 @@ class TestHAJSONEncoder:
         decoded = json.loads(json.dumps(value, cls=_HAJSONEncoder))
         assert decoded == {"hue_scenes": ["a", "b"], "brightness": 255}
 
-    def test_raises_type_error_for_unhandled_types(self):
-        class CustomType:
-            pass
+    def test_encodes_time_as_isoformat(self):
+        assert json.dumps(time(8, 30), cls=_HAJSONEncoder) == '"08:30:00"'
 
-        with pytest.raises(TypeError):
-            json.dumps(CustomType(), cls=_HAJSONEncoder)
+    def test_encodes_enum_as_its_value(self):
+        class Mode(Enum):
+            HEAT = "heat"
+
+        assert json.dumps(Mode.HEAT, cls=_HAJSONEncoder) == '"heat"'
+
+    def test_encodes_dataclass_as_dict(self):
+        @dataclass
+        class Point:
+            x: int
+            y: int
+
+        assert json.loads(json.dumps(Point(1, 2), cls=_HAJSONEncoder)) == {"x": 1, "y": 2}
+
+    def test_encodes_as_dict_objects(self):
+        class WithAsDict:
+            def as_dict(self):
+                return {"kind": "custom"}
+
+        assert json.loads(json.dumps(WithAsDict(), cls=_HAJSONEncoder)) == {"kind": "custom"}
+
+    def test_delegates_paths_to_home_assistant_default(self):
+        assert json.dumps(Path("/config/www"), cls=_HAJSONEncoder) == '"/config/www"'
+
+    def test_falls_back_to_str_for_unhandled_types(self):
+        # One exotic attribute must not blank a whole response: the tool wrapper
+        # reports a raised TypeError as isError and the model gets nothing.
+        assert json.dumps(timedelta(minutes=5), cls=_HAJSONEncoder) == '"0:05:00"'
+        assert json.loads(json.dumps(UUID(int=1), cls=_HAJSONEncoder)) == str(UUID(int=1))
 
 
 class TestDumps:
@@ -74,6 +102,15 @@ class TestDumps:
         value = {"when": datetime(2024, 6, 15, 8, 30, 45), "scenes": {"b", "a"}}
         assert dumps(value) == '{"when":"2024-06-15T08:30:45","scenes":["a","b"]}'
 
+    def test_keeps_non_ascii_text(self):
+        # A \u escape is six characters the model pays for; the JSON-RPC envelope
+        # re-escapes the text on the wire, so the HTTP response stays ASCII anyway.
+        assert dumps({"name": "Kök"}) == '{"name":"Kök"}'
+
+    def test_never_fails_on_an_exotic_attribute(self):
+        payload = {"attributes": {"duration": timedelta(minutes=5), "path": Path("/x")}}
+        assert json.loads(dumps(payload)) == {"attributes": {"duration": "0:05:00", "path": "/x"}}
+
     def test_honours_encoder_override(self):
         class Wrapper:
             pass
@@ -82,6 +119,4 @@ class TestDumps:
             def default(self, o):
                 return "wrapped" if isinstance(o, Wrapper) else super().default(o)
 
-        with pytest.raises(TypeError):
-            dumps(Wrapper())
         assert dumps({"w": Wrapper()}, cls=WrapperEncoder) == '{"w":"wrapped"}'

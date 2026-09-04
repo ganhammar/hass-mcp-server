@@ -25,7 +25,33 @@ from custom_components.mcp_server_http_transport.http import (
     register_mcp_views,
     serves_mcp_path,
 )
-from custom_components.mcp_server_http_transport.tools import TOOLS
+from custom_components.mcp_server_http_transport.tools import TOOLS, call_tool
+
+
+def test_appdaemon_tools_are_registered_by_production_registry():
+    """The production tools package imports AppDaemon handlers for registry startup."""
+    assert all(
+        name in TOOLS
+        for name in {
+            "list_appdaemon_files",
+            "get_appdaemon_file",
+            "save_appdaemon_file",
+            "delete_appdaemon_file",
+            "backup_appdaemon_files",
+            "list_appdaemon_backups",
+            "cleanup_appdaemon_backups",
+            "restore_appdaemon_backup",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_appdaemon_tool_is_callable_through_production_registry():
+    """The production registry dispatches an AppDaemon handler, not just its schema."""
+    hass = Mock()
+    hass.data = {"mcp_server_http_transport": {"appdaemon_file_access": False}}
+    result = await call_tool(hass, "list_appdaemon_files", {})
+    assert "disabled" in result["content"][0]["text"]
 
 
 def test_get_base_url_with_forwarded_headers():
@@ -311,7 +337,7 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert body["jsonrpc"] == "2.0"
         assert "tools" in body["result"]
-        assert len(body["result"]["tools"]) == 78
+        assert len(body["result"]["tools"]) == 86
         tool_names = [t["name"] for t in body["result"]["tools"]]
         assert "get_state" in tool_names
         assert "call_service" in tool_names
@@ -332,6 +358,14 @@ class TestMCPEndpointView:
         assert "validate_statistics" in tool_names
         assert "adjust_statistics" in tool_names
         assert "clear_statistics" in tool_names
+        assert "list_appdaemon_files" in tool_names
+        assert "get_appdaemon_file" in tool_names
+        assert "save_appdaemon_file" in tool_names
+        assert "delete_appdaemon_file" in tool_names
+        assert "backup_appdaemon_files" in tool_names
+        assert "list_appdaemon_backups" in tool_names
+        assert "restore_appdaemon_backup" in tool_names
+        assert "cleanup_appdaemon_backups" in tool_names
 
     async def test_post_unknown_method_returns_error(self, view):
         """Test POST with unknown method returns error."""

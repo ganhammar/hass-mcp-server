@@ -11,10 +11,13 @@ from homeassistant.helpers.start import async_at_started
 from mcp.server import Server
 
 from .const import (
+    CONF_APPDAEMON_APPS_ROOT,
+    CONF_APPDAEMON_FILE_ACCESS,
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_CONFIG_FILE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
+    DEFAULT_APPDAEMON_APPS_ROOT,
     DOMAIN,
     ISSUE_ENDPOINT_CONFLICT,
     MCP_HTTP_PATH,
@@ -41,10 +44,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config_file_access_enabled = entry.data.get(CONF_CONFIG_FILE_ACCESS, False)
     camera_image_access_enabled = entry.data.get(CONF_CAMERA_IMAGE_ACCESS, False)
     image_file_access_enabled = entry.data.get(CONF_IMAGE_FILE_ACCESS, False)
+    appdaemon_file_access_enabled = entry.data.get(CONF_APPDAEMON_FILE_ACCESS, False)
 
     hass.data[DOMAIN]["config_file_access"] = config_file_access_enabled
     hass.data[DOMAIN]["camera_image_access"] = camera_image_access_enabled
     hass.data[DOMAIN]["image_file_access"] = image_file_access_enabled
+    hass.data[DOMAIN]["appdaemon_file_access"] = appdaemon_file_access_enabled
+    hass.data[DOMAIN]["appdaemon_apps_root"] = entry.data.get(
+        CONF_APPDAEMON_APPS_ROOT, DEFAULT_APPDAEMON_APPS_ROOT
+    )
 
     # Create MCP server
     server = Server("home-assistant-mcp-server")

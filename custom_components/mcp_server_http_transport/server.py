@@ -10,6 +10,7 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from .const import VERSION
 from .json_utils import dumps
 
 _LOGGER = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ class HomeAssistantMCPServer:
         async with stdio_server() as (read_stream, write_stream):
             init_options = InitializationOptions(
                 server_name="home-assistant",
-                server_version="0.1.0",
+                server_version=VERSION,
                 capabilities=self.server.get_capabilities(
                     notification_options=None, experimental_capabilities=None
                 ),

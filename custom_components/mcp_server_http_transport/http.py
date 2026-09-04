@@ -14,6 +14,7 @@ from .const import (
     MCP_HTTP_PATH,
     MCP_PATH,
     RESOURCE_METADATA_PREFIX,
+    VERSION,
 )
 from .prompts import get_prompt, get_prompts
 from .resources import get_resources, read_resource
@@ -368,7 +369,7 @@ class MCPEndpointView(HomeAssistantView):
                     },
                     "serverInfo": {
                         "name": "home-assistant-mcp-server",
-                        "version": "0.1.0",
+                        "version": VERSION,
                     },
                 },
                 "id": msg_id,

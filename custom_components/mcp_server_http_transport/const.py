@@ -1,6 +1,16 @@
 """Constants for the MCP Server integration."""
 
+import json
+from pathlib import Path
+from typing import Final
+
 DOMAIN = "mcp_server_http_transport"
+
+# The version a client sees in serverInfo is the one the manifest declares, so a
+# release bump in one place is a bump everywhere.
+VERSION: Final[str] = json.loads(
+    Path(__file__).with_name("manifest.json").read_text(encoding="utf-8")
+)["version"]
 
 # MCP Server configuration
 DEFAULT_PORT = 8080

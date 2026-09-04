@@ -37,5 +37,14 @@ select = [
     "F",   # pyflakes
     "I",   # isort
     "UP",  # pyupgrade
+    "TID251",  # banned APIs, see below
 ]
 ignore = []
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"json.dumps".msg = "Serialize output with json_utils.dumps; it is compact, which saves the model a third of the tokens."
+
+[tool.ruff.lint.per-file-ignores]
+"custom_components/mcp_server_http_transport/json_utils.py" = ["TID251"]
+"custom_components/mcp_server_http_transport/json_patch.py" = ["TID251"]
+"tests/**" = ["TID251"]

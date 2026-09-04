@@ -108,8 +108,11 @@ class TestToolsEntities:
         assert body["jsonrpc"] == "2.0"
         assert "result" in body
         assert "content" in body["result"]
-        data = json.loads(body["result"]["content"][0]["text"])
+        text = body["result"]["content"][0]["text"]
+        data = json.loads(text)
         assert data["aliases"] == ["Lounge Light"]
+        # Tool text is compact JSON: no indentation or separator whitespace to pay tokens for.
+        assert text == json.dumps(data, separators=(",", ":"))
 
     async def test_post_tools_call_get_state_not_found(self, view, mock_hass):
         """Test POST with tools/call for non-existent entity."""

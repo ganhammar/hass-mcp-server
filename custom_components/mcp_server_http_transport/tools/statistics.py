@@ -1,7 +1,6 @@
 """Long-term statistics tools."""
 
 import asyncio
-import json
 import logging
 from datetime import datetime as dt
 from typing import Any
@@ -12,7 +11,7 @@ from homeassistant.util import dt as dt_util
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -114,9 +113,7 @@ async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
                     entry[key] = stat[key]
             result.append(entry)
 
-        return {
-            "content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         _LOGGER.error("Error getting statistics: %s", e)
         return {"content": [{"type": "text", "text": f"Error getting statistics: {str(e)}"}]}
@@ -175,11 +172,7 @@ async def list_statistic_ids(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         metadata = await get_instance(hass).async_add_executor_job(
             recorder_list_statistic_ids, hass, id_set, statistic_type
         )
-        return {
-            "content": [
-                {"type": "text", "text": json.dumps(metadata, indent=2, cls=_HAJSONEncoder)}
-            ]
-        }
+        return {"content": [{"type": "text", "text": dumps(metadata)}]}
     except Exception as e:
         _LOGGER.error("Error listing statistic IDs: %s", e)
         return {"content": [{"type": "text", "text": f"Error listing statistic IDs: {str(e)}"}]}
@@ -211,9 +204,7 @@ async def validate_statistics(hass: HomeAssistant, arguments: dict[str, Any]) ->
             statistic_id: [issue.as_dict() for issue in issue_list]
             for statistic_id, issue_list in issues.items()
         }
-        return {
-            "content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         _LOGGER.error("Error validating statistics: %s", e)
         return {"content": [{"type": "text", "text": f"Error validating statistics: {str(e)}"}]}

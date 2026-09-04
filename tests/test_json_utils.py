@@ -1,11 +1,11 @@
-"""Tests for the shared _HAJSONEncoder."""
+"""Tests for the shared JSON helpers."""
 
 import json
 from datetime import date, datetime
 
 import pytest
 
-from custom_components.mcp_server_http_transport.json_utils import _HAJSONEncoder
+from custom_components.mcp_server_http_transport.json_utils import _HAJSONEncoder, dumps
 
 
 class TestHAJSONEncoder:
@@ -54,3 +54,34 @@ class TestHAJSONEncoder:
 
         with pytest.raises(TypeError):
             json.dumps(CustomType(), cls=_HAJSONEncoder)
+
+
+class TestDumps:
+    """Test dumps emits compact JSON through the HA encoder."""
+
+    def test_omits_indentation_and_separator_whitespace(self):
+        value = {"entity_id": "light.a", "attributes": {"effect_list": ["x", "y"], "brightness": 1}}
+        text = dumps(value)
+        expected = '{"entity_id":"light.a","attributes":{"effect_list":["x","y"],"brightness":1}}'
+        assert text == expected
+        assert json.loads(text) == value
+
+    def test_is_smaller_than_pretty_printed_output(self):
+        value = [{"entity_id": f"light.l{i}", "effect_list": list("abcdef")} for i in range(20)]
+        assert len(dumps(value)) < 0.7 * len(json.dumps(value, indent=2))
+
+    def test_uses_ha_encoder_by_default(self):
+        value = {"when": datetime(2024, 6, 15, 8, 30, 45), "scenes": {"b", "a"}}
+        assert dumps(value) == '{"when":"2024-06-15T08:30:45","scenes":["a","b"]}'
+
+    def test_honours_encoder_override(self):
+        class Wrapper:
+            pass
+
+        class WrapperEncoder(json.JSONEncoder):
+            def default(self, o):
+                return "wrapped" if isinstance(o, Wrapper) else super().default(o)
+
+        with pytest.raises(TypeError):
+            dumps(Wrapper())
+        assert dumps({"w": Wrapper()}, cls=WrapperEncoder) == '{"w":"wrapped"}'

@@ -16,3 +16,14 @@ class _HAJSONEncoder(json.JSONEncoder):
         if isinstance(o, (set, frozenset)):
             return sorted(o) if all(isinstance(x, str) for x in o) else list(o)
         return super().default(o)
+
+
+def dumps(obj: Any, *, cls: type[json.JSONEncoder] = _HAJSONEncoder) -> str:
+    """Serialize ``obj`` as compact JSON for an LLM to read.
+
+    The consumer of every tool, resource, and prompt payload is a language model, so
+    indentation and the spaces after separators are token overhead with nothing to
+    show for it: compact output is roughly a third smaller than ``indent=2``. Only
+    ``cls`` is configurable, for callers whose payload needs a wider encoder.
+    """
+    return json.dumps(obj, separators=(",", ":"), cls=cls)

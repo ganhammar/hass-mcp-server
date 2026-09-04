@@ -5,7 +5,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from ..json_utils import _HAJSONEncoder  # noqa: F401
+from ..json_utils import dumps  # noqa: F401
 
 _LOGGER = logging.getLogger(__name__)
 

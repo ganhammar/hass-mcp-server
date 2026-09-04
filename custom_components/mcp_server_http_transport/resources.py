@@ -1,6 +1,5 @@
 """MCP resource definitions and handlers for Home Assistant."""
 
-import json
 from typing import Any
 
 from homeassistant.const import __version__ as HA_VERSION
@@ -10,7 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
 
-from .json_utils import _HAJSONEncoder
+from .json_utils import dumps
 
 RESOURCES = [
     {
@@ -153,7 +152,7 @@ def _read_config(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(data, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(data),
         }
     ]
 
@@ -173,7 +172,7 @@ def _read_areas(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(areas, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(areas),
         }
     ]
 
@@ -187,7 +186,7 @@ async def _read_dashboard(hass: HomeAssistant, uri: str, url_path: str) -> list[
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(config, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(config),
         }
     ]
 
@@ -210,7 +209,7 @@ def _read_devices(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(devices, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(devices),
         }
     ]
 
@@ -223,7 +222,7 @@ def _read_services(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(result, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(result),
         }
     ]
 
@@ -245,7 +244,7 @@ def _read_floors(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(floors, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(floors),
         }
     ]
 
@@ -268,7 +267,7 @@ def _read_entity(hass: HomeAssistant, uri: str, entity_id: str) -> list[dict[str
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(data, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(data),
         }
     ]
 
@@ -289,7 +288,7 @@ def _read_entities(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(by_domain, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(by_domain),
         }
     ]
 
@@ -311,7 +310,7 @@ def _read_entities_domain(hass: HomeAssistant, uri: str, domain: str) -> list[di
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(entities),
         }
     ]
 
@@ -333,7 +332,7 @@ def _read_labels(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(labels, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(labels),
         }
     ]
 
@@ -354,6 +353,6 @@ def _read_integrations(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(integrations, indent=2, cls=_HAJSONEncoder),
+            "text": dumps(integrations),
         }
     ]

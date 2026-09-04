@@ -1,6 +1,5 @@
 """System, template, and history tools."""
 
-import json
 import logging
 from datetime import datetime as dt
 from typing import Any
@@ -12,7 +11,7 @@ from homeassistant.util import dt as dt_util
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -44,7 +43,7 @@ async def get_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         "language": config.language,
     }
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -132,9 +131,7 @@ async def get_history(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
                     "attributes": dict(state.attributes),
                 }
             )
-        return {
-            "content": [{"type": "text", "text": json.dumps(history, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(history)}]}
     except Exception as e:
         _LOGGER.error("Error getting history: %s", e)
         return {"content": [{"type": "text", "text": f"Error getting history: {str(e)}"}]}
@@ -255,9 +252,7 @@ async def get_logbook(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
             processor.get_events, start_time, end_time
         )
 
-        return {
-            "content": [{"type": "text", "text": json.dumps(events, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(events)}]}
     except Exception as e:
         _LOGGER.error("Error getting logbook: %s", e)
         return {"content": [{"type": "text", "text": f"Error getting logbook: {str(e)}"}]}

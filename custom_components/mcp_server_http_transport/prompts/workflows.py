@@ -1,6 +1,5 @@
 """Cross-cutting workflow prompts: dashboard building, change validation, security review."""
 
-import json
 import logging
 from typing import Any
 
@@ -9,6 +8,7 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
+from ..json_utils import dumps
 from . import register_prompt
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ async def dashboard_builder(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     if not entities_info:
         entities_text = "No entities found for the given criteria."
     else:
-        entities_text = json.dumps(entities_info, indent=2)
+        entities_text = dumps(entities_info)
 
     return {
         "description": "Dashboard layout builder",
@@ -144,21 +144,15 @@ async def change_validator(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         try:
             if ct == "script":
                 entries = await read_dict_entries(hass, "scripts.yaml")
-                sections.append(
-                    f"**Scripts ({len(entries)}):**\n```json\n{json.dumps(entries, indent=2)}\n```"
-                )
+                sections.append(f"**Scripts ({len(entries)}):**\n```json\n{dumps(entries)}\n```")
             elif ct == "automation":
                 entries = await read_list_entries(hass, "automations.yaml")
                 sections.append(
-                    f"**Automations ({len(entries)}):**\n"
-                    f"```json\n{json.dumps(entries, indent=2)}\n```"
+                    f"**Automations ({len(entries)}):**\n```json\n{dumps(entries)}\n```"
                 )
             elif ct == "scene":
                 entries = await read_list_entries(hass, "scenes.yaml")
-                sections.append(
-                    f"**Scenes ({len(entries)}):**\n"
-                    f"```json\n{json.dumps(entries, indent=2)}\n```"
-                )
+                sections.append(f"**Scenes ({len(entries)}):**\n```json\n{dumps(entries)}\n```")
         except Exception:
             _LOGGER.debug("Could not read %s config for change validator", ct)
             sections.append(f"**{ct.title()}s:** Unable to read configuration")
@@ -224,7 +218,7 @@ async def security_review(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         "external_url": getattr(config, "external_url", None),
         "internal_url": getattr(config, "internal_url", None),
     }
-    config_text = json.dumps(config_data, indent=2)
+    config_text = dumps(config_data)
 
     # Integrations
     entries = hass.config_entries.async_entries()
@@ -236,7 +230,7 @@ async def security_review(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         }
         for entry in entries
     ]
-    integrations_text = json.dumps(integrations, indent=2)
+    integrations_text = dumps(integrations)
 
     # Sensitive entity domains
     sensitive_domains = {"camera", "lock", "alarm_control_panel", "cover"}
@@ -251,7 +245,7 @@ async def security_review(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
                     "friendly_name": state.attributes.get("friendly_name", state.entity_id),
                 }
             )
-    sensitive_text = json.dumps(sensitive_entities, indent=2)
+    sensitive_text = dumps(sensitive_entities)
 
     return {
         "description": "Security review",

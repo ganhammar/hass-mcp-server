@@ -1,7 +1,6 @@
 """Narrow, race-resistant opt-in access to AppDaemon application files only."""
 
 import hashlib
-import json
 import os
 import re
 import stat
@@ -23,6 +22,7 @@ from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
+    dumps,
     register_tool,
 )
 
@@ -830,7 +830,7 @@ async def list_appdaemon_files(hass: HomeAssistant, arguments: dict[str, Any]) -
             "content": [
                 {
                     "type": "text",
-                    "text": json.dumps(await hass.async_add_executor_job(work), indent=2),
+                    "text": dumps(await hass.async_add_executor_job(work)),
                 }
             ]
         }
@@ -861,9 +861,7 @@ async def get_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) -> 
                 }
 
         return {
-            "content": [
-                {"type": "text", "text": json.dumps(await hass.async_add_executor_job(work))}
-            ]
+            "content": [{"type": "text", "text": dumps(await hass.async_add_executor_job(work))}]
         }
     except Exception as exc:
         return _error("reading AppDaemon file", exc)
@@ -915,9 +913,7 @@ async def save_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) ->
                 }
 
         return {
-            "content": [
-                {"type": "text", "text": json.dumps(await hass.async_add_executor_job(work))}
-            ]
+            "content": [{"type": "text", "text": dumps(await hass.async_add_executor_job(work))}]
         }
     except Exception as exc:
         return _error("saving AppDaemon file", exc)
@@ -951,9 +947,7 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
                 }
 
         return {
-            "content": [
-                {"type": "text", "text": json.dumps(await hass.async_add_executor_job(work))}
-            ]
+            "content": [{"type": "text", "text": dumps(await hass.async_add_executor_job(work))}]
         }
     except Exception as exc:
         if isinstance(exc, _UnlinkFailure) and exc.possibly_committed:
@@ -961,7 +955,7 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
                 "content": [
                     {
                         "type": "text",
-                        "text": json.dumps(
+                        "text": dumps(
                             {
                                 "success": False,
                                 "mutation_result": "delete may have committed before an error",
@@ -993,9 +987,7 @@ async def backup_appdaemon_files(hass: HomeAssistant, arguments: dict[str, Any])
                 return {"success": True, "backup": _backup_path(stamp), "files": files}
 
         return {
-            "content": [
-                {"type": "text", "text": json.dumps(await hass.async_add_executor_job(work))}
-            ]
+            "content": [{"type": "text", "text": dumps(await hass.async_add_executor_job(work))}]
         }
     except Exception as exc:
         return _error("backing up AppDaemon files", exc)
@@ -1044,9 +1036,7 @@ async def list_appdaemon_backups(hass: HomeAssistant, arguments: dict[str, Any])
                 return answer
 
         return {
-            "content": [
-                {"type": "text", "text": json.dumps(await hass.async_add_executor_job(work))}
-            ]
+            "content": [{"type": "text", "text": dumps(await hass.async_add_executor_job(work))}]
         }
     except Exception as exc:
         return _error("listing AppDaemon backups", exc)
@@ -1120,9 +1110,7 @@ async def restore_appdaemon_backup(
                 return _restore(fs, timestamp)
 
         return {
-            "content": [
-                {"type": "text", "text": json.dumps(await hass.async_add_executor_job(work))}
-            ]
+            "content": [{"type": "text", "text": dumps(await hass.async_add_executor_job(work))}]
         }
     except Exception as exc:
         return _error("restoring AppDaemon backup", exc)

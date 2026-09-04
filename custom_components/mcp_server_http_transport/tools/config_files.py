@@ -1,6 +1,5 @@
 """Config file access tools (list, read, write, delete, backup, restore YAML files)."""
 
-import json
 import logging
 import os
 import re
@@ -17,6 +16,7 @@ from . import (
     ANNOTATION_IDEMPOTENT,
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
+    dumps,
     register_tool,
 )
 
@@ -248,7 +248,7 @@ async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     recursive = bool(arguments.get("recursive", False))
     try:
         files = await hass.async_add_executor_job(_list_yaml_filenames_sync, config_dir, recursive)
-        return {"content": [{"type": "text", "text": json.dumps(files, indent=2)}]}
+        return {"content": [{"type": "text", "text": dumps(files)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing config files: {e}"}]}
 
@@ -713,7 +713,7 @@ async def list_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) ->
         result = await hass.async_add_executor_job(_list_backups_sync, _config_dir(hass))
         if not result:
             return {"content": [{"type": "text", "text": "No backups found"}]}
-        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+        return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing backups: {e}"}]}
 

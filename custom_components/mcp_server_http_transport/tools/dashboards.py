@@ -1,6 +1,5 @@
 """Dashboard tools."""
 
-import json
 import logging
 from typing import Any
 
@@ -11,7 +10,7 @@ from . import (
     ANNOTATION_IDEMPOTENT,
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -33,11 +32,7 @@ async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -
 
     try:
         dashboards = await list_dashboards(hass)
-        return {
-            "content": [
-                {"type": "text", "text": json.dumps(dashboards, indent=2, cls=_HAJSONEncoder)}
-            ]
-        }
+        return {"content": [{"type": "text", "text": dumps(dashboards)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing dashboards: {str(e)}"}]}
 
@@ -122,9 +117,7 @@ async def get_dashboard_config_tool(
         else:
             result = resolve_pointer(config, pointer) if pointer else config
 
-        return {
-            "content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting dashboard config: {str(e)}"}]}
 
@@ -383,7 +376,7 @@ async def create_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
                     "type": "text",
                     "text": (
                         f"Successfully created dashboard '{arguments['url_path']}': "
-                        f"{json.dumps(item, indent=2, cls=_HAJSONEncoder)}"
+                        f"{dumps(item)}"
                     ),
                 }
             ]
@@ -439,10 +432,7 @@ async def update_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
             "content": [
                 {
                     "type": "text",
-                    "text": (
-                        f"Successfully updated dashboard '{url_path}': "
-                        f"{json.dumps(item, indent=2, cls=_HAJSONEncoder)}"
-                    ),
+                    "text": (f"Successfully updated dashboard '{url_path}': " f"{dumps(item)}"),
                 }
             ]
         }

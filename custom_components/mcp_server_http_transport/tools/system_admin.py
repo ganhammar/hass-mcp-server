@@ -1,6 +1,5 @@
 """System administration and diagnostic tools."""
 
-import json
 import logging
 from collections import deque
 from datetime import datetime
@@ -12,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -217,7 +216,7 @@ async def get_system_status(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         "integration_count": integration_count,
     }
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -268,7 +267,7 @@ async def get_domain_stats(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         "examples": examples,
     }
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -294,9 +293,7 @@ async def check_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             "valid": len(errors) == 0,
             "errors": errors,
         }
-        return {
-            "content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         _LOGGER.error("Error checking config: %s", e)
         return {"content": [{"type": "text", "text": f"Error checking config: {str(e)}"}]}
@@ -324,8 +321,4 @@ async def list_integrations(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         for entry in entries
     ]
 
-    return {
-        "content": [
-            {"type": "text", "text": json.dumps(integrations, indent=2, cls=_HAJSONEncoder)}
-        ]
-    }
+    return {"content": [{"type": "text", "text": dumps(integrations)}]}

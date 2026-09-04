@@ -55,6 +55,11 @@ Black and Ruff at line length 100, both enforced in CI. Tools register through
 handler anticipates comes back as text in that same shape rather than as a raised
 exception.
 
+Serialize any JSON a tool, resource, or prompt returns with `json_utils.dumps`. It
+is compact, which is a third fewer tokens than `indent=2` for the model that reads
+it, and it goes through `_HAJSONEncoder` so datetimes and sets serialize. Ruff bans
+`json.dumps` outside that helper.
+
 `call_tool` owns the two things a handler does not have to. It rejects a call the
 caller got wrong — an unknown name, a non-object `arguments`, a declared-required
 property that is absent or null — by raising `InvalidToolRequest`, which the

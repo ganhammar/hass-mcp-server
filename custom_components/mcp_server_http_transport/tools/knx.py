@@ -1,6 +1,5 @@
 """KNX bus tools — read Home Assistant's KNX group-monitor telegram history."""
 
-import json
 import logging
 import re
 from datetime import timedelta
@@ -14,7 +13,7 @@ from . import (
     ANNOTATION_IDEMPOTENT,
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -193,7 +192,7 @@ async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -
         "returned": len(returned),
         "telegrams": returned,
     }
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 def _not_setup() -> dict[str, Any]:
@@ -247,7 +246,7 @@ async def knx_get_base_data(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         "project_info": project_info,
         "supported_platforms": _supported_platforms_ui(),
     }
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -307,7 +306,7 @@ async def knx_get_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     _lim = arguments.get("limit")
     limit = max(1, int(_lim) if _lim is not None else 200)
     result = {"count": len(rows), "entities_by_group": rows[:limit]}
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 # --- Write tools (experimental): mutate HA's KNX UI config via config_store ---
@@ -353,7 +352,7 @@ async def knx_create_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     except Exception as err:  # noqa: BLE001
         return {"content": [{"type": "text", "text": f"create_entity failed: {err}"}]}
     result = {"created": True, "entity_id": entity_id, "platform": platform}
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -393,7 +392,7 @@ async def knx_update_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     except Exception as err:  # noqa: BLE001
         return {"content": [{"type": "text", "text": f"update_entity failed: {err}"}]}
     result = {"updated": True, "entity_id": entity_id, "platform": platform}
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -422,4 +421,4 @@ async def knx_delete_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     except Exception as err:  # noqa: BLE001
         return {"content": [{"type": "text", "text": f"delete_entity failed: {err}"}]}
     result = {"deleted": True, "entity_id": entity_id}
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}

@@ -1,6 +1,5 @@
 """Entity, area, device, and service tools."""
 
-import json
 import logging
 from typing import Any
 
@@ -14,7 +13,7 @@ from homeassistant.helpers.service import async_get_all_descriptions
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -79,7 +78,7 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
         "last_updated": state.last_updated.isoformat(),
     }
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -156,7 +155,7 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
                 "content": [
                     {
                         "type": "text",
-                        "text": json.dumps(response, indent=2, cls=_HAJSONEncoder),
+                        "text": dumps(response),
                     }
                 ]
             }
@@ -248,9 +247,7 @@ async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             }
         entities.append(entity)
 
-    return {
-        "content": [{"type": "text", "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder)}]
-    }
+    return {"content": [{"type": "text", "text": dumps(entities)}]}
 
 
 @register_tool(
@@ -274,7 +271,7 @@ async def list_areas(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         for area in registry.async_list_areas()
     ]
 
-    return {"content": [{"type": "text", "text": json.dumps(areas, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(areas)}]}
 
 
 @register_tool(
@@ -311,9 +308,7 @@ async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             }
         )
 
-    return {
-        "content": [{"type": "text", "text": json.dumps(devices, indent=2, cls=_HAJSONEncoder)}]
-    }
+    return {"content": [{"type": "text", "text": dumps(devices)}]}
 
 
 @register_tool(
@@ -399,7 +394,7 @@ async def get_device_details(hass: HomeAssistant, arguments: dict[str, Any]) -> 
             entities.append(entity)
         result["entities"] = entities
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -429,7 +424,7 @@ async def list_services(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     for domain, domain_services in services.items():
         result[domain] = list(domain_services.keys())
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -479,7 +474,7 @@ async def describe_service(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     else:
         result = dict(domain_services)
 
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(result)}]}
 
 
 @register_tool(
@@ -586,9 +581,7 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         if len(entities) >= limit:
             break
 
-    return {
-        "content": [{"type": "text", "text": json.dumps(entities, indent=2, cls=_HAJSONEncoder)}]
-    }
+    return {"content": [{"type": "text", "text": dumps(entities)}]}
 
 
 @register_tool(
@@ -617,7 +610,7 @@ async def list_labels(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         for label in registry.async_list_labels()
     ]
 
-    return {"content": [{"type": "text", "text": json.dumps(labels, indent=2, cls=_HAJSONEncoder)}]}
+    return {"content": [{"type": "text", "text": dumps(labels)}]}
 
 
 @register_tool(
@@ -681,6 +674,4 @@ async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
             }
         )
 
-    return {
-        "content": [{"type": "text", "text": json.dumps(results, indent=2, cls=_HAJSONEncoder)}]
-    }
+    return {"content": [{"type": "text", "text": dumps(results)}]}

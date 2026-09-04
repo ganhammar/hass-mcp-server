@@ -56,9 +56,11 @@ handler anticipates comes back as text in that same shape rather than as a raise
 exception.
 
 Serialize any JSON a tool, resource, or prompt returns with `json_utils.dumps`. It
-is compact, which is a third fewer tokens than `indent=2` for the model that reads
-it, and it goes through `_HAJSONEncoder` so datetimes and sets serialize. Ruff bans
-`json.dumps` outside that helper.
+is compact and keeps non-ASCII text as is, which is a third fewer tokens than
+`indent=2` for the model that reads it, and its encoder accepts every value Home
+Assistant's own API accepts, falling back to `str()` rather than failing a whole
+response on one exotic attribute. Ruff flags `json.dumps` anywhere in the package
+(TID251); the helper carries the one `noqa`, and tests are exempt.
 
 `call_tool` owns the two things a handler does not have to. It rejects a call the
 caller got wrong — an unknown name, a non-object `arguments`, a declared-required

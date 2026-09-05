@@ -10,6 +10,9 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from .const import VERSION
+from .json_utils import dumps
+
 _LOGGER = logging.getLogger(__name__)
 
 _HAS_GET_ENTITY_ALIASES = hasattr(er, "async_get_entity_aliases")
@@ -128,7 +131,7 @@ class HomeAssistantMCPServer:
             "last_updated": state.last_updated.isoformat(),
         }
 
-        return [TextContent(type="text", text=str(result))]
+        return [TextContent(type="text", text=dumps(result))]
 
     async def _call_service(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Call a Home Assistant service."""
@@ -168,14 +171,14 @@ class HomeAssistantMCPServer:
                 }
             )
 
-        return [TextContent(type="text", text=str(entities))]
+        return [TextContent(type="text", text=dumps(entities))]
 
     async def run(self, host: str, port: int) -> None:
         """Run the MCP server."""
         async with stdio_server() as (read_stream, write_stream):
             init_options = InitializationOptions(
                 server_name="home-assistant",
-                server_version="0.1.0",
+                server_version=VERSION,
                 capabilities=self.server.get_capabilities(
                     notification_options=None, experimental_capabilities=None
                 ),

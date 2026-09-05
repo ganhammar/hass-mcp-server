@@ -108,8 +108,11 @@ class TestToolsEntities:
         assert body["jsonrpc"] == "2.0"
         assert "result" in body
         assert "content" in body["result"]
-        data = json.loads(body["result"]["content"][0]["text"])
+        text = body["result"]["content"][0]["text"]
+        data = json.loads(text)
         assert data["aliases"] == ["Lounge Light"]
+        # Tool text is compact JSON: no indentation or separator whitespace to pay tokens for.
+        assert text == json.dumps(data, separators=(",", ":"))
 
     async def test_post_tools_call_get_state_not_found(self, view, mock_hass):
         """Test POST with tools/call for non-existent entity."""
@@ -326,7 +329,7 @@ class TestToolsEntities:
         )
 
     async def test_post_tools_call_service_unserializable_response(self, view, mock_hass):
-        """A response the encoder cannot handle degrades to the error string."""
+        """A value the encoder does not know is stringified, not the whole response lost."""
         mock_hass.services.supports_response = Mock(return_value=SupportsResponse.ONLY)
         mock_hass.services.async_call = AsyncMock(return_value={"handle": object()})
 
@@ -349,7 +352,8 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
-        assert "Error calling service" in body["result"]["content"][0]["text"]
+        data = json.loads(body["result"]["content"][0]["text"])
+        assert data["handle"].startswith("<object object at ")
 
     async def test_post_tools_call_service_error(self, view, mock_hass):
         """Test POST with tools/call for call_service that fails."""

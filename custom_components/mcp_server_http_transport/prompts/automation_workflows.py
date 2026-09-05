@@ -1,12 +1,11 @@
 """Automation workflow prompts: building, debugging, and auditing."""
 
-import json
 import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from ..json_utils import _HAJSONEncoder
+from ..json_utils import dumps
 from . import register_prompt
 
 _LOGGER = logging.getLogger(__name__)
@@ -96,7 +95,7 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
     # Fetch automation config
     try:
         config = await read_list_entry(hass, "automations.yaml", automation_id)
-        config_text = json.dumps(config, indent=2, cls=_HAJSONEncoder)
+        config_text = dumps(config)
     except Exception:
         _LOGGER.exception("Error reading automation config for '%s'", automation_id)
         config_text = f"Automation with id '{automation_id}' not found in automations.yaml"
@@ -113,7 +112,7 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
                 break
 
     if state is not None:
-        state_text = json.dumps(
+        state_text = dumps(
             {
                 "entity_id": state.entity_id,
                 "state": state.state,
@@ -121,8 +120,6 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
                 "current_state": state.attributes.get("current", 0),
                 "mode": state.attributes.get("mode", "single"),
             },
-            indent=2,
-            cls=_HAJSONEncoder,
         )
     else:
         state_text = f"Automation entity not found for id '{automation_id}'"
@@ -152,11 +149,7 @@ async def automation_debugger(hass: HomeAssistant, arguments: dict[str, Any]) ->
             events = await get_instance(hass).async_add_executor_job(
                 processor.get_events, start_time, end_time
             )
-            logbook_text = (
-                json.dumps(events[:20], indent=2, cls=_HAJSONEncoder)
-                if events
-                else "No recent events"
-            )
+            logbook_text = dumps(events[:20]) if events else "No recent events"
     except Exception:
         _LOGGER.debug("Could not fetch logbook entries for automation debug")
 
@@ -201,7 +194,7 @@ async def automation_audit(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     automations = None
     try:
         automations = await read_list_entries(hass, "automations.yaml")
-        automations_text = json.dumps(automations, indent=2, cls=_HAJSONEncoder)
+        automations_text = dumps(automations)
     except Exception:
         _LOGGER.exception("Error reading automations for audit")
         automations_text = "Unable to read automations.yaml"
@@ -217,7 +210,7 @@ async def automation_audit(hass: HomeAssistant, arguments: dict[str, Any]) -> di
                     "last_triggered": str(state.attributes.get("last_triggered", "never")),
                 }
             )
-    states_text = json.dumps(auto_states, indent=2, cls=_HAJSONEncoder)
+    states_text = dumps(auto_states)
 
     return {
         "description": "Audit all automations",

@@ -1,11 +1,10 @@
 """Diagnostic and troubleshooting prompts."""
 
-import json
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from ..json_utils import _HAJSONEncoder
+from ..json_utils import dumps
 from . import register_prompt
 
 
@@ -28,7 +27,7 @@ def troubleshoot_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     if state is None:
         state_info = f"Entity {entity_id} not found"
     else:
-        state_info = json.dumps(
+        state_info = dumps(
             {
                 "entity_id": state.entity_id,
                 "state": state.state,
@@ -36,8 +35,6 @@ def troubleshoot_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
                 "last_changed": state.last_changed.isoformat(),
                 "last_updated": state.last_updated.isoformat(),
             },
-            indent=2,
-            cls=_HAJSONEncoder,
         )
 
     return {
@@ -83,7 +80,7 @@ def setup_guide(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any
     else:
         domain = state.entity_id.split(".")[0]
         device_class = state.attributes.get("device_class", "generic")
-        state_info = json.dumps(
+        state_info = dumps(
             {
                 "entity_id": state.entity_id,
                 "state": state.state,
@@ -91,8 +88,6 @@ def setup_guide(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any
                 "last_changed": state.last_changed.isoformat(),
                 "last_updated": state.last_updated.isoformat(),
             },
-            indent=2,
-            cls=_HAJSONEncoder,
         )
 
     return {

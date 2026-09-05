@@ -5,8 +5,9 @@ whole Lovelace config back and forth.
 """
 
 import copy
-import json
 from typing import Any
+
+from .json_utils import dumps
 
 # Operations that address a second location in the document.
 _OPS_WITH_FROM = {"move", "copy"}
@@ -42,7 +43,7 @@ def format_pointer(tokens: list[str]) -> str:
 def _describe(value: Any, limit: int = 120) -> str:
     """Render a value for an error message, truncated so errors stay readable."""
     try:
-        text = json.dumps(value, default=str)
+        text = dumps(value)
     except (TypeError, ValueError):
         text = repr(value)
     return text if len(text) <= limit else text[:limit] + "…"

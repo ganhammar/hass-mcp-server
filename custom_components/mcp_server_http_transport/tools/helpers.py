@@ -1,6 +1,5 @@
 """Helper entity CRUD tools (input_boolean, input_text, counter, timer, etc.)."""
 
-import json
 import logging
 from typing import Any
 
@@ -12,7 +11,7 @@ from . import (
     ANNOTATION_IDEMPOTENT,
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -133,9 +132,7 @@ async def list_helpers(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
                 }
             )
 
-    return {
-        "content": [{"type": "text", "text": json.dumps(helpers, indent=2, cls=_HAJSONEncoder)}]
-    }
+    return {"content": [{"type": "text", "text": dumps(helpers)}]}
 
 
 @register_tool(
@@ -167,9 +164,7 @@ async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 f"Helper '{arguments['entity_id']}' not found in storage "
                 "(it may be YAML-configured)"
             )
-        return {
-            "content": [{"type": "text", "text": json.dumps(item, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(item)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting helper config: {str(e)}"}]}
 

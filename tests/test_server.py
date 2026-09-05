@@ -1,5 +1,6 @@
 """Tests for MCP Server implementation."""
 
+import json
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -76,8 +77,9 @@ class TestHomeAssistantMCPServer:
 
         assert len(result) == 1
         assert result[0].type == "text"
-        assert "light.living_room" in result[0].text
-        assert "on" in result[0].text
+        data = json.loads(result[0].text)
+        assert data["entity_id"] == "light.living_room"
+        assert data["state"] == "on"
 
     async def test_get_state_entity_not_found(self, server, mock_hass):
         """Test _get_state when entity doesn't exist."""

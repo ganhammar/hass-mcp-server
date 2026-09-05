@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -27,7 +26,7 @@ from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -53,7 +52,7 @@ def _text_result(payload: dict[str, Any]) -> dict[str, Any]:
         "content": [
             {
                 "type": "text",
-                "text": json.dumps(payload, indent=2, cls=_HAJSONEncoder),
+                "text": dumps(payload),
             }
         ]
     }

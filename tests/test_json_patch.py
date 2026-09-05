@@ -68,7 +68,7 @@ class TestDescribe:
     """Tests for _describe, which renders values into error messages."""
 
     def test_renders_json(self):
-        assert _describe({"entity": "light.a"}) == '{"entity": "light.a"}'
+        assert _describe({"entity": "light.a"}) == '{"entity":"light.a"}'
 
     def test_truncates_long_values(self):
         text = _describe(["light.a"] * 50)

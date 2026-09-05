@@ -24,7 +24,6 @@ Two facts about how HA keys traces shape these tools:
     says why rather than reading as an error.
 """
 
-import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -36,6 +35,7 @@ from homeassistant.util import dt as dt_util
 
 from . import (
     ANNOTATION_READ_ONLY,
+    dumps,
     register_tool,
 )
 
@@ -249,9 +249,7 @@ async def list_traces(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         traces = await async_list_traces(hass, domain, key)
         traces = sorted(traces, key=_sort_key, reverse=True)[:limit]
         traces = _attach_entity_ids(hass, traces, entity_id)
-        return {
-            "content": [{"type": "text", "text": json.dumps(traces, indent=2, cls=_TRACE_ENCODER)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(traces, cls=_TRACE_ENCODER)}]}
     except ValueError as e:
         return {"content": [{"type": "text", "text": f"Error: {e}"}]}
     except Exception as e:
@@ -344,9 +342,7 @@ async def get_trace(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
         trace = await async_get_trace(hass, key, run_id)
         if arguments.get("summary", False):
             trace = _summarize_trace(trace)
-        return {
-            "content": [{"type": "text", "text": json.dumps(trace, indent=2, cls=_TRACE_ENCODER)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(trace, cls=_TRACE_ENCODER)}]}
     except ValueError as e:
         return {"content": [{"type": "text", "text": f"Error: {e}"}]}
     except Exception as e:

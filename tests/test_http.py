@@ -1,6 +1,7 @@
 """Tests for HTTP transport, auth, and JSON-RPC routing."""
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -26,6 +27,13 @@ from custom_components.mcp_server_http_transport.http import (
     serves_mcp_path,
 )
 from custom_components.mcp_server_http_transport.tools import TOOLS, call_tool
+
+_MANIFEST = Path(__file__).resolve().parents[1] / "custom_components" / DOMAIN / "manifest.json"
+
+
+def _manifest_version() -> str:
+    """The version hacs.json releases, read independently of the integration."""
+    return json.loads(_MANIFEST.read_text(encoding="utf-8"))["version"]
 
 
 def test_appdaemon_tools_are_registered_by_production_registry():
@@ -307,6 +315,7 @@ class TestMCPEndpointView:
         assert body["jsonrpc"] == "2.0"
         assert body["result"]["protocolVersion"] == "2024-11-05"
         assert body["result"]["serverInfo"]["name"] == "home-assistant-mcp-server"
+        assert body["result"]["serverInfo"]["version"] == _manifest_version()
         assert body["id"] == 1
 
     async def test_post_initialize_advertises_capabilities(self, view):

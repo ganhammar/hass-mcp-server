@@ -1,6 +1,5 @@
 """Automation, scene, and script CRUD and read tools."""
 
-import json
 import logging
 from typing import Any
 
@@ -11,7 +10,7 @@ from . import (
     ANNOTATION_IDEMPOTENT,
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
-    _HAJSONEncoder,
+    dumps,
     register_tool,
 )
 
@@ -133,9 +132,7 @@ async def list_automations(hass: HomeAssistant, arguments: dict[str, Any]) -> di
 
     try:
         entries = await read_list_entries(hass, "automations.yaml")
-        return {
-            "content": [{"type": "text", "text": json.dumps(entries, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(entries)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing automations: {str(e)}"}]}
 
@@ -161,9 +158,7 @@ async def get_automation_config(hass: HomeAssistant, arguments: dict[str, Any]) 
 
     try:
         entry = await read_list_entry(hass, "automations.yaml", arguments["automation_id"])
-        return {
-            "content": [{"type": "text", "text": json.dumps(entry, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(entry)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting automation config: {str(e)}"}]}
 
@@ -272,9 +267,7 @@ async def list_scenes(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
 
     try:
         entries = await read_list_entries(hass, "scenes.yaml")
-        return {
-            "content": [{"type": "text", "text": json.dumps(entries, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(entries)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing scenes: {str(e)}"}]}
 
@@ -300,9 +293,7 @@ async def get_scene_config(hass: HomeAssistant, arguments: dict[str, Any]) -> di
 
     try:
         entry = await read_list_entry(hass, "scenes.yaml", arguments["scene_id"])
-        return {
-            "content": [{"type": "text", "text": json.dumps(entry, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(entry)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting scene config: {str(e)}"}]}
 
@@ -417,9 +408,7 @@ async def list_scripts(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
 
     try:
         entries = await read_dict_entries(hass, "scripts.yaml")
-        return {
-            "content": [{"type": "text", "text": json.dumps(entries, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(entries)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error listing scripts: {str(e)}"}]}
 
@@ -445,8 +434,6 @@ async def get_script_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
 
     try:
         entry = await read_dict_entry(hass, "scripts.yaml", arguments["key"])
-        return {
-            "content": [{"type": "text", "text": json.dumps(entry, indent=2, cls=_HAJSONEncoder)}]
-        }
+        return {"content": [{"type": "text", "text": dumps(entry)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting script config: {str(e)}"}]}

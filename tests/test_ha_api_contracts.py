@@ -22,6 +22,10 @@ from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.recorder import Recorder
+from homeassistant.components.recorder.history import (
+    get_significant_states,
+    get_significant_states_with_session,
+)
 from homeassistant.components.recorder.services import (
     SERVICE_GET_STATISTICS,
     _async_handle_get_statistics_service,
@@ -210,6 +214,41 @@ class TestRecorderContracts:
 
     def test_async_clear_statistics_signature(self):
         assert _params(Recorder.async_clear_statistics) == ["self", "statistic_ids", "on_done"]
+
+
+class TestHistoryContracts:
+    """Contracts for the state history the prompts in prompts/reporting.py read.
+
+    get_significant_states is the function behind the history REST view and
+    websocket command, both of which are HTTP surfaces this integration cannot
+    call from inside the process, so the prompts reach into the module.
+    """
+
+    def test_get_significant_states_signature(self):
+        """The prompts pass hass, start, end and entity_ids positionally.
+
+        daily_summary also names the two options that keep its every-connect
+        query cheap; a rename would turn them into a TypeError inside the
+        executor and the prompt would report the recorder as unavailable.
+        """
+        params = _params(get_significant_states)
+        assert params[:4] == ["hass", "start_time", "end_time", "entity_ids"]
+        assert {"include_start_time_state", "no_attributes"} <= set(params)
+
+    def test_a_query_across_every_entity_is_refused(self):
+        """Regression for #95: entity_ids=None raises rather than meaning "all".
+
+        daily_summary therefore supplies the state machine's entity list. The
+        check runs before the session is touched, which is why a Mock session
+        gets far enough to trip it.
+        """
+        hass = Mock()
+        hass.data = {DATA_INSTANCE: Mock(states_meta_manager=Mock(active=True))}
+
+        with pytest.raises(ValueError, match="entity_ids must be provided"):
+            get_significant_states_with_session(
+                hass, Mock(), datetime(2024, 1, 1, tzinfo=UTC), None, None
+            )
 
 
 @pytest.mark.skipif(

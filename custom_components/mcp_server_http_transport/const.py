@@ -40,7 +40,14 @@ def validate_appdaemon_apps_root(value: str) -> str:
     if normalized == DEFAULT_APPDAEMON_APPS_ROOT:
         return normalized
     if not normalized.startswith(APPDAEMON_SHARED_ROOTS):
-        raise ValueError("AppDaemon apps root must be under /share or /media")
+        # /share and /media are the only writable folders Home Assistant Core
+        # shares with add-ons on Home Assistant OS; an add-on's private config
+        # folder (/addon_configs, /app_configs) is not mounted into Core at all.
+        raise ValueError(
+            "AppDaemon apps root must be under /share or /media, the folders Home "
+            "Assistant Core shares with add-ons; add-on private folders such as "
+            "/addon_configs and /app_configs are not visible to Core"
+        )
     return normalized
 
 

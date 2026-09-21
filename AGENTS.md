@@ -76,3 +76,11 @@ to give about that property being absent is unreachable — put the reason in th
 property's schema `description`, which the `-32602` message quotes back. And
 `isError` is currently set only by that wrapper, so a handler-caught failure still
 returns a success-shaped result whose text happens to describe an error.
+
+`get_prompt` does the same for `prompts/get`: an unknown name, non-object
+`arguments`, or a `required` argument that is absent or null raises
+`InvalidPromptRequest` and never reaches a handler. Some clients call
+`prompts/get` for every prompt at connect time with placeholder values, so a
+handler that cannot use a value it was given (a timestamp that will not parse)
+raises `InvalidPromptArguments` rather than logging it; an ID that merely does not
+exist is the client's input too, so log it at debug, not with a traceback.

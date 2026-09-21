@@ -15,7 +15,7 @@ from .const import (
     RESOURCE_METADATA_PREFIX,
     VERSION,
 )
-from .prompts import get_prompt, get_prompts
+from .prompts import InvalidPromptRequest, get_prompt, get_prompts
 from .resources import get_resources, read_resource
 from .tools import InvalidToolRequest, call_tool, get_tool_schemas
 
@@ -199,10 +199,16 @@ class MCPEndpointView(HomeAssistantView):
     def __init__(
         self,
         hass: HomeAssistant,
+        *,
         native_auth_enabled: bool = False,
         paths: list[str] | None = None,
     ) -> None:
-        """Initialize the MCP endpoint, optionally narrowing the paths served."""
+        """Initialize the MCP endpoint, optionally narrowing the paths served.
+
+        The options are keyword-only so a stray positional argument, such as
+        a Mock where a server object used to go, fails here rather than
+        quietly becoming a truthy auth flag.
+        """
         self.hass = hass
         self.native_auth_enabled = native_auth_enabled
         if paths is not None:
@@ -429,7 +435,12 @@ class MCPEndpointView(HomeAssistantView):
         if method == "prompts/get":
             name = params.get("name", "")
             arguments = params.get("arguments", {})
-            result = await get_prompt(self.hass, name, arguments)
+
+            try:
+                result = await get_prompt(self.hass, name, arguments)
+            except InvalidPromptRequest as err:
+                return _jsonrpc_error(-32602, str(err), msg_id)
+
             return {
                 "jsonrpc": "2.0",
                 "result": result,
@@ -481,7 +492,7 @@ def register_mcp_views(hass: HomeAssistant, native_auth_enabled: bool) -> None:
 
     contested = mcp_path_is_contested(hass)
     endpoint_paths = [MCP_HTTP_PATH] if contested else [MCP_PATH, MCP_HTTP_PATH]
-    endpoint = MCPEndpointView(hass, native_auth_enabled, paths=endpoint_paths)
+    endpoint = MCPEndpointView(hass, native_auth_enabled=native_auth_enabled, paths=endpoint_paths)
     metadata_paths = [f"{RESOURCE_METADATA_PREFIX}{path}" for path in endpoint_paths]
 
     router = hass.http.app.router

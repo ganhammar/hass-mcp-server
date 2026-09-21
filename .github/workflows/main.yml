@@ -101,6 +101,9 @@ jobs:
       matrix:
         include:
           - python-version: "3.14"
+            ha-version: "2026.9.3"
+            ha-test-helper: "0.13.366"
+          - python-version: "3.14"
             ha-version: "2026.4.2"
             ha-test-helper: "0.13.323"
           - python-version: "3.13"

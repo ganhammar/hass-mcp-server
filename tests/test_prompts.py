@@ -1330,7 +1330,7 @@ class TestPromptInputErrors:
 
     @pytest.fixture
     def view(self, mock_hass):
-        return MCPEndpointView(mock_hass, Mock())
+        return MCPEndpointView(mock_hass)
 
     async def _get(self, view, name, arguments, msg_id=1):
         request = Mock()

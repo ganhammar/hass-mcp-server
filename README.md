@@ -568,9 +568,14 @@ code-execution-equivalent capability inside the AppDaemon environment and
 whatever Home Assistant API access AppDaemon has. Enable it only after
 reviewing the contents and secrets of the apps tree. The `appdaemon_apps_root` option defaults to the
 legacy AppDaemon private apps path, `/addon_configs/a0d7b954_appdaemon/apps`,
-for compatibility. On installations where Home Assistant Core cannot see an
-add-on-private mount, configure the AppDaemon add-on and this integration to
-use a shared root such as `/share/appdaemon/apps` or `/media/appdaemon/apps`.
+for compatibility with installations that mount that folder into Home Assistant
+Core themselves. On Home Assistant OS it never works: the Core container only
+mounts `/config`, `/share`, `/media` and `/ssl`, and an add-on's private config
+folder (`/addon_configs/...`, or `/app_configs/...` as other add-ons see it) is
+not among them, so neither path can be reached from this integration. Use a
+shared root instead: set `app_dir: /share/appdaemon/apps` (or a folder under
+`/media`) in AppDaemon's `appdaemon.yaml`, move the apps there, and configure
+the same path as the AppDaemon apps root here.
 
 Only the legacy root and paths below `/share/` or `/media/` are accepted.
 Absolute paths, malformed components, `..` traversal, symlink components, and

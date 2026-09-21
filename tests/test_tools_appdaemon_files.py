@@ -499,6 +499,29 @@ def test_configured_shared_root_is_used():
     assert tools._root(_configured_hass("/share/appdaemon/apps")) == Path("/share/appdaemon/apps")
 
 
+@pytest.mark.asyncio
+async def test_unreachable_root_explains_the_shared_folder_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Regression for #93: the default root does not exist on Home Assistant OS.
+
+    Core never mounts an add-on's private config folder, so a bare ENOENT sends
+    the user hunting for the right spelling of a path that cannot work. The
+    error names the folders Core does see and the AppDaemon setting to change.
+    """
+    monkeypatch.setattr(tools, "_APPS_ROOT", tmp_path / "addon_configs" / "apps")
+
+    for tool, arguments in (
+        (tools.list_appdaemon_files, {}),
+        (tools.get_appdaemon_file, {"path": "hello.py"}),
+        (tools.save_appdaemon_file, {"path": "hello.py", "content": "x"}),
+    ):
+        text = (await tool(_hass(), arguments))["content"][0]["text"]
+        assert "not reachable from Home Assistant Core" in text
+        assert "/addon_configs" in text and "/app_configs" in text
+        assert "app_dir" in text and "/share/appdaemon/apps" in text
+
+
 def test_path_and_failure_helpers_preserve_their_contract():
     assert tools._parts(".mcp_appdaemon_backups/x.py", allow_backup=True) == (
         ".mcp_appdaemon_backups",

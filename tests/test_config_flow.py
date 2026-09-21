@@ -1,5 +1,7 @@
 """Test config flow for MCP Server integration."""
 
+import json
+import pathlib
 from unittest.mock import Mock, patch
 
 import pytest
@@ -18,6 +20,7 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
     DEFAULT_APPDAEMON_APPS_ROOT,
+    DOMAIN,
     validate_appdaemon_apps_root,
 )
 
@@ -370,6 +373,34 @@ class TestMCPServerOptionsFlow:
         """The underlying path-security validator remains unchanged."""
         with pytest.raises(ValueError):
             validate_appdaemon_apps_root(root)
+
+    @pytest.mark.parametrize(
+        "root",
+        ["/app_configs/a0d7b954_appdaemon/apps", "/addon_configs/other_addon/apps"],
+    )
+    def test_root_validator_rejects_addon_private_folders_by_name(self, root):
+        """Regression for #93: an add-on private folder is refused with the reason.
+
+        Core never sees /addon_configs or /app_configs, so accepting the path
+        would only move the failure to the first tool call.
+        """
+        with pytest.raises(ValueError, match="not visible to Core"):
+            validate_appdaemon_apps_root(root)
+
+    def test_translations_carry_every_error_key(self):
+        """en.json must translate each error strings.json declares, per step.
+
+        A key missing from en.json shows up in the UI as the raw key, so a
+        rejected AppDaemon root read as ``invalid_appdaemon_apps_root`` with no
+        hint at what would be accepted.
+        """
+        package = pathlib.Path(__file__).parent.parent / "custom_components" / DOMAIN
+        strings = json.loads((package / "strings.json").read_text())
+        english = json.loads((package / "translations" / "en.json").read_text())
+
+        for section in ("config", "options"):
+            assert set(english[section]["error"]) == set(strings[section]["error"])
+        assert set(strings["options"]["error"]) >= {"invalid_appdaemon_apps_root"}
 
     async def test_init_step_persists_image_access(self):
         """Test init step merges camera and image file access into entry data."""

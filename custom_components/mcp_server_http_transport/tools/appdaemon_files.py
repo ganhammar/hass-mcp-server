@@ -68,6 +68,25 @@ def _error(prefix: str, exc: Exception) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": f"Error {prefix}: {exc}"}]}
 
 
+def _unreachable_root(root: Path) -> str:
+    """Explain a root Home Assistant Core cannot open.
+
+    On Home Assistant OS the Core container mounts /config, /share, /media and
+    /ssl only. An add-on's private config folder (/addon_configs or /app_configs
+    inside other add-ons) is never visible here, so the fix is on the AppDaemon
+    side: serve the apps from a shared folder and point both at it.
+    """
+    return (
+        f"AppDaemon apps root '{root}' does not exist or is not reachable from "
+        "Home Assistant Core. On Home Assistant OS, Core only sees /config, /share, "
+        "/media and /ssl; add-on private folders such as /addon_configs and "
+        "/app_configs are not mounted. Set app_dir in AppDaemon's appdaemon.yaml to a "
+        "folder under /share or /media (e.g., /share/appdaemon/apps), move the apps "
+        "there, and configure the same path as the AppDaemon apps root in this "
+        "integration's options."
+    )
+
+
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -129,8 +148,10 @@ class _RootFS:
                 os.close(fd)
                 fd = next_fd
             return fd
-        except Exception:
+        except Exception as err:
             os.close(fd)
+            if isinstance(err, (FileNotFoundError, NotADirectoryError)):
+                raise FileNotFoundError(_unreachable_root(root)) from err
             raise
 
     def close(self) -> None:

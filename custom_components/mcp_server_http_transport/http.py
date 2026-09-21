@@ -6,7 +6,6 @@ from typing import Any
 from aiohttp import hdrs, web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
-from mcp.server import Server
 
 from .completions import complete
 from .const import (
@@ -200,13 +199,11 @@ class MCPEndpointView(HomeAssistantView):
     def __init__(
         self,
         hass: HomeAssistant,
-        server: Server,
         native_auth_enabled: bool = False,
         paths: list[str] | None = None,
     ) -> None:
         """Initialize the MCP endpoint, optionally narrowing the paths served."""
         self.hass = hass
-        self.server = server
         self.native_auth_enabled = native_auth_enabled
         if paths is not None:
             self.url, self.extra_urls = paths[0], list(paths[1:])
@@ -465,7 +462,7 @@ class MCPEndpointView(HomeAssistantView):
         return await call_tool(self.hass, name, arguments)
 
 
-def register_mcp_views(hass: HomeAssistant, server: Server, native_auth_enabled: bool) -> None:
+def register_mcp_views(hass: HomeAssistant, native_auth_enabled: bool) -> None:
     """Register the HTTP views this integration serves.
 
     MCP_PATH is skipped, endpoint and metadata alike, when something else
@@ -479,13 +476,12 @@ def register_mcp_views(hass: HomeAssistant, server: Server, native_auth_enabled:
     second one, which would sit behind the first and never be reached.
     """
     if (endpoint := hass.data.get(REGISTERED_ENDPOINT)) is not None:
-        endpoint.server = server
         endpoint.native_auth_enabled = native_auth_enabled
         return
 
     contested = mcp_path_is_contested(hass)
     endpoint_paths = [MCP_HTTP_PATH] if contested else [MCP_PATH, MCP_HTTP_PATH]
-    endpoint = MCPEndpointView(hass, server, native_auth_enabled, paths=endpoint_paths)
+    endpoint = MCPEndpointView(hass, native_auth_enabled, paths=endpoint_paths)
     metadata_paths = [f"{RESOURCE_METADATA_PREFIX}{path}" for path in endpoint_paths]
 
     router = hass.http.app.router

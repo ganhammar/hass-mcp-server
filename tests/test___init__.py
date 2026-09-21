@@ -31,69 +31,53 @@ class TestAsyncSetup:
 class TestAsyncSetupEntry:
     """Test async_setup_entry function."""
 
-    @patch("custom_components.mcp_server_http_transport.Server")
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
-    async def test_async_setup_entry_initializes_server(
+    async def test_async_setup_entry_initializes_domain_data(
         self,
         mock_register_views,
-        mock_server_class,
         mock_hass,
         mock_config_entry,
     ):
-        """Test async_setup_entry initializes MCP server."""
-        mock_server = Mock()
-        mock_server_class.return_value = mock_server
+        """Test async_setup_entry fills hass.data and registers the views."""
 
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
         assert result is True
         assert DOMAIN in mock_hass.data
-        assert "server" in mock_hass.data[DOMAIN]
-        assert mock_hass.data[DOMAIN]["server"] == mock_server
-        mock_server_class.assert_called_once_with("home-assistant-mcp-server")
+        mock_register_views.assert_called_once_with(mock_hass, False)
 
-    @patch("custom_components.mcp_server_http_transport.Server")
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_registers_views(
         self,
         mock_register_views,
-        mock_server_class,
         mock_hass,
         mock_config_entry,
     ):
         """Test async_setup_entry registers the HTTP views."""
-        mock_server = Mock()
-        mock_server_class.return_value = mock_server
 
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
         assert result is True
-        mock_register_views.assert_called_once_with(mock_hass, mock_server, False)
+        mock_register_views.assert_called_once_with(mock_hass, False)
 
-    @patch("custom_components.mcp_server_http_transport.Server")
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_passes_native_auth_enabled(
         self,
         mock_register_views,
-        mock_server_class,
         mock_hass,
         mock_config_entry,
     ):
         """Test async_setup_entry passes native_auth_enabled on to registration."""
         mock_config_entry.data = {"native_auth_enabled": True}
-        mock_server = Mock()
-        mock_server_class.return_value = mock_server
 
         await async_setup_entry(mock_hass, mock_config_entry)
 
-        mock_register_views.assert_called_once_with(mock_hass, mock_server, True)
+        mock_register_views.assert_called_once_with(mock_hass, True)
 
-    @patch("custom_components.mcp_server_http_transport.Server")
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_image_access_defaults_off(
         self,
         mock_register_views,
-        mock_server_class,
         mock_hass,
         mock_config_entry,
     ):
@@ -103,12 +87,10 @@ class TestAsyncSetupEntry:
         assert mock_hass.data[DOMAIN]["camera_image_access"] is False
         assert mock_hass.data[DOMAIN]["image_file_access"] is False
 
-    @patch("custom_components.mcp_server_http_transport.Server")
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_wires_image_access_flags(
         self,
         mock_register_views,
-        mock_server_class,
         mock_hass,
         mock_config_entry,
     ):

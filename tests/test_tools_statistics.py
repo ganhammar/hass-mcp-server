@@ -14,11 +14,6 @@ class TestToolsStatistics:
     """Tests for tools/statistics.py tools."""
 
     @pytest.fixture
-    def mock_server(self):
-        """Create a mock MCP server."""
-        return Mock()
-
-    @pytest.fixture
     def mock_hass(self):
         """Create a mock Home Assistant instance."""
         hass = Mock()
@@ -27,9 +22,9 @@ class TestToolsStatistics:
         return hass
 
     @pytest.fixture
-    def view(self, mock_hass, mock_server):
+    def view(self, mock_hass):
         """Create an MCPEndpointView instance."""
-        return MCPEndpointView(mock_hass, mock_server)
+        return MCPEndpointView(mock_hass)
 
     async def test_post_tools_call_get_statistics(self, view, mock_hass):
         """Test POST with tools/call for get_statistics."""
@@ -188,7 +183,7 @@ class TestListStatisticIds:
     @pytest.fixture
     def view(self):
         hass = Mock()
-        return MCPEndpointView(hass, Mock())
+        return MCPEndpointView(hass)
 
     async def test_lists_metadata(self, view):
         """Metadata is passed through verbatim, including external (colon) IDs."""
@@ -249,7 +244,7 @@ class TestValidateStatistics:
     @pytest.fixture
     def view(self):
         hass = Mock()
-        return MCPEndpointView(hass, Mock())
+        return MCPEndpointView(hass)
 
     async def test_reports_issues(self, view):
         """ValidationIssue objects are serialized via their as_dict()."""
@@ -286,7 +281,7 @@ class TestAdjustStatistics:
     @pytest.fixture
     def view(self):
         hass = Mock()
-        return MCPEndpointView(hass, Mock())
+        return MCPEndpointView(hass)
 
     def _recorder(self, metadata):
         recorder = Mock()
@@ -422,7 +417,7 @@ class TestClearStatistics:
     def view(self):
         hass = Mock()
         hass.loop = asyncio.get_event_loop()
-        return MCPEndpointView(hass, Mock())
+        return MCPEndpointView(hass)
 
     def _recorder(self, known_ids=("sensor.energy",), clear=None):
         """A recorder whose existence check knows known_ids."""

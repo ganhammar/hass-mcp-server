@@ -83,7 +83,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m venv .venv
-        .venv/bin/pip install "pytest-homeassistant-custom-component==0.13.357" mcp
+        .venv/bin/pip install "pytest-homeassistant-custom-component==0.13.357"
         .venv/bin/pip install \
           "xknx==3.19.0" \
           "xknxproject==3.10.0" \
@@ -128,7 +128,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m venv .venv
-        .venv/bin/pip install "pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }}" mcp
+        .venv/bin/pip install "pytest-homeassistant-custom-component==${{ matrix.ha-test-helper }}"
         if [ -n "$EXTRA_DEPS" ]; then .venv/bin/pip install $EXTRA_DEPS; fi
       env:
         EXTRA_DEPS: ${{ matrix.extra-deps }}

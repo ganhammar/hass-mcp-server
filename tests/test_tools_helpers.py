@@ -538,10 +538,6 @@ class TestHelperToolsViaHTTP:
     """Integration-style tests for helper tools via the MCP HTTP endpoint."""
 
     @pytest.fixture
-    def mock_server(self):
-        return Mock()
-
-    @pytest.fixture
     def mock_hass(self):
         hass = Mock()
         # DOMAIN key must be truthy so _integration_loaded() passes
@@ -551,8 +547,8 @@ class TestHelperToolsViaHTTP:
         return hass
 
     @pytest.fixture
-    def view(self, mock_hass, mock_server):
-        return MCPEndpointView(mock_hass, mock_server)
+    def view(self, mock_hass):
+        return MCPEndpointView(mock_hass)
 
     def _make_request(self, method: str, params: dict, request_id: int = 1) -> Mock:
         request = Mock()

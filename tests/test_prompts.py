@@ -1,12 +1,18 @@
 """Tests for prompt-related MCP endpoints."""
 
 import json
+import logging
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.prompts import (
+    PROMPTS,
+    InvalidPromptArguments,
+    get_prompt,
+)
 
 
 class TestPrompts:
@@ -120,7 +126,15 @@ class TestPrompts:
         assert "not found" in body["result"]["messages"][0]["content"]["text"]
 
     async def test_post_prompts_get_daily_summary(self, view, mock_hass):
-        """Test POST with prompts/get for daily_summary."""
+        """Regression for #95: the recorder is asked for the entities that exist.
+
+        get_significant_states raises "entity_ids must be provided" for None, so
+        the prompt has to hand it the state machine's entity list.
+        """
+        mock_hass.states.async_all.return_value = [
+            Mock(entity_id="light.living_room"),
+            Mock(entity_id="sensor.temperature"),
+        ]
         mock_state1 = Mock()
         mock_state1.state = "on"
         mock_state2 = Mock()
@@ -156,9 +170,45 @@ class TestPrompts:
         result = body["result"]
         assert "Daily summary" in result["description"]
         assert "light.living_room" in result["messages"][0]["content"]["text"]
+        entity_ids = mock_recorder.async_add_executor_job.call_args.args[4]
+        assert entity_ids == ["light.living_room", "sensor.temperature"]
+
+    async def test_post_prompts_get_daily_summary_without_entities_skips_recorder(
+        self, view, mock_hass
+    ):
+        """An empty state machine has no history to ask for, and asking would raise."""
+        mock_hass.states.async_all.return_value = []
+        mock_recorder = Mock()
+        mock_recorder.async_add_executor_job = AsyncMock()
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": "daily_summary", "arguments": {}},
+                "id": 31,
+            }
+        )
+
+        with (
+            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch(
+                "homeassistant.components.recorder.get_instance",
+                return_value=mock_recorder,
+            ),
+        ):
+            response = await view.post(request)
+
+        body = json.loads(response.body)
+        text = body["result"]["messages"][0]["content"]["text"]
+        assert "No significant state changes" in text
+        mock_recorder.async_add_executor_job.assert_not_called()
 
     async def test_post_prompts_get_daily_summary_recorder_error(self, view, mock_hass):
         """Test POST with prompts/get for daily_summary when recorder fails."""
+        mock_hass.states.async_all.return_value = [Mock(entity_id="light.living_room")]
         mock_recorder = Mock()
         mock_recorder.async_add_executor_job = AsyncMock(
             side_effect=Exception("Recorder not available")
@@ -1258,3 +1308,126 @@ class TestPrompts:
         text = body["result"]["messages"][0]["content"]["text"]
         assert "Invalid trigger config" in text
         assert "validation errors" in text.lower()
+
+
+class TestPromptInputErrors:
+    """Regression for #94: a prompts/get the client got wrong is a caller error.
+
+    Clients that enumerate prompts at connect time call prompts/get for every
+    prompt with placeholder values (opencode sends the literal ``$1``). Each
+    such call is answered with JSON-RPC -32602, as malformed tools/call already
+    is, and writes nothing at ERROR to the Home Assistant log.
+    """
+
+    @pytest.fixture
+    def mock_hass(self):
+        hass = Mock()
+        hass.states = Mock()
+        hass.states.get.return_value = None
+        hass.states.async_all.return_value = []
+        hass.services = Mock()
+        return hass
+
+    @pytest.fixture
+    def view(self, mock_hass):
+        return MCPEndpointView(mock_hass, Mock())
+
+    async def _get(self, view, name, arguments, msg_id=1):
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": name, "arguments": arguments},
+                "id": msg_id,
+            }
+        )
+        request.url.origin.return_value = "https://homeassistant.local"
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        return response, json.loads(response.body)
+
+    async def test_unknown_prompt_is_invalid_params(self, view):
+        response, body = await self._get(view, "no_such_prompt", {})
+
+        assert response.status == 200
+        assert body["error"]["code"] == -32602
+        assert "Unknown prompt" in body["error"]["message"]
+        assert body["id"] == 1
+
+    async def test_missing_required_argument_names_it_with_its_description(self, view):
+        response, body = await self._get(view, "energy_report", {})
+
+        assert body["error"]["code"] == -32602
+        assert "start_time" in body["error"]["message"]
+        assert "ISO format" in body["error"]["message"]
+
+    async def test_explicit_null_counts_as_a_missing_argument(self, view):
+        response, body = await self._get(view, "automation_review", {"automation_id": None})
+
+        assert body["error"]["code"] == -32602
+        assert "automation_id" in body["error"]["message"]
+
+    async def test_non_object_arguments_are_rejected(self, view):
+        response, body = await self._get(view, "daily_summary", ["$1"])
+
+        assert body["error"]["code"] == -32602
+        assert "must be a JSON object" in body["error"]["message"]
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"start_time": "$1"},
+            {"start_time": "2024-01-01T00:00:00", "end_time": "$1"},
+        ],
+    )
+    async def test_energy_report_rejects_a_placeholder_timestamp(self, view, arguments, caplog):
+        """An unparseable timestamp is answered, not raised through the transport."""
+        response, body = await self._get(view, "energy_report", arguments)
+
+        assert response.status == 200
+        assert body["error"]["code"] == -32602
+        assert "ISO 8601" in body["error"]["message"]
+        assert "'$1'" in body["error"]["message"]
+        assert not [r for r in caplog.records if r.levelname == "ERROR"]
+
+    @pytest.mark.parametrize("name", ["automation_review", "automation_debugger"])
+    async def test_unknown_automation_id_degrades_without_an_error_log(self, view, name, caplog):
+        """A not-found ID still yields a prompt, and no traceback lands in the HA log."""
+        with patch(
+            "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
+            new_callable=AsyncMock,
+            side_effect=ValueError("Entry with id '$1' not found in automations.yaml"),
+        ):
+            response, body = await self._get(view, name, {"automation_id": "$1"})
+
+        assert response.status == 200
+        assert "not found" in body["result"]["messages"][0]["content"]["text"]
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    async def test_get_prompt_validates_before_the_handler_runs(self, mock_hass):
+        """A handler never sees a call that omits what it declared required."""
+        called = False
+
+        async def handler(hass, arguments):
+            nonlocal called
+            called = True
+            return {"messages": []}
+
+        definition = {
+            "name": "probe",
+            "description": "",
+            "arguments": [{"name": "entity_id", "required": True}],
+        }
+        with patch.dict(PROMPTS, {"probe": {"definition": definition, "handler": handler}}):
+            with pytest.raises(InvalidPromptArguments, match="entity_id"):
+                await get_prompt(mock_hass, "probe", {})
+            with pytest.raises(InvalidPromptArguments, match="entity_id"):
+                await get_prompt(mock_hass, "probe", {"entity_id": None})
+            assert called is False
+            assert await get_prompt(mock_hass, "probe", {"entity_id": "light.x"}) == {
+                "messages": []
+            }

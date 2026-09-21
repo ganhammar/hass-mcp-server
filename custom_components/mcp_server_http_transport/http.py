@@ -16,7 +16,7 @@ from .const import (
     RESOURCE_METADATA_PREFIX,
     VERSION,
 )
-from .prompts import get_prompt, get_prompts
+from .prompts import InvalidPromptRequest, get_prompt, get_prompts
 from .resources import get_resources, read_resource
 from .tools import InvalidToolRequest, call_tool, get_tool_schemas
 
@@ -432,7 +432,12 @@ class MCPEndpointView(HomeAssistantView):
         if method == "prompts/get":
             name = params.get("name", "")
             arguments = params.get("arguments", {})
-            result = await get_prompt(self.hass, name, arguments)
+
+            try:
+                result = await get_prompt(self.hass, name, arguments)
+            except InvalidPromptRequest as err:
+                return _jsonrpc_error(-32602, str(err), msg_id)
+
             return {
                 "jsonrpc": "2.0",
                 "result": result,

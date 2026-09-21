@@ -7,9 +7,20 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from . import register_prompt
+from . import InvalidPromptArguments, register_prompt
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _parse_timestamp(name: str, value: Any) -> datetime:
+    """Parse an ISO 8601 argument, reporting an unusable one as the caller's error."""
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError) as err:
+        raise InvalidPromptArguments(
+            f"Argument '{name}' must be an ISO 8601 timestamp "
+            f"(e.g., 2024-01-01T00:00:00), got {value!r}"
+        ) from err
 
 
 @register_prompt(
@@ -24,10 +35,17 @@ async def daily_summary(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     end_time = dt_util.utcnow()
     start_time = end_time - timedelta(days=1)
 
+    # The recorder refuses a query across every entity, so the state machine
+    # supplies the list. An entity that has no state has no history either.
+    entity_ids = [state.entity_id for state in hass.states.async_all()]
+
     try:
-        states = await get_instance(hass).async_add_executor_job(
-            get_significant_states, hass, start_time, end_time, None
-        )
+        if not entity_ids:
+            states = {}
+        else:
+            states = await get_instance(hass).async_add_executor_job(
+                get_significant_states, hass, start_time, end_time, entity_ids
+            )
 
         summary_parts = []
         for entity_id, entity_states in states.items():
@@ -88,9 +106,9 @@ async def energy_report(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     from homeassistant.components.recorder import get_instance
     from homeassistant.components.recorder.history import get_significant_states
 
-    start_time = datetime.fromisoformat(arguments.get("start_time", ""))
+    start_time = _parse_timestamp("start_time", arguments["start_time"])
     end_time_str = arguments.get("end_time")
-    end_time = datetime.fromisoformat(end_time_str) if end_time_str else dt_util.utcnow()
+    end_time = _parse_timestamp("end_time", end_time_str) if end_time_str else dt_util.utcnow()
 
     energy_device_classes = {"energy", "power", "gas"}
     energy_units = {"kWh", "Wh", "W", "m\u00b3"}

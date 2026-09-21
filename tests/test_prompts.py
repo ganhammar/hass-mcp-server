@@ -6,6 +6,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.components.recorder.history import get_significant_states
 
 from custom_components.mcp_server_http_transport.http import MCPEndpointView
 from custom_components.mcp_server_http_transport.prompts import (
@@ -169,9 +170,13 @@ class TestPrompts:
         body = json.loads(response.body)
         result = body["result"]
         assert "Daily summary" in result["description"]
-        assert "light.living_room" in result["messages"][0]["content"]["text"]
-        entity_ids = mock_recorder.async_add_executor_job.call_args.args[4]
-        assert entity_ids == ["light.living_room", "sensor.temperature"]
+        assert "light.living_room: 2 change(s)" in result["messages"][0]["content"]["text"]
+        # This prompt runs on every connect for clients that enumerate prompts,
+        # so the query skips the attributes join and the start-of-window state.
+        query = mock_recorder.async_add_executor_job.call_args.args[0]
+        assert query.func is get_significant_states
+        assert query.args[3] == ["light.living_room", "sensor.temperature"]
+        assert query.keywords == {"include_start_time_state": False, "no_attributes": True}
 
     async def test_post_prompts_get_daily_summary_without_entities_skips_recorder(
         self, view, mock_hass

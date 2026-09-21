@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -39,18 +40,27 @@ async def daily_summary(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     # supplies the list. An entity that has no state has no history either.
     entity_ids = [state.entity_id for state in hass.states.async_all()]
 
+    # This prompt takes no arguments, so a client that enumerates prompts at
+    # connect time runs it on every connect. The summary reads only the row
+    # count and the last state, so the attributes join and the start-of-window
+    # state, the expensive parts of the query, are left out.
+    query = partial(
+        get_significant_states,
+        hass,
+        start_time,
+        end_time,
+        entity_ids,
+        include_start_time_state=False,
+        no_attributes=True,
+    )
+
     try:
-        if not entity_ids:
-            states = {}
-        else:
-            states = await get_instance(hass).async_add_executor_job(
-                get_significant_states, hass, start_time, end_time, entity_ids
-            )
+        states = await get_instance(hass).async_add_executor_job(query) if entity_ids else {}
 
         summary_parts = []
         for entity_id, entity_states in states.items():
-            if len(entity_states) > 1:
-                changes = len(entity_states) - 1
+            if entity_states:
+                changes = len(entity_states)
                 current = entity_states[-1].state
                 summary_parts.append(f"- {entity_id}: {changes} change(s), currently '{current}'")
 

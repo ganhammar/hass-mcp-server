@@ -225,13 +225,15 @@ class TestHistoryContracts:
     """
 
     def test_get_significant_states_signature(self):
-        """The prompts pass hass, start, end and entity_ids positionally."""
-        assert _params(get_significant_states)[:4] == [
-            "hass",
-            "start_time",
-            "end_time",
-            "entity_ids",
-        ]
+        """The prompts pass hass, start, end and entity_ids positionally.
+
+        daily_summary also names the two options that keep its every-connect
+        query cheap; a rename would turn them into a TypeError inside the
+        executor and the prompt would report the recorder as unavailable.
+        """
+        params = _params(get_significant_states)
+        assert params[:4] == ["hass", "start_time", "end_time", "entity_ids"]
+        assert {"include_start_time_state", "no_attributes"} <= set(params)
 
     def test_a_query_across_every_entity_is_refused(self):
         """Regression for #95: entity_ids=None raises rather than meaning "all".

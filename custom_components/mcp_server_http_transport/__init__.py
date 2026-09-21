@@ -8,7 +8,6 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.start import async_at_started
-from mcp.server import Server
 
 from .const import (
     CONF_APPDAEMON_APPS_ROOT,
@@ -54,14 +53,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_APPDAEMON_APPS_ROOT, DEFAULT_APPDAEMON_APPS_ROOT
     )
 
-    # Create MCP server
-    server = Server("home-assistant-mcp-server")
-    hass.data[DOMAIN]["server"] = server
-
     # Register HTTP endpoints. The views are gated on hass.data[DOMAIN] so
     # requests stop being served the moment async_unload_entry clears it
     # (HA has no public register_view reverse — see #37).
-    register_mcp_views(hass, server, native_auth_enabled)
+    register_mcp_views(hass, native_auth_enabled)
 
     _LOGGER.info(
         "MCP Server initialized at %s (native_auth=%s)",

@@ -220,7 +220,7 @@ class TestMCPClientSession:
     @pytest.fixture
     def view(self, populated_hass):
         """Create view with populated hass."""
-        return MCPEndpointView(populated_hass, Mock())
+        return MCPEndpointView(populated_hass)
 
     async def _call(self, view, method, params=None, msg_id=1):
         """Helper: make a JSON-RPC request through the view."""

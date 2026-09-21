@@ -138,9 +138,9 @@ def test_get_protected_resource_metadata():
 class TestMCPProtectedResourceMetadataView:
     """Test the MCP protected resource metadata view at root."""
 
-    async def test_get_returns_metadata(self, routing_hass, mock_server):
+    async def test_get_returns_metadata(self, routing_hass):
         """Test GET returns protected resource metadata."""
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
         request = Mock(path=MCP_PATH)
         request.headers = {}
         request.url.origin.return_value = "https://homeassistant.local"
@@ -155,9 +155,9 @@ class TestMCPProtectedResourceMetadataView:
         assert body["resource"] == "https://homeassistant.local/api/mcp"
         assert body["authorization_servers"] == ["https://homeassistant.local/oidc"]
 
-    async def test_get_with_forwarded_headers(self, routing_hass, mock_server):
+    async def test_get_with_forwarded_headers(self, routing_hass):
         """Test GET with X-Forwarded headers."""
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
         request = Mock(path=MCP_PATH)
         request.headers = {
             "X-Forwarded-Proto": "https",
@@ -170,9 +170,7 @@ class TestMCPProtectedResourceMetadataView:
         body = json.loads(response.body)
         assert body["resource"] == "https://example.com/api/mcp"
 
-    async def test_get_names_the_dedicated_path_when_api_mcp_is_contested(
-        self, routing_hass, mock_server
-    ):
+    async def test_get_names_the_dedicated_path_when_api_mcp_is_contested(self, routing_hass):
         """The root path describes an endpoint this integration actually answers.
 
         A client falls back here when the path-suffixed metadata 404s, so naming
@@ -180,7 +178,7 @@ class TestMCPProtectedResourceMetadataView:
         token the integration holding that path rejects.
         """
         routing_hass.http.app.router._routes.append(_FakeRoute("POST", MCP_PATH))
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
         request = Mock(path=RESOURCE_METADATA_PREFIX)
         request.headers = {}
         request.url.origin.return_value = "https://homeassistant.local"
@@ -251,12 +249,6 @@ class TestMCPSubpathProtectedResourceMetadataView:
 
 
 @pytest.fixture
-def mock_server():
-    """Create a mock MCP server."""
-    return Mock()
-
-
-@pytest.fixture
 def mock_hass():
     """Create a mock Home Assistant instance with the integration loaded."""
     hass = Mock()
@@ -267,9 +259,9 @@ def mock_hass():
 
 
 @pytest.fixture
-def view(mock_hass, mock_server):
+def view(mock_hass):
     """Create an MCPEndpointView instance."""
-    return MCPEndpointView(mock_hass, mock_server)
+    return MCPEndpointView(mock_hass)
 
 
 class TestMCPEndpointView:
@@ -454,11 +446,11 @@ class TestMCPEndpointView:
         assert response.headers["Allow"] == "OPTIONS, POST"
         assert "WWW-Authenticate" not in response.headers
 
-    async def test_get_returns_503_when_unloaded(self, mock_server):
+    async def test_get_returns_503_when_unloaded(self):
         """Test GET is gated on the integration being loaded, like POST."""
         hass = Mock()
         hass.data = {}
-        view = MCPEndpointView(hass, mock_server)
+        view = MCPEndpointView(hass)
 
         request = Mock(path=MCP_PATH)
         request.headers = {}
@@ -654,7 +646,7 @@ class TestIntegrationDisabledGate:
     async def test_endpoint_view_returns_503_when_domain_missing(self):
         hass = Mock()
         hass.data = {}
-        view = MCPEndpointView(hass, Mock())
+        view = MCPEndpointView(hass)
 
         request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
@@ -668,7 +660,7 @@ class TestIntegrationDisabledGate:
     async def test_endpoint_view_returns_503_when_domain_cleared(self):
         hass = Mock()
         hass.data = {"mcp_server_http_transport": {}}  # matches async_unload_entry.clear()
-        view = MCPEndpointView(hass, Mock())
+        view = MCPEndpointView(hass)
 
         request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
@@ -698,7 +690,7 @@ class TestIntegrationDisabledGate:
     async def test_endpoint_view_serves_when_domain_populated(self):
         hass = Mock()
         hass.data = {"mcp_server_http_transport": {"server": Mock()}}
-        view = MCPEndpointView(hass, Mock())
+        view = MCPEndpointView(hass)
 
         request = Mock(path=MCP_PATH)
         request.headers = {}  # no token → 401, not 503
@@ -724,12 +716,12 @@ class TestNativeAuth:
     @pytest.fixture
     def view(self, mock_hass):
         """Create an MCPEndpointView with native auth enabled."""
-        return MCPEndpointView(mock_hass, Mock(), native_auth_enabled=True)
+        return MCPEndpointView(mock_hass, native_auth_enabled=True)
 
     @pytest.fixture
     def view_disabled(self, mock_hass):
         """Create an MCPEndpointView with native auth disabled."""
-        return MCPEndpointView(mock_hass, Mock(), native_auth_enabled=False)
+        return MCPEndpointView(mock_hass, native_auth_enabled=False)
 
     async def test_llat_validates_when_enabled(self, view, mock_hass):
         """Test that a valid LLAT is accepted when native auth is enabled."""
@@ -863,7 +855,7 @@ class TestOidcAudienceBinding:
     def view(self):
         """Create an MCPEndpointView (native auth disabled)."""
         hass = Mock()
-        return MCPEndpointView(hass, Mock(), native_auth_enabled=False)
+        return MCPEndpointView(hass, native_auth_enabled=False)
 
     async def test_passes_expected_audience_to_validator(self, view):
         """_validate_token derives the resource URI and passes it as audience."""
@@ -982,15 +974,15 @@ def _paths(router: _FakeRouter, method: str = "POST") -> list[str]:
 class TestRegisterMCPViews:
     """Test which paths the integration claims, and how it spots a conflict."""
 
-    def test_claims_both_paths_when_api_mcp_is_free(self, routing_hass, mock_server):
+    def test_claims_both_paths_when_api_mcp_is_free(self, routing_hass):
         """With nothing else on /api/mcp, the endpoint serves both paths."""
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
 
         assert _paths(routing_hass.http.app.router) == [MCP_PATH, MCP_HTTP_PATH]
 
-    def test_registers_the_metadata_views(self, routing_hass, mock_server):
+    def test_registers_the_metadata_views(self, routing_hass):
         """Both RFC 9728 metadata paths are served alongside the endpoint."""
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
 
         assert _paths(routing_hass.http.app.router, "GET") == [
             RESOURCE_METADATA_PREFIX,
@@ -1000,7 +992,7 @@ class TestRegisterMCPViews:
             MCP_HTTP_PATH,
         ]
 
-    def test_stays_off_api_mcp_when_another_integration_serves_it(self, routing_hass, mock_server):
+    def test_stays_off_api_mcp_when_another_integration_serves_it(self, routing_hass):
         """A path already answering POST elsewhere is left alone entirely.
 
         Home Assistant's built-in mcp_server registers no GET on /api/mcp, so
@@ -1010,12 +1002,12 @@ class TestRegisterMCPViews:
         router = routing_hass.http.app.router
         router._routes.append(_FakeRoute("POST", MCP_PATH))
 
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
 
         assert _paths(router) == [MCP_PATH, MCP_HTTP_PATH]  # the foreign one, then ours
         assert MCP_PATH not in _paths(router, "GET")
 
-    def test_metadata_for_a_contested_path_is_left_alone_too(self, routing_hass, mock_server):
+    def test_metadata_for_a_contested_path_is_left_alone_too(self, routing_hass):
         """The RFC 9728 metadata follows the endpoint off a contested path.
 
         Nothing else serves that metadata, so answering there would hand a
@@ -1025,43 +1017,41 @@ class TestRegisterMCPViews:
         router = routing_hass.http.app.router
         router._routes.append(_FakeRoute("POST", MCP_PATH))
 
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
 
         assert f"{RESOURCE_METADATA_PREFIX}{MCP_PATH}" not in _paths(router, "GET")
         assert f"{RESOURCE_METADATA_PREFIX}{MCP_HTTP_PATH}" in _paths(router, "GET")
 
-    def test_a_wildcard_route_counts_as_a_competitor(self, routing_hass, mock_server):
+    def test_a_wildcard_route_counts_as_a_competitor(self, routing_hass):
         """A route registered for every method answers POST as well."""
         routing_hass.http.app.router._routes.append(_FakeRoute("*", MCP_PATH))
 
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
 
         assert mcp_path_is_contested(routing_hass) is True
         assert MCP_PATH not in _paths(routing_hass.http.app.router, "GET")
 
-    def test_own_routes_are_not_mistaken_for_a_conflict(self, routing_hass, mock_server):
+    def test_own_routes_are_not_mistaken_for_a_conflict(self, routing_hass):
         """A reload does not make this integration its own competitor."""
-        register_mcp_views(routing_hass, mock_server, False)
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
+        register_mcp_views(routing_hass, False)
 
         assert mcp_path_is_contested(routing_hass) is False
 
-    def test_a_reload_updates_the_view_the_router_holds(self, routing_hass, mock_server):
+    def test_a_reload_updates_the_view_the_router_holds(self, routing_hass):
         """Registering again would sit behind the first view and never be reached."""
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
         routes_after_first_load = routing_hass.http.app.router.routes()
         endpoint = routing_hass.data[REGISTERED_ENDPOINT]
 
-        reloaded_server = Mock()
-        register_mcp_views(routing_hass, reloaded_server, True)
+        register_mcp_views(routing_hass, True)
 
         assert routing_hass.http.app.router.routes() == routes_after_first_load
         assert endpoint.native_auth_enabled is True
-        assert endpoint.server is reloaded_server
 
-    def test_serves_mcp_path_reports_who_answers(self, routing_hass, mock_server):
+    def test_serves_mcp_path_reports_who_answers(self, routing_hass):
         """Only the first route on the path answers, whoever registered it."""
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
 
         assert serves_mcp_path(routing_hass) is True
 
@@ -1071,28 +1061,24 @@ class TestRegisterMCPViews:
         assert mcp_path_is_contested(routing_hass) is True
         assert serves_mcp_path(routing_hass) is True
 
-    def test_serves_mcp_path_is_false_when_another_integration_got_there_first(
-        self, routing_hass, mock_server
-    ):
+    def test_serves_mcp_path_is_false_when_another_integration_got_there_first(self, routing_hass):
         """A path claimed before setup is answered by its holder, not this one."""
         routing_hass.http.app.router._routes.append(_FakeRoute("POST", MCP_PATH))
 
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
 
         assert serves_mcp_path(routing_hass) is False
 
-    def test_conflict_is_seen_when_the_other_integration_arrives_later(
-        self, routing_hass, mock_server
-    ):
+    def test_conflict_is_seen_when_the_other_integration_arrives_later(self, routing_hass):
         """A path claimed after setup still reports as contested."""
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
         routing_hass.http.app.router._routes.append(_FakeRoute("POST", MCP_PATH))
 
         assert mcp_path_is_contested(routing_hass) is True
 
-    def test_registered_routes_survive_an_unload(self, routing_hass, mock_server):
+    def test_registered_routes_survive_an_unload(self, routing_hass):
         """The tracked routes live outside hass.data[DOMAIN], which unload clears."""
-        register_mcp_views(routing_hass, mock_server, False)
+        register_mcp_views(routing_hass, False)
         routing_hass.data[DOMAIN].clear()
 
         assert routing_hass.data[REGISTERED_ROUTES]

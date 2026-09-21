@@ -12,11 +12,6 @@ class TestCompletions:
     """Test the MCP completion endpoints."""
 
     @pytest.fixture
-    def mock_server(self):
-        """Create a mock MCP server."""
-        return Mock()
-
-    @pytest.fixture
     def mock_hass(self):
         """Create a mock Home Assistant instance."""
         hass = Mock()
@@ -25,9 +20,9 @@ class TestCompletions:
         return hass
 
     @pytest.fixture
-    def view(self, mock_hass, mock_server):
+    def view(self, mock_hass):
         """Create an MCPEndpointView instance."""
-        return MCPEndpointView(mock_hass, mock_server)
+        return MCPEndpointView(mock_hass)
 
     async def test_post_completion_entity_id(self, view, mock_hass):
         """Test POST with completion/complete for entity_id."""

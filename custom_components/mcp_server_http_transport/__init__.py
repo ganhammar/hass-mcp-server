@@ -16,7 +16,9 @@ from .const import (
     CONF_CONFIG_FILE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
+    CONF_SERVER_NAME,
     DEFAULT_APPDAEMON_APPS_ROOT,
+    DEFAULT_SERVER_NAME,
     DOMAIN,
     ISSUE_ENDPOINT_CONFLICT,
     MCP_HTTP_PATH,
@@ -40,6 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     native_auth_enabled = entry.data.get(CONF_NATIVE_AUTH, False)
+    server_name = entry.data.get(CONF_SERVER_NAME) or DEFAULT_SERVER_NAME
     config_file_access_enabled = entry.data.get(CONF_CONFIG_FILE_ACCESS, False)
     camera_image_access_enabled = entry.data.get(CONF_CAMERA_IMAGE_ACCESS, False)
     image_file_access_enabled = entry.data.get(CONF_IMAGE_FILE_ACCESS, False)
@@ -56,7 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register HTTP endpoints. The views are gated on hass.data[DOMAIN] so
     # requests stop being served the moment async_unload_entry clears it
     # (HA has no public register_view reverse — see #37).
-    register_mcp_views(hass, native_auth_enabled)
+    register_mcp_views(hass, native_auth_enabled, server_name=server_name)
 
     _LOGGER.info(
         "MCP Server initialized at %s (native_auth=%s)",

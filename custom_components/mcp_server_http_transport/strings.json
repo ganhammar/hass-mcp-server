@@ -10,7 +10,8 @@
           "camera_image_access_enabled": "Enable camera image access",
           "image_file_access_enabled": "Enable image file access",
           "appdaemon_file_access_enabled": "Enable AppDaemon app file access",
-          "appdaemon_apps_root": "AppDaemon apps root"
+          "appdaemon_apps_root": "AppDaemon apps root",
+          "server_name": "MCP server name"
         },
         "data_description": {
           "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required.",
@@ -18,13 +19,15 @@
           "camera_image_access_enabled": "Allow AI assistants to capture the current image from any camera entity (via the **`get_camera_image`** tool) and analyse what the camera sees. No snapshot file is written. **Privacy note:** when enabled, any camera in Home Assistant becomes viewable by the AI.",
           "image_file_access_enabled": "Allow AI assistants to read image files (JPEG, PNG, GIF, WebP) from disk (via the **`get_image_file`** tool), for example camera snapshots saved by the `camera.snapshot` service. Access is limited to directories Home Assistant is allowed to use (the config directory and configured media dirs). **Privacy note:** any image stored in those directories becomes readable by the AI.",
           "appdaemon_file_access_enabled": "Allow AI assistants to manage AppDaemon application files under the separately configured, bounded AppDaemon apps root. Enabling write access allows an AI/MCP client to modify executable AppDaemon Python code, granting code-execution-equivalent capability inside the AppDaemon environment and access available to AppDaemon. Paths outside the approved `/share/`, `/media/`, or legacy `/addon_configs/a0d7b954_appdaemon/apps` roots, `..` traversal, and symlink escapes are rejected. Only `.py`, `.yaml`, `.yml`, and `.json` files can be created, written, or deleted. Every save/delete snapshots the app tree first in `.mcp_appdaemon_backups/`; restore takes a pre-restore snapshot. There is no direct MCP shell or AppDaemon process-control tool, but writing AppDaemon Python files remains code-execution-equivalent within the AppDaemon environment and its available Home Assistant API permissions. App files may contain credentials: keep sensitive values out of readable files before enabling.",
-          "appdaemon_apps_root": "Absolute AppDaemon apps root. Defaults to `/addon_configs/a0d7b954_appdaemon/apps`, which only exists where that add-on folder is mounted into Home Assistant Core (not on Home Assistant OS); otherwise use a folder under `/share/` or `/media/` and point AppDaemon's `app_dir` at the same folder."
+          "appdaemon_apps_root": "Absolute AppDaemon apps root. Defaults to `/addon_configs/a0d7b954_appdaemon/apps`, which only exists where that add-on folder is mounted into Home Assistant Core (not on Home Assistant OS); otherwise use a folder under `/share/` or `/media/` and point AppDaemon's `app_dir` at the same folder.",
+          "server_name": "Name this server reports to MCP clients (`serverInfo.name`). Give each Home Assistant instance a different name when one client connects to more than one: some clients derive the namespace they show for a server's tools from this name, and then keep only one of the servers. Such clients may shorten the name first (VS Code keeps the first 13 characters), so keep names distinct early."
         }
       }
     },
     "error": {
       "oidc_provider_required": "The OIDC Provider integration is required when native authentication is disabled. Install it from {oidc_provider_url} or enable native authentication.",
-      "invalid_appdaemon_apps_root": "The AppDaemon apps root must be the legacy AppDaemon path or a path under /share or /media. Home Assistant Core cannot see add-on private folders such as /addon_configs or /app_configs; set app_dir in appdaemon.yaml to a shared folder (e.g., /share/appdaemon/apps) and use that path here."
+      "invalid_appdaemon_apps_root": "The AppDaemon apps root must be the legacy AppDaemon path or a path under /share or /media. Home Assistant Core cannot see add-on private folders such as /addon_configs or /app_configs; set app_dir in appdaemon.yaml to a shared folder (e.g., /share/appdaemon/apps) and use that path here.",
+      "invalid_server_name": "The server name must not be empty."
     },
     "abort": {
       "oidc_provider_required": "The OIDC Provider integration is required but not installed. Please install hass-oidc-provider from {oidc_provider_url} first."
@@ -39,7 +42,8 @@
           "camera_image_access_enabled": "Enable camera image access",
           "image_file_access_enabled": "Enable image file access",
           "appdaemon_file_access_enabled": "Enable AppDaemon app file access",
-          "appdaemon_apps_root": "AppDaemon apps root"
+          "appdaemon_apps_root": "AppDaemon apps root",
+          "server_name": "MCP server name"
         },
         "data_description": {
           "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required.",
@@ -47,13 +51,15 @@
           "camera_image_access_enabled": "Allow AI assistants to capture the current image from any camera entity (via the **`get_camera_image`** tool) and analyse what the camera sees. No snapshot file is written. **Privacy note:** when enabled, any camera in Home Assistant becomes viewable by the AI.",
           "image_file_access_enabled": "Allow AI assistants to read image files (JPEG, PNG, GIF, WebP) from disk (via the **`get_image_file`** tool), for example camera snapshots saved by the `camera.snapshot` service. Access is limited to directories Home Assistant is allowed to use (the config directory and configured media dirs). **Privacy note:** any image stored in those directories becomes readable by the AI.",
           "appdaemon_file_access_enabled": "Allow AI assistants to manage AppDaemon application files under the separately configured, bounded AppDaemon apps root. Enabling write access allows an AI/MCP client to modify executable AppDaemon Python code, granting code-execution-equivalent capability inside the AppDaemon environment and access available to AppDaemon. Paths outside the approved `/share/`, `/media/`, or legacy `/addon_configs/a0d7b954_appdaemon/apps` roots, `..` traversal, and symlink escapes are rejected. Only `.py`, `.yaml`, `.yml`, and `.json` files can be created, written, or deleted. Every save/delete snapshots the app tree first in `.mcp_appdaemon_backups/`; restore takes a pre-restore snapshot. This does not provide shell or AppDaemon process control. App files may contain credentials: keep sensitive values out of readable files before enabling.",
-          "appdaemon_apps_root": "Absolute AppDaemon apps root. Defaults to `/addon_configs/a0d7b954_appdaemon/apps`, which only exists where that add-on folder is mounted into Home Assistant Core (not on Home Assistant OS); otherwise use a folder under `/share/` or `/media/` and point AppDaemon's `app_dir` at the same folder."
+          "appdaemon_apps_root": "Absolute AppDaemon apps root. Defaults to `/addon_configs/a0d7b954_appdaemon/apps`, which only exists where that add-on folder is mounted into Home Assistant Core (not on Home Assistant OS); otherwise use a folder under `/share/` or `/media/` and point AppDaemon's `app_dir` at the same folder.",
+          "server_name": "Name this server reports to MCP clients (`serverInfo.name`). Give each Home Assistant instance a different name when one client connects to more than one: some clients derive the namespace they show for a server's tools from this name, and then keep only one of the servers. Such clients may shorten the name first (VS Code keeps the first 13 characters), so keep names distinct early."
         }
       }
     },
     "error": {
       "oidc_provider_required": "The OIDC Provider integration is required when native authentication is disabled. Install it or keep native authentication enabled.",
-      "invalid_appdaemon_apps_root": "The AppDaemon apps root must be the legacy AppDaemon path or a path under /share or /media. Home Assistant Core cannot see add-on private folders such as /addon_configs or /app_configs; set app_dir in appdaemon.yaml to a shared folder (e.g., /share/appdaemon/apps) and use that path here."
+      "invalid_appdaemon_apps_root": "The AppDaemon apps root must be the legacy AppDaemon path or a path under /share or /media. Home Assistant Core cannot see add-on private folders such as /addon_configs or /app_configs; set app_dir in appdaemon.yaml to a shared folder (e.g., /share/appdaemon/apps) and use that path here.",
+      "invalid_server_name": "The server name must not be empty."
     }
   },
   "issues": {

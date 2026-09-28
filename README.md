@@ -56,6 +56,12 @@ You can use both methods at the same time. When both are active, the server trie
 
 You can change this setting later via Settings > Devices & Services > MCP Server > Configure.
 
+### Server name
+
+Every instance of this integration reports the name `home-assistant-mcp-server` to MCP clients (`serverInfo.name`). That only matters when one client connects to more than one Home Assistant instance: some clients derive the namespace they show for a server's tools from that name, so two servers reporting the same name become one and only one instance stays reachable. VS Code, for example, keeps the first 13 characters of the name before using it.
+
+Set **MCP server name** (Settings > Devices & Services > MCP Server > Configure) to something distinct per instance when a client connects to several. Keep the names distinct within their first 13 characters if your client shortens them. The default is the name every client saw before this option existed, so a single-instance setup can leave it alone.
+
 ## Usage with Claude in Browser (OAuth)
 
 This requires the [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server) integration to be installed.

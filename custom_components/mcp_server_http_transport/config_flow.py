@@ -136,7 +136,7 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                 except ValueError:
                     errors[CONF_APPDAEMON_APPS_ROOT] = "invalid_appdaemon_apps_root"
 
-            submitted_server_name = user_input.get(CONF_SERVER_NAME, current_server_name)
+            submitted_server_name = user_input.get(CONF_SERVER_NAME, DEFAULT_SERVER_NAME)
             try:
                 submitted_server_name = validate_server_name(submitted_server_name)
             except ValueError:
@@ -193,7 +193,9 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_APPDAEMON_APPS_ROOT, default=current_appdaemon_apps_root
                     ): str,
-                    vol.Optional(CONF_SERVER_NAME, default=current_server_name): str,
+                    vol.Optional(
+                        CONF_SERVER_NAME, description={"suggested_value": current_server_name}
+                    ): str,
                 }
             ),
             errors=errors,

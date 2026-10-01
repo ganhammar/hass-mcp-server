@@ -1058,10 +1058,11 @@ class TestRegisterMCPViews:
         routes_after_first_load = routing_hass.http.app.router.routes()
         endpoint = routing_hass.data[REGISTERED_ENDPOINT]
 
-        register_mcp_views(routing_hass, True)
+        register_mcp_views(routing_hass, True, server_name="ha-mcp-secundair")
 
         assert routing_hass.http.app.router.routes() == routes_after_first_load
         assert endpoint.native_auth_enabled is True
+        assert endpoint.server_name == "ha-mcp-secundair"
 
     def test_serves_mcp_path_reports_who_answers(self, routing_hass):
         """Only the first route on the path answers, whoever registered it."""

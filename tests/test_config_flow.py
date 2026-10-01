@@ -374,13 +374,37 @@ class TestMCPServerOptionsFlow:
         call_kwargs = flow.hass.config_entries.async_update_entry.call_args
         assert call_kwargs[1]["data"][CONF_SERVER_NAME] == "ha-mcp-secundair"
 
+    async def test_init_step_resets_cleared_server_name_to_default(self):
+        """Clearing the optional name restores the integration default."""
+        flow = self._create_flow(
+            data={CONF_NATIVE_AUTH: True, CONF_SERVER_NAME: "ha-mcp-secundair"}
+        )
+
+        result = await flow.async_step_init(user_input={CONF_NATIVE_AUTH: True})
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_SERVER_NAME] == DEFAULT_SERVER_NAME
+
+    async def test_init_step_rejects_blank_server_name(self):
+        """A blank options-flow name is rejected before updating the entry."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_SERVER_NAME: "   "}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["errors"][CONF_SERVER_NAME] == "invalid_server_name"
+        flow.hass.config_entries.async_update_entry.assert_not_called()
+
     async def test_init_step_defaults_server_name(self):
         """Entries without the option keep reporting the integration's own name."""
         flow = self._create_flow(data={})
         result = await flow.async_step_init(user_input=None)
 
         schema_keys = {str(k): k for k in result["data_schema"].schema}
-        assert schema_keys[CONF_SERVER_NAME].default() == DEFAULT_SERVER_NAME
+        assert schema_keys[CONF_SERVER_NAME].description["suggested_value"] == DEFAULT_SERVER_NAME
 
     @pytest.mark.parametrize("root", ["/media/appdaemon/apps", DEFAULT_APPDAEMON_APPS_ROOT])
     async def test_init_step_accepts_approved_appdaemon_roots(self, root):

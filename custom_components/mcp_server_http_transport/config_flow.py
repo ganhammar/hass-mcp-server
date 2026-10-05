@@ -14,9 +14,12 @@ from .const import (
     CONF_CONFIG_FILE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
+    CONF_SERVER_NAME,
     DEFAULT_APPDAEMON_APPS_ROOT,
+    DEFAULT_SERVER_NAME,
     DOMAIN,
     validate_appdaemon_apps_root,
+    validate_server_name,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,6 +32,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_IMAGE_FILE_ACCESS, default=False): bool,
         vol.Optional(CONF_APPDAEMON_FILE_ACCESS, default=False): bool,
         vol.Optional(CONF_APPDAEMON_APPS_ROOT, default=DEFAULT_APPDAEMON_APPS_ROOT): str,
+        vol.Optional(CONF_SERVER_NAME, default=DEFAULT_SERVER_NAME): str,
     }
 )
 
@@ -60,6 +64,15 @@ class MCPServerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 except ValueError:
                     errors[CONF_APPDAEMON_APPS_ROOT] = "invalid_appdaemon_apps_root"
+
+            # A blank name leaves a client with nothing to key its tool
+            # namespace on, so it is rejected before the entry is created.
+            try:
+                user_input[CONF_SERVER_NAME] = validate_server_name(
+                    user_input.get(CONF_SERVER_NAME, DEFAULT_SERVER_NAME)
+                )
+            except ValueError:
+                errors[CONF_SERVER_NAME] = "invalid_server_name"
 
             # OIDC provider is only required when native auth is disabled
             if errors:
@@ -108,6 +121,7 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
         current_appdaemon_apps_root = self.config_entry.data.get(
             CONF_APPDAEMON_APPS_ROOT, DEFAULT_APPDAEMON_APPS_ROOT
         )
+        current_server_name = self.config_entry.data.get(CONF_SERVER_NAME, DEFAULT_SERVER_NAME)
 
         if user_input is not None:
             submitted_appdaemon_apps_root = user_input.get(
@@ -121,6 +135,12 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                     validate_appdaemon_apps_root(submitted_appdaemon_apps_root)
                 except ValueError:
                     errors[CONF_APPDAEMON_APPS_ROOT] = "invalid_appdaemon_apps_root"
+
+            submitted_server_name = user_input.get(CONF_SERVER_NAME, DEFAULT_SERVER_NAME)
+            try:
+                submitted_server_name = validate_server_name(submitted_server_name)
+            except ValueError:
+                errors[CONF_SERVER_NAME] = "invalid_server_name"
 
             native_auth = user_input.get(CONF_NATIVE_AUTH, False)
 
@@ -137,6 +157,7 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                         **self.config_entry.data,
                         **user_input,
                         CONF_APPDAEMON_APPS_ROOT: submitted_appdaemon_apps_root,
+                        CONF_SERVER_NAME: submitted_server_name,
                     },
                 )
                 return self.async_create_entry(title="", data={})
@@ -154,6 +175,7 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
         current_appdaemon_apps_root = values.get(
             CONF_APPDAEMON_APPS_ROOT, current_appdaemon_apps_root
         )
+        current_server_name = values.get(CONF_SERVER_NAME, current_server_name)
 
         return self.async_show_form(
             step_id="init",
@@ -170,6 +192,9 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                     ): bool,
                     vol.Optional(
                         CONF_APPDAEMON_APPS_ROOT, default=current_appdaemon_apps_root
+                    ): str,
+                    vol.Optional(
+                        CONF_SERVER_NAME, description={"suggested_value": current_server_name}
                     ): str,
                 }
             ),

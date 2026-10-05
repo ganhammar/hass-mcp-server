@@ -310,6 +310,20 @@ class TestMCPEndpointView:
         assert body["result"]["serverInfo"]["version"] == _manifest_version()
         assert body["id"] == 1
 
+    async def test_post_initialize_reports_configured_server_name(self, view):
+        """A configured name is what lets a client tell two instances apart."""
+        view.server_name = "ha-mcp-secundair"
+        request = Mock(path=MCP_PATH)
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 2})
+
+        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert body["result"]["serverInfo"]["name"] == "ha-mcp-secundair"
+
     async def test_post_initialize_advertises_capabilities(self, view):
         """Test POST initialize advertises resources and prompts capabilities."""
         request = Mock(path=MCP_PATH)
@@ -1044,10 +1058,11 @@ class TestRegisterMCPViews:
         routes_after_first_load = routing_hass.http.app.router.routes()
         endpoint = routing_hass.data[REGISTERED_ENDPOINT]
 
-        register_mcp_views(routing_hass, True)
+        register_mcp_views(routing_hass, True, server_name="ha-mcp-secundair")
 
         assert routing_hass.http.app.router.routes() == routes_after_first_load
         assert endpoint.native_auth_enabled is True
+        assert endpoint.server_name == "ha-mcp-secundair"
 
     def test_serves_mcp_path_reports_who_answers(self, routing_hass):
         """Only the first route on the path answers, whoever registered it."""

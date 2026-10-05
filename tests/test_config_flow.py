@@ -19,7 +19,9 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
+    CONF_SERVER_NAME,
     DEFAULT_APPDAEMON_APPS_ROOT,
+    DEFAULT_SERVER_NAME,
     DOMAIN,
     validate_appdaemon_apps_root,
 )
@@ -74,6 +76,52 @@ class TestMCPServerConfigFlow:
         )
 
         assert result["data"][CONF_APPDAEMON_APPS_ROOT] == DEFAULT_APPDAEMON_APPS_ROOT
+
+    async def test_user_flow_defaults_server_name(self):
+        """A new entry names this server after the integration, as before."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(user_input={CONF_NATIVE_AUTH: False})
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_SERVER_NAME] == DEFAULT_SERVER_NAME
+
+    async def test_user_flow_accepts_custom_server_name(self):
+        """The submitted name is stored trimmed."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(
+            user_input={CONF_NATIVE_AUTH: False, CONF_SERVER_NAME: "  ha-mcp-secundair  "}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_SERVER_NAME] == "ha-mcp-secundair"
+
+    async def test_user_flow_rejects_blank_server_name(self):
+        """A blank name is refused rather than written to the entry."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=[])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(
+            user_input={CONF_NATIVE_AUTH: True, CONF_SERVER_NAME: "   "}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["errors"][CONF_SERVER_NAME] == "invalid_server_name"
 
     async def test_user_flow_rejects_unapproved_appdaemon_root(self):
         """Roots outside the approved shared locations are rejected."""
@@ -313,6 +361,50 @@ class TestMCPServerOptionsFlow:
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
         call_kwargs = flow.hass.config_entries.async_update_entry.call_args
         assert call_kwargs[1]["data"][CONF_APPDAEMON_APPS_ROOT] == "/share/appdaemon/apps"
+
+    async def test_init_step_persists_server_name(self):
+        """The options flow persists the name clients see in serverInfo."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_SERVER_NAME: "ha-mcp-secundair"}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_SERVER_NAME] == "ha-mcp-secundair"
+
+    async def test_init_step_resets_cleared_server_name_to_default(self):
+        """Clearing the optional name restores the integration default."""
+        flow = self._create_flow(
+            data={CONF_NATIVE_AUTH: True, CONF_SERVER_NAME: "ha-mcp-secundair"}
+        )
+
+        result = await flow.async_step_init(user_input={CONF_NATIVE_AUTH: True})
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_SERVER_NAME] == DEFAULT_SERVER_NAME
+
+    async def test_init_step_rejects_blank_server_name(self):
+        """A blank options-flow name is rejected before updating the entry."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_SERVER_NAME: "   "}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["errors"][CONF_SERVER_NAME] == "invalid_server_name"
+        flow.hass.config_entries.async_update_entry.assert_not_called()
+
+    async def test_init_step_defaults_server_name(self):
+        """Entries without the option keep reporting the integration's own name."""
+        flow = self._create_flow(data={})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_SERVER_NAME].description["suggested_value"] == DEFAULT_SERVER_NAME
 
     @pytest.mark.parametrize("root", ["/media/appdaemon/apps", DEFAULT_APPDAEMON_APPS_ROOT])
     async def test_init_step_accepts_approved_appdaemon_roots(self, root):

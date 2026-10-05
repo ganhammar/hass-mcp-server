@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from .completions import complete
 from .const import (
+    DEFAULT_SERVER_NAME,
     DOMAIN,
     MCP_HTTP_PATH,
     MCP_PATH,
@@ -202,6 +203,7 @@ class MCPEndpointView(HomeAssistantView):
         *,
         native_auth_enabled: bool = False,
         paths: list[str] | None = None,
+        server_name: str = DEFAULT_SERVER_NAME,
     ) -> None:
         """Initialize the MCP endpoint, optionally narrowing the paths served.
 
@@ -211,6 +213,7 @@ class MCPEndpointView(HomeAssistantView):
         """
         self.hass = hass
         self.native_auth_enabled = native_auth_enabled
+        self.server_name = server_name
         if paths is not None:
             self.url, self.extra_urls = paths[0], list(paths[1:])
 
@@ -371,7 +374,7 @@ class MCPEndpointView(HomeAssistantView):
                         "prompts": {},
                     },
                     "serverInfo": {
-                        "name": "home-assistant-mcp-server",
+                        "name": self.server_name,
                         "version": VERSION,
                     },
                 },
@@ -473,7 +476,11 @@ class MCPEndpointView(HomeAssistantView):
         return await call_tool(self.hass, name, arguments)
 
 
-def register_mcp_views(hass: HomeAssistant, native_auth_enabled: bool) -> None:
+def register_mcp_views(
+    hass: HomeAssistant,
+    native_auth_enabled: bool,
+    server_name: str = DEFAULT_SERVER_NAME,
+) -> None:
     """Register the HTTP views this integration serves.
 
     MCP_PATH is skipped, endpoint and metadata alike, when something else
@@ -484,15 +491,22 @@ def register_mcp_views(hass: HomeAssistant, native_auth_enabled: bool) -> None:
     the other one will reject. MCP_HTTP_PATH is always served.
 
     A reload updates the view the router already holds instead of registering a
-    second one, which would sit behind the first and never be reached.
+    second one, which would sit behind the first and never be reached. The name a
+    client sees is refreshed the same way.
     """
     if (endpoint := hass.data.get(REGISTERED_ENDPOINT)) is not None:
         endpoint.native_auth_enabled = native_auth_enabled
+        endpoint.server_name = server_name
         return
 
     contested = mcp_path_is_contested(hass)
     endpoint_paths = [MCP_HTTP_PATH] if contested else [MCP_PATH, MCP_HTTP_PATH]
-    endpoint = MCPEndpointView(hass, native_auth_enabled=native_auth_enabled, paths=endpoint_paths)
+    endpoint = MCPEndpointView(
+        hass,
+        native_auth_enabled=native_auth_enabled,
+        paths=endpoint_paths,
+        server_name=server_name,
+    )
     metadata_paths = [f"{RESOURCE_METADATA_PREFIX}{path}" for path in endpoint_paths]
 
     router = hass.http.app.router

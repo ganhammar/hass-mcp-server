@@ -29,6 +29,19 @@ CONF_APPDAEMON_APPS_ROOT = "appdaemon_apps_root"
 DEFAULT_APPDAEMON_APPS_ROOT = "/addon_configs/a0d7b954_appdaemon/apps"
 APPDAEMON_SHARED_ROOTS = ("/share/", "/media/")
 
+# The name a client sees in serverInfo. Clients that key the namespace they show
+# for a server's tools off it end up with one reachable server when two instances
+# report the same name, so the name is configurable per instance.
+CONF_SERVER_NAME = "server_name"
+DEFAULT_SERVER_NAME = "home-assistant-mcp-server"
+
+
+def validate_server_name(value: str) -> str:
+    """Validate the client-facing server name."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Server name must be a non-empty string")
+    return value.strip()
+
 
 def validate_appdaemon_apps_root(value: str) -> str:
     """Validate the bounded AppDaemon apps root option."""

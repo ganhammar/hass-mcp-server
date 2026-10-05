@@ -10,6 +10,7 @@ from custom_components.mcp_server_http_transport import (
     async_unload_entry,
 )
 from custom_components.mcp_server_http_transport.const import (
+    DEFAULT_SERVER_NAME,
     ISSUE_ENDPOINT_CONFLICT,
     MCP_HTTP_PATH,
     MCP_PATH,
@@ -44,7 +45,11 @@ class TestAsyncSetupEntry:
 
         assert result is True
         assert DOMAIN in mock_hass.data
-        mock_register_views.assert_called_once_with(mock_hass, False)
+        mock_register_views.assert_called_once_with(
+            mock_hass,
+            False,
+            server_name=DEFAULT_SERVER_NAME,
+        )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_registers_views(
@@ -58,7 +63,11 @@ class TestAsyncSetupEntry:
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
         assert result is True
-        mock_register_views.assert_called_once_with(mock_hass, False)
+        mock_register_views.assert_called_once_with(
+            mock_hass,
+            False,
+            server_name=DEFAULT_SERVER_NAME,
+        )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_passes_native_auth_enabled(
@@ -72,7 +81,29 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(mock_hass, mock_config_entry)
 
-        mock_register_views.assert_called_once_with(mock_hass, True)
+        mock_register_views.assert_called_once_with(
+            mock_hass,
+            True,
+            server_name=DEFAULT_SERVER_NAME,
+        )
+
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_passes_server_name(
+        self,
+        mock_register_views,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """Test async_setup_entry passes the configured server name on to registration."""
+        mock_config_entry.data = {"server_name": "ha-mcp-secundair"}
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        mock_register_views.assert_called_once_with(
+            mock_hass,
+            False,
+            server_name="ha-mcp-secundair",
+        )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_image_access_defaults_off(

@@ -437,3 +437,157 @@ async def get_script_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return {"content": [{"type": "text", "text": dumps(entry)}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error getting script config: {str(e)}"}]}
+
+
+@register_tool(
+    name="update_automation_json",
+    description=(
+        "Preview or save a COMPLETE existing automation using a JSON string. "
+        "apply=false by default, so previews never write. "
+        "An apply creates a backup, checks the HA configuration, and restores "
+        "automations.yaml on validation failure. NEVER reloads automations. "
+        "A separate explicit automation.reload action is required later."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "automation_id": {
+                "type": "string",
+                "description": "Existing ID in automations.yaml",
+            },
+            "config_json": {
+                "type": "string",
+                "description": (
+                    "A JSON-encoded string containing the full automation config, "
+                    "not an object. Include the existing triggers, conditions, "
+                    "actions, mode and all other keys. Obtain it using "
+                    "get_automation_config first."
+                ),
+            },
+            "apply": {
+                "type": "boolean",
+                "description": "False (default): preview only. True: write without reload.",
+            },
+        },
+        "required": ["automation_id", "config_json"],
+    },
+    annotations=ANNOTATION_NON_IDEMPOTENT,
+)
+async def update_automation_json(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Safely update automations.yaml without calling automation.reload."""
+    import json
+    import os
+    from pathlib import Path
+
+    from homeassistant.util.yaml import dumper as yaml_dumper
+
+    from ..config_manager import _load_yaml_list, read_list_entry
+    from .config_files import _atomic_write, _create_backup_sync, _run_config_check
+
+    def result(message: str, error: bool = False) -> dict[str, Any]:
+        response = {"content": [{"type": "text", "text": message}]}
+        if error:
+            response["isError"] = True
+        return response
+
+    automation_id = arguments["automation_id"]
+    if not isinstance(automation_id, str) or not automation_id:
+        return result("automation_id must be a non-empty string", True)
+
+    try:
+        new_config = json.loads(arguments["config_json"])
+        if not isinstance(new_config, dict) or not new_config:
+            raise ValueError("config_json must contain a non-empty JSON object")
+        if not ("triggers" in new_config or "trigger" in new_config):
+            raise ValueError("Complete config must include triggers or trigger")
+        if not ("actions" in new_config or "action" in new_config):
+            raise ValueError("Complete config must include actions or action")
+        if "id" in new_config and str(new_config["id"]) != automation_id:
+            raise ValueError("config_json ID differs from automation_id")
+
+        original = await read_list_entry(hass, "automations.yaml", automation_id)
+        missing = sorted(set(original) - set(new_config) - {"id"})
+        if missing:
+            raise ValueError(f"Config is incomplete; original fields missing: {missing}")
+
+        new_config["id"] = automation_id
+        changed = sorted(
+            key for key in (original.keys() | new_config.keys())
+            if original.get(key) != new_config.get(key)
+        )
+        if not changed:
+            return result(f"Automation {automation_id} unchanged; no action needed")
+        if arguments.get("apply") is not True:
+            return result(
+                f"PREVIEW ONLY for {automation_id}; changed top-level keys: {changed}. "
+                "No files modified, no reload. Review the full configuration "
+                "before resubmitting with apply=true."
+            )
+
+        path = Path(hass.config.path("automations.yaml"))
+        backup_dir = await hass.async_add_executor_job(
+            _create_backup_sync, Path(hass.config.config_dir)
+        )
+        if not backup_dir:
+            raise RuntimeError("Could not create backup; refusing to edit")
+        backup_file = Path(hass.config.config_dir) / backup_dir / "automations.yaml"
+        if not backup_file.is_file():
+            raise RuntimeError("Backup is missing automations.yaml; refusing to edit")
+
+        def write_updated() -> None:
+            rows = _load_yaml_list(str(path))
+            indexes = [
+                index for index, row in enumerate(rows)
+                if str(row.get("id")) == automation_id
+            ]
+            if len(indexes) != 1:
+                raise ValueError(f"Expected exactly one entry for {automation_id}")
+            # Reject a concurrent edit between preview and write.
+            if rows[indexes[0]] != original:
+                raise RuntimeError("Automation changed since it was read; refusing to overwrite")
+            rows[indexes[0]] = new_config
+            tmp = path.with_name(f".{path.name}.mcp_update_tmp")
+            try:
+                yaml_dumper.save_yaml(str(tmp), rows)
+                os.replace(tmp, path)
+            finally:
+                if tmp.exists():
+                    tmp.unlink()
+
+        def restore_backup() -> None:
+            _atomic_write(path, backup_file.read_text(encoding="utf-8"))
+
+        wrote = False
+        try:
+            await hass.async_add_executor_job(write_updated)
+            wrote = True
+            check = await _run_config_check(hass)
+            if not check["valid"]:
+                raise ValueError(f"HA config validation failed: {check['errors']}")
+        except Exception as write_error:
+            if not wrote:
+                return result(
+                    f"Write refused or failed before commit: {write_error}. "
+                    f"No reload. Backup: {backup_dir}", True
+                )
+            # This restores ALL automations, not just the target, from the snapshot.
+            # There is deliberately no reload either on failure or on success.
+            try:
+                await hass.async_add_executor_job(restore_backup)
+            except Exception as rollback_error:
+                return result(
+                    f"Write/check failed: {write_error}. CRITICAL: restore failed: "
+                    f"{rollback_error}. Manual backup: {backup_dir}", True
+                )
+            return result(
+                f"Write/check failed: {write_error}. Backup restored without reload. "
+                f"Backup: {backup_dir}", True
+            )
+
+        return result(
+            f"Saved automation {automation_id} with config check OK. "
+            f"Backup: {backup_dir}. NO automation reload performed; "
+            "changes will not be active until explicitly reloaded."
+        )
+    except Exception as exc:
+        return result(f"No automation update applied: {exc}", True)

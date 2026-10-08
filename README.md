@@ -151,6 +151,7 @@ Deleting the built-in integration's config entry does not release the path on it
 | `get_automation_config` | Get full configuration of a single automation |
 | `create_automation` | Create a new automation |
 | `update_automation` | Update an existing automation |
+| `update_automation_json` | Preview or stage a full automation from a JSON-encoded string; no automatic reload |
 | `delete_automation` | Delete an automation |
 | `list_scenes` | List all scenes with full configuration |
 | `get_scene_config` | Get full configuration of a single scene |
@@ -164,6 +165,17 @@ Deleting the built-in integration's config entry does not release the path on it
 | `delete_script` | Delete a script |
 | `list_traces` | List recent execution traces for an automation/script (or a whole domain), newest first |
 | `get_trace` | Get the full step-by-step execution trace of one run — which trigger fired, which conditions passed/failed, and the variables at each step (`summary=true` for an outline of large traces) |
+
+
+> **Safe staged automation updates:** `update_automation_json` accepts `automation_id`
+> and a full JSON-encoded configuration in `config_json`. It previews the changed
+> top-level keys by default (`apply=false`) without writing anything. Set
+> `apply=true` only after reviewing the complete replacement: the tool backs up
+> the root YAML configuration, updates `automations.yaml`, validates the Home
+> Assistant configuration, and restores its backup if validation fails.
+> **It never invokes `automation.reload`**, so staged changes become active only
+> when automations are explicitly reloaded later. The existing
+> `update_automation` tool still reloads automations immediately.
 
 **Helpers**
 

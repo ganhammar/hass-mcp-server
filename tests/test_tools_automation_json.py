@@ -106,9 +106,7 @@ async def test_default_is_preview_only(mock_hass, existing_config, tmp_path):
         ),
     ],
 )
-async def test_invalid_payloads_never_write(
-    mock_hass, replacement, expected, tmp_path
-):
+async def test_invalid_payloads_never_write(mock_hass, replacement, expected, tmp_path):
     response = await update_automation_json(
         mock_hass,
         {"automation_id": AUTOMATION_ID, "config_json": replacement, "apply": True},
@@ -173,9 +171,7 @@ async def test_apply_backs_up_validates_and_never_reloads(
             },
         ) as validation,
     ):
-        response = await update_automation_json(
-            mock_hass, arguments(existing_config, apply=True)
-        )
+        response = await update_automation_json(mock_hass, arguments(existing_config, apply=True))
 
     saved = (tmp_path / "automations.yaml").read_text(encoding="utf-8")
     if config_valid:

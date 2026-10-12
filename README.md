@@ -149,17 +149,17 @@ Deleting the built-in integration's config entry does not release the path on it
 |------|-------------|
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
-| `create_automation` | Create a new automation |
+| `create_automation` | Create a new automation, optionally in a category |
 | `update_automation` | Update an existing automation |
 | `delete_automation` | Delete an automation |
 | `list_scenes` | List all scenes with full configuration |
 | `get_scene_config` | Get full configuration of a single scene |
-| `create_scene` | Create a new scene |
+| `create_scene` | Create a new scene, optionally in a category |
 | `update_scene` | Update an existing scene |
 | `delete_scene` | Delete a scene |
 | `list_scripts` | List all scripts with full configuration |
 | `get_script_config` | Get full configuration of a single script |
-| `create_script` | Create a new script |
+| `create_script` | Create a new script, optionally in a category |
 | `update_script` | Update an existing script |
 | `delete_script` | Delete a script |
 | `list_traces` | List recent execution traces for an automation/script (or a whole domain), newest first |
@@ -171,9 +171,16 @@ Deleting the built-in integration's config entry does not release the path on it
 |------|-------------|
 | `list_helpers` | List all helper entities, optionally filtered by domain |
 | `get_helper_config` | Get the raw stored configuration of a UI-managed helper (experimental) |
-| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule) (experimental) |
+| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule), optionally in a category (experimental) |
 | `update_helper` | Update an existing UI-managed helper by entity ID (experimental) |
 | `delete_helper` | Delete a UI-managed helper by entity ID (experimental) |
+
+**Categories**
+
+| Tool | Description |
+|------|-------------|
+| `list_categories` | List the categories for automations, scripts, scenes or helpers, with the entities in each |
+| `set_category` | Put an automation, script, scene or helper in a category (created by name if new), or take it out of one |
 
 **Config Files**
 

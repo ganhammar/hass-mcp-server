@@ -34,9 +34,12 @@ from homeassistant.components.recorder.statistics import (
     list_statistic_ids,
     validate_statistics,
 )
+from homeassistant.helpers.category_registry import CategoryEntry, CategoryRegistry
 from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.helpers.entity_registry import EntityRegistry, RegistryEntry
 from homeassistant.helpers.json import json_encoder_default
 from homeassistant.helpers.recorder import DATA_INSTANCE
+from homeassistant.loader import Integration, async_get_integration
 
 from custom_components.mcp_server_http_transport.const import MCP_PATH
 
@@ -214,6 +217,38 @@ class TestRecorderContracts:
 
     def test_async_clear_statistics_signature(self):
         assert _params(Recorder.async_clear_statistics) == ["self", "statistic_ids", "on_done"]
+
+
+class TestCategoryContracts:
+    """Contracts for tools/categories.py.
+
+    Categories have no service; the frontend sets them over the websocket API,
+    which writes the same registries these call. The entity registry keys an
+    entity's categories by scope ("automation", "script", "scene", "helpers"),
+    one category per scope.
+    """
+
+    def test_category_registry_lookup_and_create_signatures(self):
+        assert _params(CategoryRegistry.async_get_category) == ["self", "scope", "category_id"]
+        assert _params(CategoryRegistry.async_list_categories) == ["self", "scope"]
+        assert _params(CategoryRegistry.async_create) == ["self", "name", "scope", "icon"]
+
+    def test_category_entry_carries_the_listed_fields(self):
+        fields = {f.name for f in dataclasses.fields(CategoryEntry)}
+        assert {"category_id", "name", "icon"} <= fields
+
+    def test_entity_categories_are_a_scope_mapping_set_through_update_entity(self):
+        assert "categories" in _params(EntityRegistry.async_update_entity)
+        assert "categories" in {a.name for a in RegistryEntry.__attrs_attrs__}
+
+    def test_helpers_are_recognized_by_their_integration_type(self):
+        """A helper is put in the "helpers" scope because its integration is a helper.
+
+        That covers config entry helpers such as template sensors, whose entity
+        domain says nothing about being a helper.
+        """
+        assert _params(async_get_integration) == ["hass", "domain"]
+        assert "integration_type" in dir(Integration)
 
 
 class TestHistoryContracts:

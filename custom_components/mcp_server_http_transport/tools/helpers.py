@@ -14,6 +14,7 @@ from . import (
     dumps,
     register_tool,
 )
+from .categories import CATEGORY_PROPERTY, async_category_suffix
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -192,6 +193,7 @@ async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                     "Optional for most types: icon, initial, restore"
                 ),
             },
+            "category": CATEGORY_PROPERTY,
         },
         "required": ["domain", "config"],
     },
@@ -218,11 +220,12 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     try:
         collection = _get_collection(hass, domain)
         item = await collection.async_create_item(config)
+        suffix = await async_category_suffix(hass, arguments, domain, domain, item["id"])
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": f"Successfully created {domain} helper with id: {item['id']}",
+                    "text": f"Successfully created {domain} helper with id: {item['id']}{suffix}",
                 }
             ]
         }

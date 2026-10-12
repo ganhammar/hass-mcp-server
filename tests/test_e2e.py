@@ -24,6 +24,8 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_COMPONENT_LOADED
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import category_registry as cr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import ATTR_COMPONENT, async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -379,3 +381,71 @@ async def test_a_reload_keeps_serving_both_paths(
 
         assert resp.status == 200, path
         assert (await resp.json())["result"]["protocolVersion"] == "2024-11-05"
+
+
+_CREATE_CALLS = {
+    "automation": (
+        "create_automation",
+        {
+            "config": {
+                "alias": "Porch light",
+                "triggers": [{"trigger": "event", "event_type": "test"}],
+                "actions": [],
+            }
+        },
+    ),
+    "script": ("create_script", {"key": "porch", "config": {"sequence": []}}),
+    "scene": ("create_scene", {"config": {"name": "Evening", "entities": {}}}),
+    "helpers": ("create_helper", {"domain": "input_boolean", "config": {"name": "Guests"}}),
+}
+
+
+@pytest.mark.parametrize("scope", list(_CREATE_CALLS))
+async def test_create_tools_categorize_what_the_real_load_registered(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    tmp_path,
+    scope: str,
+) -> None:
+    """Each create tool's item is in the entity registry by the time it is categorized.
+
+    Categories live on the entity registry entry, which only exists once the
+    reload (or, for a helper, the storage collection) has loaded the new item,
+    and each domain registers it under its own platform and unique ID. This
+    drives the real loading so a release that stops registering within the call,
+    or changes either key, fails here rather than leaving items uncategorized.
+    """
+    (tmp_path / "configuration.yaml").write_text(
+        "automation: !include automations.yaml\n"
+        "script: !include scripts.yaml\n"
+        "scene: !include scenes.yaml\n"
+    )
+    (tmp_path / "automations.yaml").write_text("[]\n")
+    (tmp_path / "scenes.yaml").write_text("[]\n")
+    (tmp_path / "scripts.yaml").write_text("{}\n")
+    hass.config.config_dir = str(tmp_path)
+    for domain in ("automation", "script", "scene", "input_boolean"):
+        assert await async_setup_component(hass, domain, {})
+    client = await hass_client()
+    tool, arguments = _CREATE_CALLS[scope]
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": {**arguments, "category": "Mine"}},
+            "id": 3,
+        },
+    )
+
+    text = (await resp.json())["result"]["content"][0]["text"]
+    assert "with category 'Mine'" in text, text
+    (category,) = cr.async_get(hass).async_list_categories(scope=scope)
+    categorized = [
+        entry.entity_id
+        for entry in er.async_get(hass).entities.values()
+        if entry.categories == {scope: category.category_id}
+    ]
+    assert len(categorized) == 1

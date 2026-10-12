@@ -13,6 +13,7 @@ from . import (
     dumps,
     register_tool,
 )
+from .categories import CATEGORY_PROPERTY, async_category_suffix
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ _LOGGER = logging.getLogger(__name__)
                 "description": (
                     "Automation configuration (alias, trigger, action, condition, mode, etc.)"
                 ),
-            }
+            },
+            "category": CATEGORY_PROPERTY,
         },
         "required": ["config"],
     },
@@ -45,9 +47,13 @@ async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         entry_id = await create_list_entry(
             hass, "automations.yaml", arguments["config"], "automation"
         )
+        suffix = await async_category_suffix(hass, arguments, "automation", "automation", entry_id)
         return {
             "content": [
-                {"type": "text", "text": f"Successfully created automation with id: {entry_id}"}
+                {
+                    "type": "text",
+                    "text": f"Successfully created automation with id: {entry_id}{suffix}",
+                }
             ]
         }
     except Exception as e:
@@ -175,7 +181,8 @@ async def get_automation_config(hass: HomeAssistant, arguments: dict[str, Any]) 
             "config": {
                 "type": "object",
                 "description": "Scene configuration (name, entities, etc.)",
-            }
+            },
+            "category": CATEGORY_PROPERTY,
         },
         "required": ["config"],
     },
@@ -187,8 +194,12 @@ async def create_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
 
     try:
         entry_id = await create_list_entry(hass, "scenes.yaml", arguments["config"], "scene")
+        # Scenes from scenes.yaml belong to the "homeassistant" scene platform.
+        suffix = await async_category_suffix(hass, arguments, "scene", "homeassistant", entry_id)
         return {
-            "content": [{"type": "text", "text": f"Successfully created scene with id: {entry_id}"}]
+            "content": [
+                {"type": "text", "text": f"Successfully created scene with id: {entry_id}{suffix}"}
+            ]
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error creating scene: {str(e)}"}]}
@@ -315,6 +326,7 @@ async def get_scene_config(hass: HomeAssistant, arguments: dict[str, Any]) -> di
                 "type": "object",
                 "description": "Script configuration (alias, sequence, mode, etc.)",
             },
+            "category": CATEGORY_PROPERTY,
         },
         "required": ["key", "config"],
     },
@@ -328,8 +340,11 @@ async def create_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         key = await create_dict_entry(
             hass, "scripts.yaml", arguments["key"], arguments["config"], "script"
         )
+        suffix = await async_category_suffix(hass, arguments, "script", "script", key)
         return {
-            "content": [{"type": "text", "text": f"Successfully created script with key: {key}"}]
+            "content": [
+                {"type": "text", "text": f"Successfully created script with key: {key}{suffix}"}
+            ]
         }
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error creating script: {str(e)}"}]}

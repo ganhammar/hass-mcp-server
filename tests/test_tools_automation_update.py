@@ -42,8 +42,11 @@ def yaml_io():
     """Replace HA YAML access with simple PyYAML for isolated file tests."""
     with (
         patch(
-            "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
-            side_effect=lambda path: yaml.safe_load(Path(path).read_text(encoding="utf-8")),
+            "custom_components.mcp_server_http_transport.config_manager."
+            "_load_yaml_list",
+            side_effect=lambda path: yaml.safe_load(
+                Path(path).read_text(encoding="utf-8")
+            ),
         ),
         patch(
             "custom_components.mcp_server_http_transport.config_manager."
@@ -92,10 +95,12 @@ def test_schema_keeps_object_and_optional_flags():
 async def test_dry_run_does_not_write_or_reload(mock_hass, existing_config, tmp_path):
     with (
         patch(
-            "custom_components.mcp_server_http_transport.tools.config_files._create_backup_sync"
+            "custom_components.mcp_server_http_transport.tools.config_files."
+            "_create_backup_sync"
         ) as backup,
         patch(
-            "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+            "custom_components.mcp_server_http_transport.tools.config_files."
+            "_run_config_check",
             new_callable=AsyncMock,
         ) as validation,
     ):
@@ -137,7 +142,8 @@ async def test_removed_keys_are_allowed(mock_hass, existing_config, tmp_path):
     }
     changed["alias"] = "Updated"
     with patch(
-        "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+        "custom_components.mcp_server_http_transport.tools.config_files."
+            "_run_config_check",
         new_callable=AsyncMock,
         return_value={"valid": True, "errors": []},
     ):
@@ -157,7 +163,8 @@ async def test_write_validates_and_restores_on_failure(
     mock_hass, existing_config, tmp_path, config_valid
 ):
     with patch(
-        "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+        "custom_components.mcp_server_http_transport.tools.config_files."
+            "_run_config_check",
         new_callable=AsyncMock,
         return_value={
             "valid": config_valid,
@@ -186,7 +193,8 @@ async def test_write_validates_and_restores_on_failure(
 
 async def test_default_reload_is_preserved(mock_hass, existing_config):
     with patch(
-        "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+        "custom_components.mcp_server_http_transport.tools.config_files."
+            "_run_config_check",
         new_callable=AsyncMock,
         return_value={"valid": True, "errors": []},
     ):
@@ -219,14 +227,16 @@ async def test_stale_preview_hash_is_rejected(mock_hass, existing_config, tmp_pa
 async def test_write_refuses_concurrent_changes(mock_hass, existing_config, tmp_path):
     with (
         patch(
-            "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
+            "custom_components.mcp_server_http_transport.config_manager."
+            "_load_yaml_list",
             side_effect=[
                 [existing_config.copy()],
                 [{**existing_config, "alias": "Changed concurrently"}],
             ],
         ),
         patch(
-            "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+            "custom_components.mcp_server_http_transport.tools.config_files."
+            "_run_config_check",
             new_callable=AsyncMock,
         ) as validation,
     ):
@@ -241,7 +251,8 @@ async def test_write_refuses_concurrent_changes(mock_hass, existing_config, tmp_
 
 async def test_no_op_neither_backs_up_nor_reloads(mock_hass, existing_config, tmp_path):
     with patch(
-        "custom_components.mcp_server_http_transport.tools.config_files._create_backup_sync"
+        "custom_components.mcp_server_http_transport.tools.config_files."
+            "_create_backup_sync"
     ) as backup:
         response = await update_automation(
             mock_hass, {"automation_id": AUTOMATION_ID, "config": existing_config}

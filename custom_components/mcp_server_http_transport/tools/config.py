@@ -74,7 +74,8 @@ def _automation_config_hash(config: dict[str, Any]) -> str:
     name="update_automation",
     description=(
         "Update an existing automation with a backup and config validation. "
-        "dry_run=true previews changed keys and returns an expected_hash without writing. "
+        "dry_run=true previews changed keys and returns an expected_hash "
+        "without writing. "
         "Pass expected_hash on the subsequent update to prevent overwriting edits "
         "made after the preview. reload=true by default; set reload=false to stage "
         "validated changes without calling automation.reload."
@@ -88,7 +89,9 @@ def _automation_config_hash(config: dict[str, Any]) -> str:
             },
             "config": {
                 "type": "object",
-                "description": "Complete replacement automation configuration as an object",
+                "description": (
+                    "Complete replacement automation configuration as an object"
+                ),
             },
             "dry_run": {
                 "type": "boolean",
@@ -96,18 +99,24 @@ def _automation_config_hash(config: dict[str, Any]) -> str:
             },
             "reload": {
                 "type": "boolean",
-                "description": "Default true; reload automations after a validated write",
+                "description": (
+                    "Default true; reload automations after a validated write"
+                ),
             },
             "expected_hash": {
                 "type": "string",
-                "description": "Optional original hash returned by a previous dry_run preview",
+                "description": (
+                    "Optional original hash returned by a previous dry_run preview"
+                ),
             },
         },
         "required": ["automation_id", "config"],
     },
     annotations=ANNOTATION_IDEMPOTENT,
 )
-async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+async def update_automation(
+    hass: HomeAssistant, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Preview or atomically write an automation, validating before optional reload."""
     from homeassistant.util.yaml import dumper as yaml_dumper
 
@@ -185,9 +194,16 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 raise ValueError(f"Expected exactly one entry for {automation_id}")
             current = rows[indexes[0]]
             if current != original:
-                raise RuntimeError("Automation changed since it was read; refusing to overwrite")
-            if expected_hash is not None and _automation_config_hash(current) != expected_hash:
-                raise RuntimeError("Automation changed since preview; refusing to overwrite")
+                raise RuntimeError(
+                    "Automation changed since it was read; refusing to overwrite"
+                )
+            if (
+                expected_hash is not None
+                and _automation_config_hash(current) != expected_hash
+            ):
+                raise RuntimeError(
+                    "Automation changed since preview; refusing to overwrite"
+                )
             rows[indexes[0]] = new_config
             tmp = path.with_name(f".{path.name}.mcp_update_tmp")
             try:

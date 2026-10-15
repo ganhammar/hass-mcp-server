@@ -143,7 +143,7 @@ async def test_removed_keys_are_allowed(mock_hass, existing_config, tmp_path):
     changed["alias"] = "Updated"
     with patch(
         "custom_components.mcp_server_http_transport.tools.config_files."
-            "_run_config_check",
+        "_run_config_check",
         new_callable=AsyncMock,
         return_value={"valid": True, "errors": []},
     ):
@@ -164,7 +164,7 @@ async def test_write_validates_and_restores_on_failure(
 ):
     with patch(
         "custom_components.mcp_server_http_transport.tools.config_files."
-            "_run_config_check",
+        "_run_config_check",
         new_callable=AsyncMock,
         return_value={
             "valid": config_valid,
@@ -194,7 +194,7 @@ async def test_write_validates_and_restores_on_failure(
 async def test_default_reload_is_preserved(mock_hass, existing_config):
     with patch(
         "custom_components.mcp_server_http_transport.tools.config_files."
-            "_run_config_check",
+        "_run_config_check",
         new_callable=AsyncMock,
         return_value={"valid": True, "errors": []},
     ):
@@ -252,7 +252,7 @@ async def test_write_refuses_concurrent_changes(mock_hass, existing_config, tmp_
 async def test_no_op_neither_backs_up_nor_reloads(mock_hass, existing_config, tmp_path):
     with patch(
         "custom_components.mcp_server_http_transport.tools.config_files."
-            "_create_backup_sync"
+        "_create_backup_sync"
     ) as backup:
         response = await update_automation(
             mock_hass, {"automation_id": AUTOMATION_ID, "config": existing_config}

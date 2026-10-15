@@ -150,7 +150,7 @@ Deleting the built-in integration's config entry does not release the path on it
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
 | `create_automation` | Create a new automation, optionally in a category |
-| `update_automation` | Update an existing automation |
+| `update_automation` | Update an automation with preview (`dry_run`), validation, rollback and optional reload |
 | `delete_automation` | Delete an automation |
 | `list_scenes` | List all scenes with full configuration |
 | `get_scene_config` | Get full configuration of a single scene |
@@ -164,6 +164,16 @@ Deleting the built-in integration's config entry does not release the path on it
 | `delete_script` | Delete a script |
 | `list_traces` | List recent execution traces for an automation/script (or a whole domain), newest first |
 | `get_trace` | Get the full step-by-step execution trace of one run — which trigger fired, which conditions passed/failed, and the variables at each step (`summary=true` for an outline of large traces) |
+
+> **Safe automation updates:** `update_automation` accepts an `automation_id`
+> and the complete replacement `config` as an object. By default it saves,
+> checks the Home Assistant configuration and reloads automations, as before.
+> Set `dry_run=true` to preview changed top-level keys without writing, and
+> optionally pass the returned `expected_hash` on the subsequent write to
+> reject updates if the automation changed after preview. Set `reload=false`
+> to leave a validated change staged until a separate automation reload.
+> Writes create a YAML backup; on configuration-validation failure the original
+> `automations.yaml` is restored without reloading.
 
 **Helpers**
 

@@ -157,6 +157,7 @@ async def call_tool(hass: HomeAssistant, name: str, arguments: dict[str, Any]) -
 from . import (  # noqa: E402
     appdaemon_files,  # noqa: F401
     calendar,  # noqa: F401
+    categories,  # noqa: F401
     config,  # noqa: F401
     config_files,  # noqa: F401
     dashboards,  # noqa: F401

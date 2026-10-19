@@ -89,6 +89,18 @@ async def async_assign_category(hass: HomeAssistant, entity_id: str, category: s
     return outcome
 
 
+def registered_entity_id(hass: HomeAssistant, domain: str, platform: str, unique_id: str) -> str:
+    """Return the entity ID an item's platform registered it under.
+
+    A saved item is loaded, and so registered, before the tool that saved it
+    returns, which is what makes it addressable by the ID the tool just wrote.
+    """
+    entity_id = er.async_get(hass).async_get_entity_id(domain, platform, unique_id)
+    if entity_id is None:
+        raise ValueError(f"{domain} '{unique_id}' is not in the entity registry")
+    return entity_id
+
+
 async def async_category_suffix(
     hass: HomeAssistant,
     arguments: dict[str, Any],
@@ -105,9 +117,7 @@ async def async_category_suffix(
     if not arguments.get("category"):
         return ""
     try:
-        entity_id = er.async_get(hass).async_get_entity_id(domain, platform, unique_id)
-        if entity_id is None:
-            raise ValueError(f"{domain} '{unique_id}' is not in the entity registry")
+        entity_id = registered_entity_id(hass, domain, platform, unique_id)
         return f", with {await async_assign_category(hass, entity_id, arguments['category'])}"
     except Exception as e:
         return f", but the category could not be set: {str(e)}"

@@ -401,7 +401,7 @@ _CREATE_CALLS = {
 
 
 @pytest.mark.parametrize("scope", list(_CREATE_CALLS))
-async def test_create_tools_categorize_what_the_real_load_registered(
+async def test_create_tools_categorize_and_set_icon_on_what_the_real_load_registered(
     loaded_entry: MockConfigEntry,
     hass: HomeAssistant,
     hass_client: ClientSessionGenerator,
@@ -410,7 +410,7 @@ async def test_create_tools_categorize_what_the_real_load_registered(
 ) -> None:
     """Each create tool's item is in the entity registry by the time it is categorized.
 
-    Categories live on the entity registry entry, which only exists once the
+    Categories and the icon override live on the entity registry entry, which only exists once the
     reload (or, for a helper, the storage collection) has loaded the new item,
     and each domain registers it under its own platform and unique ID. This
     drives the real loading so a release that stops registering within the call,
@@ -435,17 +435,21 @@ async def test_create_tools_categorize_what_the_real_load_registered(
         json={
             "jsonrpc": "2.0",
             "method": "tools/call",
-            "params": {"name": tool, "arguments": {**arguments, "category": "Mine"}},
+            "params": {
+                "name": tool,
+                "arguments": {**arguments, "category": "Mine", "icon": "mdi:star"},
+            },
             "id": 3,
         },
     )
 
     text = (await resp.json())["result"]["content"][0]["text"]
     assert "with category 'Mine'" in text, text
+    assert "with icon mdi:star" in text, text
     (category,) = cr.async_get(hass).async_list_categories(scope=scope)
     categorized = [
         entry.entity_id
         for entry in er.async_get(hass).entities.values()
-        if entry.categories == {scope: category.category_id}
+        if entry.categories == {scope: category.category_id} and entry.icon == "mdi:star"
     ]
     assert len(categorized) == 1

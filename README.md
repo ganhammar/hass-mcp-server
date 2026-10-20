@@ -149,18 +149,18 @@ Deleting the built-in integration's config entry does not release the path on it
 |------|-------------|
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
-| `create_automation` | Create a new automation, optionally in a category |
-| `update_automation` | Update an existing automation |
+| `create_automation` | Create a new automation, optionally in a category and with an icon |
+| `update_automation` | Update an existing automation, optionally changing its icon |
 | `delete_automation` | Delete an automation |
 | `list_scenes` | List all scenes with full configuration |
 | `get_scene_config` | Get full configuration of a single scene |
-| `create_scene` | Create a new scene, optionally in a category |
-| `update_scene` | Update an existing scene |
+| `create_scene` | Create a new scene, optionally in a category and with an icon |
+| `update_scene` | Update an existing scene, optionally changing its icon |
 | `delete_scene` | Delete a scene |
 | `list_scripts` | List all scripts with full configuration |
 | `get_script_config` | Get full configuration of a single script |
-| `create_script` | Create a new script, optionally in a category |
-| `update_script` | Update an existing script |
+| `create_script` | Create a new script, optionally in a category and with an icon |
+| `update_script` | Update an existing script, optionally changing its icon |
 | `delete_script` | Delete a script |
 | `list_traces` | List recent execution traces for an automation/script (or a whole domain), newest first |
 | `get_trace` | Get the full step-by-step execution trace of one run — which trigger fired, which conditions passed/failed, and the variables at each step (`summary=true` for an outline of large traces) |
@@ -171,8 +171,8 @@ Deleting the built-in integration's config entry does not release the path on it
 |------|-------------|
 | `list_helpers` | List all helper entities, optionally filtered by domain |
 | `get_helper_config` | Get the raw stored configuration of a UI-managed helper (experimental) |
-| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule), optionally in a category (experimental) |
-| `update_helper` | Update an existing UI-managed helper by entity ID (experimental) |
+| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule), optionally in a category and with an icon (experimental) |
+| `update_helper` | Update an existing UI-managed helper by entity ID, optionally changing its icon (experimental) |
 | `delete_helper` | Delete a UI-managed helper by entity ID (experimental) |
 
 **Categories**
@@ -181,6 +181,12 @@ Deleting the built-in integration's config entry does not release the path on it
 |------|-------------|
 | `list_categories` | List the categories for automations, scripts, scenes or helpers, with the entities in each |
 | `set_category` | Put an automation, script, scene or helper in a category (created by name if new), or take it out of one |
+
+**Icons**
+
+| Tool | Description |
+|------|-------------|
+| `set_icon` | Set or remove the icon override of any registered entity, such as an automation, without changing its config |
 
 **Config Files**
 

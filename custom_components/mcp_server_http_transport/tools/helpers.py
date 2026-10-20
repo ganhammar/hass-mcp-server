@@ -15,6 +15,7 @@ from . import (
     register_tool,
 )
 from .categories import CATEGORY_PROPERTY, async_category_suffix
+from .icons import ICON_PROPERTY, async_icon_suffix
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -194,6 +195,7 @@ async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 ),
             },
             "category": CATEGORY_PROPERTY,
+            "icon": ICON_PROPERTY,
         },
         "required": ["domain", "config"],
     },
@@ -221,6 +223,7 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         collection = _get_collection(hass, domain)
         item = await collection.async_create_item(config)
         suffix = await async_category_suffix(hass, arguments, domain, domain, item["id"])
+        suffix += await async_icon_suffix(hass, arguments, domain, domain, item["id"])
         return {
             "content": [
                 {
@@ -249,6 +252,7 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
                     "Updated helper configuration. Include all fields, not just changed ones"
                 ),
             },
+            "icon": ICON_PROPERTY,
         },
         "required": ["entity_id", "config"],
     },
@@ -260,7 +264,8 @@ async def update_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         domain, item_id = await _entity_id_to_item_id(hass, arguments["entity_id"])
         collection = _get_collection(hass, domain)
         await collection.async_update_item(item_id, arguments["config"])
-        return {"content": [{"type": "text", "text": "Successfully updated helper"}]}
+        suffix = await async_icon_suffix(hass, arguments, domain, domain, item_id)
+        return {"content": [{"type": "text", "text": f"Successfully updated helper{suffix}"}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error updating helper: {str(e)}"}]}
 

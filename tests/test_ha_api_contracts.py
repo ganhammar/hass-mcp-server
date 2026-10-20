@@ -241,6 +241,15 @@ class TestCategoryContracts:
         assert "categories" in _params(EntityRegistry.async_update_entity)
         assert "categories" in {a.name for a in RegistryEntry.__attrs_attrs__}
 
+    def test_entity_icon_override_is_set_through_update_entity(self):
+        """tools/icons.py writes the icon override the entity settings dialog writes.
+
+        Automations have no icon in their config, so this field is the only place
+        the create and update tools can put one.
+        """
+        assert "icon" in _params(EntityRegistry.async_update_entity)
+        assert "icon" in {a.name for a in RegistryEntry.__attrs_attrs__}
+
     def test_helpers_are_recognized_by_their_integration_type(self):
         """A helper is put in the "helpers" scope because its integration is a helper.
 

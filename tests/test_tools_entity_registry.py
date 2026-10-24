@@ -246,7 +246,9 @@ async def test_update_registry_delegates_id_validation_to_ha(registry_hass, new_
             "apply": True,
         },
     )
-    registry.async_update_entity.assert_called_once_with("light.living_room", new_entity_id=new_id)
+    registry.async_update_entity.assert_called_once_with(
+        "light.living_room", new_entity_id=new_id
+    )
     assert message in result["content"][0]["text"]
     assert "isError" not in result
 

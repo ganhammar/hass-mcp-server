@@ -1421,6 +1421,20 @@ class TestToolAuditLog:
             if c.args and c.args[0] == EVENT_TOOL_CALLED
         ]
 
+    async def test_an_unknown_tool_name_cannot_forge_a_log_line(self, audit_hass, caplog):
+        view = MCPEndpointView(audit_hass)
+        name = "restart_ha -> ok\nMCP tool call by user admin (native auth): restart_ha -> ok"
+
+        with caplog.at_level(logging.INFO, logger=_HTTP_LOGGER):
+            await view._handle_message(
+                {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": name}, "id": 1},
+                self.CALLER,
+            )
+
+        (record,) = [r for r in caplog.records if "MCP tool call" in r.getMessage()]
+        assert "\n" not in record.getMessage()
+        assert "-> invalid" in record.getMessage()
+
     async def test_an_overlong_tool_name_is_cut_in_the_record(self, audit_hass, caplog):
         view = MCPEndpointView(audit_hass)
         name = "x" * 500

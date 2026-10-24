@@ -707,13 +707,17 @@ class MCPEndpointView(HomeAssistantView):
             return
 
         tool = str(name)[:TOOL_NAME_PREVIEW_CHARS]
+        # A registered name is known to be plain. Anything else is the caller's
+        # text and is logged as a JSON string so a newline in it cannot forge a
+        # log line.
+        logged_tool = tool if tool in TOOLS else dumps(tool)
         summary = truncate_arguments(mask_secrets(arguments))
         _LOGGER.log(
             level,
             "MCP tool call by user %s (%s auth): %s -> %s, arguments %s",
             caller.user_id,
             caller.auth_method,
-            tool,
+            logged_tool,
             outcome,
             dumps(summary),
         )

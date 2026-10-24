@@ -19,6 +19,7 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
+    CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
     DEFAULT_APPDAEMON_APPS_ROOT,
     DEFAULT_SERVER_NAME,
@@ -244,6 +245,36 @@ class TestMCPServerConfigFlow:
             options_flow = MCPServerConfigFlow.async_get_options_flow(mock_config_entry)
 
             assert isinstance(options_flow, MCPServerOptionsFlowHandler)
+
+    async def test_user_flow_requires_admin_by_default(self):
+        """The administrator requirement is on unless the user turns it off."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_REQUIRE_ADMIN].default() is True
+
+    async def test_user_flow_persists_require_admin_off(self):
+        """Turning the requirement off at setup is stored on the entry."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(
+            user_input={CONF_NATIVE_AUTH: False, CONF_REQUIRE_ADMIN: False}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_REQUIRE_ADMIN] is False
 
 
 class TestMCPServerOptionsFlow:
@@ -510,3 +541,31 @@ class TestMCPServerOptionsFlow:
         call_kwargs = flow.hass.config_entries.async_update_entry.call_args
         assert call_kwargs[1]["data"][CONF_CAMERA_IMAGE_ACCESS] is True
         assert call_kwargs[1]["data"][CONF_IMAGE_FILE_ACCESS] is True
+
+    async def test_init_step_require_admin_defaults_to_true(self):
+        """An entry created before the option existed shows it on."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_REQUIRE_ADMIN].default() is True
+
+    async def test_init_step_shows_current_require_admin(self):
+        """The form reflects a requirement the user already turned off."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True, CONF_REQUIRE_ADMIN: False})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_REQUIRE_ADMIN].default() is False
+
+    async def test_init_step_persists_require_admin(self):
+        """Changing the requirement is merged into the entry data."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_REQUIRE_ADMIN: False}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_REQUIRE_ADMIN] is False

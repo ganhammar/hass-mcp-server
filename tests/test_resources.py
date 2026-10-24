@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
 
 
 class TestResources:
@@ -33,7 +37,7 @@ class TestResources:
             return_value={"jsonrpc": "2.0", "method": "resources/list", "id": 22}
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -77,7 +81,7 @@ class TestResources:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -110,7 +114,7 @@ class TestResources:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.resources.ar.async_get",
                 return_value=mock_registry,
@@ -146,7 +150,7 @@ class TestResources:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -172,7 +176,7 @@ class TestResources:
         )
         request.url.origin.return_value = "https://homeassistant.local"
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -194,7 +198,7 @@ class TestResources:
         )
         request.url.origin.return_value = "https://homeassistant.local"
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -226,7 +230,7 @@ class TestResources:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.resources.dr.async_get",
                 return_value=mock_registry,
@@ -259,7 +263,7 @@ class TestResources:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -292,7 +296,7 @@ class TestResources:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.resources.fr.async_get",
                 return_value=mock_registry,
@@ -331,7 +335,7 @@ class TestResources:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -366,7 +370,7 @@ class TestResources:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -399,7 +403,7 @@ class TestResources:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.resources.lr.async_get",
                 return_value=mock_registry,
@@ -435,7 +439,7 @@ class TestResources:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200

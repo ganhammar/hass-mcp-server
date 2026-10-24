@@ -7,12 +7,21 @@ HTTP POST → token validation → JSON-RPC dispatch → module handler → resp
 
 import json
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 from homeassistant.core import SupportsResponse
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.const import EVENT_TOOL_CALLED
+from custom_components.mcp_server_http_transport.http import MCPEndpointView, ValidatedToken
+
+# What a validated bearer token resolves to; the view then looks its user up.
+TOKEN = ValidatedToken(sub="user123", auth_method="native")
+
+
+def _fired_by_tool(async_fire: Mock) -> list:
+    """Return the bus events the tool fired, leaving out the view's audit event."""
+    return [c for c in async_fire.call_args_list if c.args[0] != EVENT_TOOL_CALLED]
 
 
 @pytest.fixture
@@ -111,6 +120,11 @@ def populated_hass():
     hass.config.currency = "SEK"
     hass.config.country = "SE"
     hass.config.language = "sv"
+
+    # The administrator the session's token belongs to.
+    hass.auth.async_get_user = AsyncMock(
+        return_value=Mock(id="user123", is_active=True, is_admin=True)
+    )
 
     return hass
 
@@ -232,7 +246,7 @@ class TestMCPClientSession:
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value=body)
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", return_value=TOKEN):
             response = await view.post(request)
 
         return json.loads(response.body)
@@ -767,7 +781,7 @@ class TestMCPClientSession:
         )
         request.url.origin.return_value = "https://ha.local"
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", return_value=TOKEN):
             response = await view.post(request)
 
         assert response.status == 200
@@ -789,7 +803,7 @@ class TestMCPClientSession:
             return_value={"jsonrpc": "2.0", "method": "notifications/initialized"}
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_validate_token", return_value=TOKEN):
             response = await view.post(request)
 
         assert response.status == 202
@@ -1258,7 +1272,9 @@ class TestMCPClientSession:
             msg_id=200,
         )
         assert "Successfully fired event" in result["result"]["content"][0]["text"]
-        populated_hass.bus.async_fire.assert_called_once_with("test_event", {"source": "test"})
+        assert _fired_by_tool(populated_hass.bus.async_fire) == [
+            call("test_event", {"source": "test"})
+        ]
 
     async def test_search_entities_by_query(self, view, populated_hass, mock_entity_registry):
         """Test searching entities by friendly name."""
@@ -1675,7 +1691,7 @@ class TestMCPClientSession:
             )
             text = result["result"]["content"][0]["text"]
             assert "not allowed" in text
-            populated_hass.bus.async_fire.assert_not_called()
+            assert _fired_by_tool(populated_hass.bus.async_fire) == []
 
     async def test_search_entities_by_area(
         self, view, populated_hass, mock_entity_registry, mock_device_registry

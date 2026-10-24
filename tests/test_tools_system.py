@@ -2,11 +2,21 @@
 
 import json
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.const import EVENT_TOOL_CALLED
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
+
+
+def _fired_by_tool(async_fire: Mock) -> list:
+    """Return the bus events the tool fired, leaving out the view's audit event."""
+    return [c for c in async_fire.call_args_list if c.args[0] != EVENT_TOOL_CALLED]
 
 
 class TestToolsSystem:
@@ -50,7 +60,7 @@ class TestToolsSystem:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -86,7 +96,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.helpers.template.Template",
                 return_value=mock_tpl,
@@ -115,7 +125,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.helpers.template.Template",
                 side_effect=Exception("Template syntax error"),
@@ -163,7 +173,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.recorder.get_instance",
                 return_value=mock_recorder,
@@ -201,7 +211,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.recorder.get_instance",
                 return_value=mock_recorder,
@@ -239,7 +249,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.recorder.get_instance",
                 return_value=mock_recorder,
@@ -273,13 +283,13 @@ class TestToolsSystem:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
         body = json.loads(response.body)
         assert "Successfully fired event" in body["result"]["content"][0]["text"]
-        mock_hass.bus.async_fire.assert_called_once_with("custom_event", {"key": "value"})
+        assert _fired_by_tool(mock_hass.bus.async_fire) == [call("custom_event", {"key": "value"})]
 
     async def test_post_tools_call_fire_event_without_data(self, view, mock_hass):
         """Test fire_event without event_data defaults to empty dict."""
@@ -300,11 +310,11 @@ class TestToolsSystem:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
-        mock_hass.bus.async_fire.assert_called_once_with("simple_event", {})
+        assert _fired_by_tool(mock_hass.bus.async_fire) == [call("simple_event", {})]
 
     async def test_post_tools_call_fire_event_blocked_type(self, view, mock_hass):
         """Test fire_event rejects system event types."""
@@ -325,13 +335,43 @@ class TestToolsSystem:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
         body = json.loads(response.body)
         assert "not allowed" in body["result"]["content"][0]["text"]
-        mock_hass.bus.async_fire.assert_not_called()
+        assert _fired_by_tool(mock_hass.bus.async_fire) == []
+
+    async def test_post_tools_call_fire_event_cannot_forge_audit_event(self, view, mock_hass):
+        """fire_event refuses the integration's own event namespace."""
+        mock_hass.bus = Mock()
+        mock_hass.bus.async_fire = Mock()
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "fire_event",
+                    "arguments": {
+                        "event_type": EVENT_TOOL_CALLED,
+                        "event_data": {"tool": "restart_ha", "user_id": "someone-else"},
+                    },
+                },
+                "id": 82,
+            }
+        )
+
+        with patch.object(view, "_authenticate", return_value=CALLER):
+            response = await view.post(request)
+
+        assert response.status == 200
+        body = json.loads(response.body)
+        assert "not allowed" in body["result"]["content"][0]["text"]
+        assert _fired_by_tool(mock_hass.bus.async_fire) == []
 
     async def test_post_tools_call_fire_event_error(self, view, mock_hass):
         """Test fire_event when bus.async_fire raises."""
@@ -352,7 +392,7 @@ class TestToolsSystem:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -386,7 +426,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.logbook.processor.EventProcessor",
                 return_value=mock_processor,
@@ -433,7 +473,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.logbook.processor.EventProcessor",
                 mock_event_processor_cls,
@@ -480,7 +520,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.logbook.processor.EventProcessor",
                 return_value=mock_processor,
@@ -514,7 +554,7 @@ class TestToolsSystem:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.logbook.processor.EventProcessor",
                 side_effect=Exception("Logbook unavailable"),

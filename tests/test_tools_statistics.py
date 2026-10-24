@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
 
 
 class TestToolsStatistics:
@@ -66,7 +70,7 @@ class TestToolsStatistics:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -104,7 +108,7 @@ class TestToolsStatistics:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -137,7 +141,7 @@ class TestToolsStatistics:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -160,7 +164,7 @@ async def _run_tool(view, name, arguments, recorder=None, extra_patches=()):
     )
 
     with ExitStack() as stack:
-        stack.enter_context(patch.object(view, "_validate_token", return_value={"sub": "u"}))
+        stack.enter_context(patch.object(view, "_authenticate", return_value=CALLER))
         if recorder is not None:
             stack.enter_context(
                 patch(

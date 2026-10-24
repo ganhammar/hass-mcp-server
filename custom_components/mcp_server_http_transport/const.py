@@ -19,6 +19,11 @@ DEFAULT_HOST = "0.0.0.0"
 # Authentication configuration
 CONF_NATIVE_AUTH = "native_auth_enabled"
 
+# Whether only Home Assistant administrators may use the endpoint. Home Assistant
+# itself restricts most of what the tools do (config changes, restart, templates,
+# the error log) to administrators, so an entry without the key requires one.
+CONF_REQUIRE_ADMIN = "require_admin"
+
 # Feature flags
 CONF_CONFIG_FILE_ACCESS = "config_file_access_enabled"
 CONF_CAMERA_IMAGE_ACCESS = "camera_image_access_enabled"
@@ -74,3 +79,6 @@ RESOURCE_METADATA_PREFIX = "/.well-known/oauth-protected-resource"
 
 # Repairs issue raised while another integration also serves MCP_PATH.
 ISSUE_ENDPOINT_CONFLICT = "endpoint_conflict"
+
+# Bus event fired after every tool call that is not read-only, as an audit trail.
+EVENT_TOOL_CALLED = f"{DOMAIN}_tool_called"

@@ -142,6 +142,32 @@ class TestAsyncSetupEntry:
         assert mock_hass.data[DOMAIN]["image_file_access"] is False
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_template_rendering_defaults_off(
+        self,
+        mock_register_views,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """Test template rendering defaults to disabled in hass.data."""
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["template_rendering"] is False
+
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_wires_template_rendering_flag(
+        self,
+        mock_register_views,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """Test the template rendering flag is read into hass.data."""
+        mock_config_entry.data = {"template_rendering_enabled": True}
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["template_rendering"] is True
+
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_wires_image_access_flags(
         self,
         mock_register_views,

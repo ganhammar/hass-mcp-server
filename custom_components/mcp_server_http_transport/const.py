@@ -28,6 +28,7 @@ CONF_REQUIRE_ADMIN = "require_admin"
 CONF_CONFIG_FILE_ACCESS = "config_file_access_enabled"
 CONF_CAMERA_IMAGE_ACCESS = "camera_image_access_enabled"
 CONF_IMAGE_FILE_ACCESS = "image_file_access_enabled"
+CONF_TEMPLATE_RENDERING = "template_rendering_enabled"
 CONF_APPDAEMON_FILE_ACCESS = "appdaemon_file_access_enabled"
 CONF_APPDAEMON_APPS_ROOT = "appdaemon_apps_root"
 

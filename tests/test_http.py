@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, create_autospec, patch
 
 import pytest
 from custom_components.oidc_provider.token_validator import get_issuer_from_request
@@ -30,6 +30,7 @@ from custom_components.mcp_server_http_transport.http import (
     MCPProtectedResourceMetadataView,
     MCPSubpathProtectedResourceMetadataView,
     ValidatedToken,
+    _accepts_expected_audience,
     _get_issuer,
     _get_protected_resource_metadata,
     mask_secrets,
@@ -940,8 +941,8 @@ class TestOidcAudienceBinding:
         assert kwargs.get("expected_audience") == f"https://ha.example.com{MCP_HTTP_PATH}"
 
     @patch("custom_components.mcp_server_http_transport.http.ir")
-    async def test_falls_back_to_legacy_signature_on_type_error(self, mock_ir, view):
-        """An older OIDC provider without expected_audience still works."""
+    async def test_falls_back_to_legacy_signature_for_an_old_provider(self, mock_ir, view):
+        """An older OIDC provider whose validator lacks expected_audience still works."""
         import sys
 
         request = Mock(path=MCP_PATH)
@@ -951,21 +952,63 @@ class TestOidcAudienceBinding:
             "X-Forwarded-Host": "ha.example.com",
         }
 
-        def side_effect(*args, **kwargs):
-            if "expected_audience" in kwargs:
-                raise TypeError("unexpected keyword argument 'expected_audience'")
-            return {"sub": "legacy"}
-
         mv = sys.modules["custom_components.oidc_provider.token_validator"]
-        mv.validate_access_token.reset_mock()
-        mv.validate_access_token.side_effect = side_effect
+        original = mv.validate_access_token
+        mv.validate_access_token = _legacy_validator()
         try:
             result = await view._validate_token(request)
         finally:
-            mv.validate_access_token.side_effect = None
-            mv.validate_access_token.return_value = None
+            mv.validate_access_token = original
 
         assert result == ValidatedToken(sub="legacy", auth_method="oidc")
+
+    async def test_a_type_error_inside_a_modern_validator_is_not_a_fallback(self, view):
+        """A provider bug surfaces instead of re-validating without the audience check."""
+        import sys
+
+        request = Mock(path=MCP_PATH)
+        request.headers = {"Authorization": "Bearer t"}
+
+        mv = sys.modules["custom_components.oidc_provider.token_validator"]
+        mv.validate_access_token.reset_mock()
+        mv.validate_access_token.side_effect = TypeError("bug inside the validator")
+        try:
+            with pytest.raises(TypeError):
+                await view._validate_token(request)
+        finally:
+            mv.validate_access_token.side_effect = None
+        assert mv.validate_access_token.call_count == 1
+
+
+def _legacy_signature(hass, token, expected_issuer):
+    """The validate_access_token signature of hass-oidc-server before 1.5.0."""
+
+
+def _legacy_validator(payload: dict | None = None) -> Mock:
+    """A validator mock whose signature predates expected_audience."""
+    return create_autospec(
+        _legacy_signature, return_value={"sub": "legacy"} if payload is None else payload
+    )
+
+
+class TestAcceptsExpectedAudience:
+    """The provider's support for audience binding is read off its signature."""
+
+    def test_legacy_signature_is_not_supported(self):
+        assert _accepts_expected_audience(_legacy_signature) is False
+
+    def test_keyword_parameter_is_supported(self):
+        def modern(hass, token, expected_issuer, expected_audience=None): ...
+
+        assert _accepts_expected_audience(modern) is True
+
+    def test_var_keyword_is_supported(self):
+        def forwarding(*args, **kwargs): ...
+
+        assert _accepts_expected_audience(forwarding) is True
+
+    def test_uninspectable_callable_is_assumed_supported(self):
+        assert _accepts_expected_audience(object()) is True
 
 
 class TestOidcAudienceFallbackReport:
@@ -978,14 +1021,16 @@ class TestOidcAudienceFallbackReport:
 
     @pytest.fixture
     def validator(self):
-        """The stubbed OIDC validator, restored to its default after the test."""
+        """The stubbed OIDC validator module, restored to its default after the test."""
         import sys
 
         mv = sys.modules["custom_components.oidc_provider.token_validator"]
-        mv.validate_access_token.reset_mock()
-        yield mv.validate_access_token
-        mv.validate_access_token.side_effect = None
-        mv.validate_access_token.return_value = None
+        original = mv.validate_access_token
+        original.reset_mock()
+        yield mv
+        mv.validate_access_token = original
+        original.side_effect = None
+        original.return_value = None
 
     @staticmethod
     def _request():
@@ -998,13 +1043,6 @@ class TestOidcAudienceFallbackReport:
         return request
 
     @staticmethod
-    def _old_provider(*args, **kwargs):
-        """Stand in for a provider whose validator predates expected_audience."""
-        if "expected_audience" in kwargs:
-            raise TypeError("unexpected keyword argument 'expected_audience'")
-        return {"sub": "legacy"}
-
-    @staticmethod
     def _fallback_warnings(caplog):
         return [
             r
@@ -1015,7 +1053,7 @@ class TestOidcAudienceFallbackReport:
     @patch("custom_components.mcp_server_http_transport.http.ir")
     async def test_warns_once_across_requests(self, mock_ir, view, validator, caplog):
         """Two requests through the fallback log the warning a single time."""
-        validator.side_effect = self._old_provider
+        validator.validate_access_token = _legacy_validator()
 
         with caplog.at_level(logging.DEBUG):
             first = await view._validate_token(self._request())
@@ -1032,7 +1070,7 @@ class TestOidcAudienceFallbackReport:
     @patch("custom_components.mcp_server_http_transport.http.ir")
     async def test_each_view_reports_on_its_own(self, mock_ir, validator, caplog):
         """The once-only flag belongs to the view instance."""
-        validator.side_effect = self._old_provider
+        validator.validate_access_token = _legacy_validator()
 
         with caplog.at_level(logging.DEBUG):
             await MCPEndpointView(Mock())._validate_token(self._request())
@@ -1043,7 +1081,7 @@ class TestOidcAudienceFallbackReport:
     @patch("custom_components.mcp_server_http_transport.http.ir")
     async def test_raises_repair_issue(self, mock_ir, view, validator):
         """The fallback raises a non-fixable warning repair naming the minimum version."""
-        validator.side_effect = self._old_provider
+        validator.validate_access_token = _legacy_validator()
 
         await view._validate_token(self._request())
 
@@ -1061,7 +1099,7 @@ class TestOidcAudienceFallbackReport:
     @patch("custom_components.mcp_server_http_transport.http.ir")
     async def test_silent_when_audience_check_succeeds(self, mock_ir, view, validator, caplog):
         """A provider that supports the audience raises neither warning nor repair."""
-        validator.return_value = {"sub": "u"}
+        validator.validate_access_token.return_value = {"sub": "u"}
 
         with caplog.at_level(logging.DEBUG):
             result = await view._validate_token(self._request())
@@ -1073,7 +1111,7 @@ class TestOidcAudienceFallbackReport:
     @patch("custom_components.mcp_server_http_transport.http.ir")
     async def test_silent_when_token_is_merely_invalid(self, mock_ir, view, validator, caplog):
         """A token the audience-aware provider rejects is not a fallback."""
-        validator.return_value = None
+        validator.validate_access_token.return_value = None
 
         with caplog.at_level(logging.DEBUG):
             result = await view._validate_token(self._request())

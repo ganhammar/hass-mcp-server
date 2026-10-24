@@ -1,5 +1,6 @@
 """HTTP transport for MCP server."""
 
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -257,6 +258,24 @@ def _jsonrpc_error(code: int, message: str, msg_id: Any = None) -> dict[str, Any
     }
 
 
+def _accepts_expected_audience(validate_access_token: Any) -> bool:
+    """Return True when the provider's validator takes the expected_audience keyword.
+
+    The signature decides, not a failed call: a TypeError raised inside a validator
+    that does take the keyword is a provider bug and must not be read as an old
+    provider. A validator that cannot be introspected is assumed to take it, so a
+    mismatch there fails the token rather than skipping the audience check.
+    """
+    try:
+        parameters = inspect.signature(validate_access_token).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.name == "expected_audience" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+
+
 def _forbidden(description: str) -> web.Response:
     """Build the 403 for a valid token whose user may not use this endpoint.
 
@@ -448,14 +467,13 @@ class MCPEndpointView(HomeAssistantView):
             # URI is the resource a compliant client (e.g. Claude) binds the token
             # to. Require the token's aud to match it.
             expected_audience = f"{expected_issuer}{_resource_path(request.path)}"
-            try:
+            if _accepts_expected_audience(validate_access_token):
                 result = validate_access_token(
                     self.hass, token, expected_issuer, expected_audience=expected_audience
                 )
-            except TypeError:
-                # OIDC provider predates resource-aware validation; fall back to
-                # the legacy signature so an un-upgraded provider still works, and
-                # say that the audience goes unchecked.
+            else:
+                # The installed provider predates resource-aware validation, so the
+                # token is validated without an audience check.
                 self._report_audience_fallback()
                 result = validate_access_token(self.hass, token, expected_issuer)
             sub = result.get("sub") if isinstance(result, dict) else None

@@ -18,9 +18,14 @@ token validator returns ``None``, so requests fall through to the native-auth
 path under test.
 """
 
+from ipaddress import ip_address
+from socket import herror
+from unittest.mock import patch
+
 import pytest
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http.ban import KEY_BAN_MANAGER, KEY_FAILED_LOGIN_ATTEMPTS
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_COMPONENT_LOADED
 from homeassistant.core import HomeAssistant
@@ -28,12 +33,17 @@ from homeassistant.helpers import category_registry as cr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import ATTR_COMPONENT, async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    MockUser,
+    async_capture_events,
+)
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.mcp_server_http_transport.const import (
     CONF_NATIVE_AUTH,
     DOMAIN,
+    EVENT_TOOL_CALLED,
     ISSUE_ENDPOINT_CONFLICT,
     MCP_HTTP_PATH,
     MCP_PATH,
@@ -118,6 +128,85 @@ async def test_unauthenticated_request_is_rejected(
     assert (await resp.json())["error"] == "invalid_token"
 
 
+async def test_non_admin_token_is_refused(
+    loaded_entry: MockConfigEntry,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_read_only_access_token: str,
+) -> None:
+    """A real token for a non-administrator is valid but not enough."""
+    client = await hass_client_no_auth()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        headers={"Authorization": f"Bearer {hass_read_only_access_token}"},
+    )
+
+    assert resp.status == 403
+    assert (await resp.json())["error"] == "insufficient_scope"
+    assert resp.headers["WWW-Authenticate"].startswith('Bearer error="insufficient_scope"')
+
+
+async def test_a_write_tool_fires_the_audit_event_as_its_caller(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_admin_user: MockUser,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """The event carries the caller, and so does the context Home Assistant records."""
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "fire_event",
+                "arguments": {"event_type": "mcp_e2e", "event_data": {"api_key": "k"}},
+            },
+            "id": 1,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    (event,) = events
+    assert event.data == {
+        "tool": "fire_event",
+        "user_id": hass_admin_user.id,
+        "auth_method": "native",
+        "outcome": "ok",
+        "arguments": {"event_type": "mcp_e2e", "event_data": {"api_key": "***"}},
+    }
+    assert event.context.user_id == hass_admin_user.id
+
+
+async def test_a_read_only_tool_fires_no_audit_event(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """Reads would flood the recorder, so they are only logged."""
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "get_state", "arguments": {"entity_id": "sun.sun"}},
+            "id": 1,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    assert events == []
+
+
 async def test_unauthenticated_get_carries_the_challenge(
     loaded_entry: MockConfigEntry,
     hass_client_no_auth: ClientSessionGenerator,
@@ -135,6 +224,138 @@ async def test_unauthenticated_get_carries_the_challenge(
     assert resp.status == 401
     assert resp.headers.get("WWW-Authenticate", "").startswith("Bearer")
     assert (await resp.json())["error"] == "invalid_token"
+
+
+@pytest.fixture
+async def banning_entry(enable_custom_integrations: None, hass: HomeAssistant) -> MockConfigEntry:
+    """The integration set up behind an http component with IP banning switched on."""
+    assert await async_setup_component(
+        hass, "http", {"http": {"ip_ban_enabled": True, "login_attempts_threshold": 10}}
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_NATIVE_AUTH: True})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    return entry
+
+
+async def test_a_rejected_bearer_token_counts_as_a_failed_login(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """A bad token reaches Home Assistant's login attempt counter, a bare probe does not."""
+    client = await hass_client_no_auth()
+    attempts = hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS]
+    request = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
+
+    # The reverse DNS lookup process_wrong_login does would hit the network.
+    with patch("homeassistant.components.http.ban.gethostbyaddr", side_effect=herror):
+        resp = await client.post("/api/mcp", json=request)
+        assert resp.status == 401
+        assert (await client.get("/api/mcp")).status == 401
+        assert attempts == {}
+
+        resp = await client.post(
+            "/api/mcp", json=request, headers={"Authorization": "Bearer not-a-real-token"}
+        )
+        assert resp.status == 401
+        assert (await resp.json())["error"] == "invalid_token"
+        assert attempts[ip_address("127.0.0.1")] == 1
+
+        resp = await client.get("/api/mcp", headers={"Authorization": "Bearer not-a-real-token"})
+        assert resp.status == 401
+        assert attempts[ip_address("127.0.0.1")] == 2
+
+
+async def test_a_valid_token_is_not_counted_as_a_failed_login(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    client = await hass_client()
+
+    resp = await client.post("/api/mcp", json={"jsonrpc": "2.0", "method": "initialize", "id": 1})
+
+    assert resp.status == 200
+    assert hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS] == {}
+
+
+async def test_an_authorized_request_clears_earlier_failures(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """An expired token presented once an hour before refreshing never adds up to a ban."""
+    client = await hass_client()
+    attempts = hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS]
+    request = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
+
+    with patch("homeassistant.components.http.ban.gethostbyaddr", side_effect=herror):
+        resp = await client.post(
+            "/api/mcp", json=request, headers={"Authorization": "Bearer expired-token"}
+        )
+    assert resp.status == 401
+    assert attempts[ip_address("127.0.0.1")] == 1
+
+    resp = await client.post("/api/mcp", json=request)
+
+    assert resp.status == 200
+    assert attempts == {}
+
+
+async def test_a_non_admin_token_is_not_counted_as_a_failed_login(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_read_only_access_token: str,
+) -> None:
+    client = await hass_client_no_auth()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        headers={"Authorization": f"Bearer {hass_read_only_access_token}"},
+    )
+
+    assert resp.status == 403
+    assert hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS] == {}
+
+
+async def test_reaching_the_threshold_bans_the_address(
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """Enough rejected tokens trip Home Assistant's own ban, which then blocks every request."""
+    assert await async_setup_component(
+        hass, "http", {"http": {"ip_ban_enabled": True, "login_attempts_threshold": 2}}
+    )
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_NATIVE_AUTH: True})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    client = await hass_client_no_auth()
+    request = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
+    bad = {"Authorization": "Bearer not-a-real-token"}
+
+    # The ban is kept in memory for the middleware and appended to ip_bans.yaml;
+    # the file write is the only part that must not reach the test config dir.
+    with (
+        patch("homeassistant.components.http.ban.gethostbyaddr", side_effect=herror),
+        patch("homeassistant.components.http.ban.IpBanManager._add_ban"),
+    ):
+        assert (await client.post("/api/mcp", json=request, headers=bad)).status == 401
+        assert (await client.post("/api/mcp", json=request, headers=bad)).status == 401
+        assert ip_address("127.0.0.1") in hass.http.app[KEY_BAN_MANAGER].ip_bans_lookup
+
+        # Banned means banned for everything from that address, probes included.
+        assert (await client.post("/api/mcp", json=request)).status == 403
+        assert (await client.get("/api/mcp")).status == 403
 
 
 async def test_dedicated_path_is_served(
@@ -401,7 +622,7 @@ _CREATE_CALLS = {
 
 
 @pytest.mark.parametrize("scope", list(_CREATE_CALLS))
-async def test_create_tools_categorize_what_the_real_load_registered(
+async def test_create_tools_categorize_and_set_icon_on_what_the_real_load_registered(
     loaded_entry: MockConfigEntry,
     hass: HomeAssistant,
     hass_client: ClientSessionGenerator,
@@ -410,7 +631,7 @@ async def test_create_tools_categorize_what_the_real_load_registered(
 ) -> None:
     """Each create tool's item is in the entity registry by the time it is categorized.
 
-    Categories live on the entity registry entry, which only exists once the
+    Categories and the icon override live on the entity registry entry, which only exists once the
     reload (or, for a helper, the storage collection) has loaded the new item,
     and each domain registers it under its own platform and unique ID. This
     drives the real loading so a release that stops registering within the call,
@@ -435,17 +656,21 @@ async def test_create_tools_categorize_what_the_real_load_registered(
         json={
             "jsonrpc": "2.0",
             "method": "tools/call",
-            "params": {"name": tool, "arguments": {**arguments, "category": "Mine"}},
+            "params": {
+                "name": tool,
+                "arguments": {**arguments, "category": "Mine", "icon": "mdi:star"},
+            },
             "id": 3,
         },
     )
 
     text = (await resp.json())["result"]["content"][0]["text"]
     assert "with category 'Mine'" in text, text
+    assert "with icon mdi:star" in text, text
     (category,) = cr.async_get(hass).async_list_categories(scope=scope)
     categorized = [
         entry.entity_id
         for entry in er.async_get(hass).entities.values()
-        if entry.categories == {scope: category.category_id}
+        if entry.categories == {scope: category.category_id} and entry.icon == "mdi:star"
     ]
     assert len(categorized) == 1

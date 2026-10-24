@@ -5,8 +5,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
 from custom_components.mcp_server_http_transport.tools.dashboards import _view_overview
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
 
 
 class TestToolsDashboards:
@@ -44,7 +48,7 @@ class TestToolsDashboards:
         ]
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.list_dashboards",
                 new_callable=AsyncMock,
@@ -72,7 +76,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.list_dashboards",
                 new_callable=AsyncMock,
@@ -104,7 +108,7 @@ class TestToolsDashboards:
         mock_config = {"views": [{"title": "Home", "cards": []}]}
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,
@@ -135,7 +139,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,
@@ -168,7 +172,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.save_dashboard_config",
                 new_callable=AsyncMock,
@@ -200,7 +204,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.save_dashboard_config",
                 new_callable=AsyncMock,
@@ -230,7 +234,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.delete_dashboard_config",
                 new_callable=AsyncMock,
@@ -259,7 +263,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.delete_dashboard_config",
                 new_callable=AsyncMock,
@@ -295,7 +299,7 @@ class TestToolsDashboards:
         created_item = {"id": "abc", "url_path": "my-dash", "title": "My Dashboard"}
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.create_dashboard",
                 new_callable=AsyncMock,
@@ -328,7 +332,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.create_dashboard",
                 new_callable=AsyncMock,
@@ -363,7 +367,7 @@ class TestToolsDashboards:
         updated_item = {"url_path": "my-dash", "title": "Updated Dashboard"}
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.update_dashboard",
                 new_callable=AsyncMock,
@@ -396,7 +400,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.update_dashboard",
                 new_callable=AsyncMock,
@@ -426,7 +430,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.delete_dashboard",
                 new_callable=AsyncMock,
@@ -455,7 +459,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.delete_dashboard",
                 new_callable=AsyncMock,
@@ -497,7 +501,7 @@ class TestToolsDashboards:
         }
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,
@@ -528,7 +532,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,
@@ -571,7 +575,7 @@ class TestToolsDashboards:
         }
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,
@@ -612,7 +616,7 @@ class TestToolsDashboards:
         }
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,
@@ -651,7 +655,7 @@ class TestToolsDashboards:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,
@@ -705,7 +709,7 @@ class TestToolsDashboards:
         mock_save = AsyncMock()
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,
@@ -753,7 +757,7 @@ class TestToolsDashboards:
         mock_save = AsyncMock()
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.dashboard_manager.get_dashboard_config",
                 new_callable=AsyncMock,

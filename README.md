@@ -56,11 +56,43 @@ You can use both methods at the same time. When both are active, the server trie
 
 You can change this setting later via Settings > Devices & Services > MCP Server > Configure.
 
+### Template rendering
+
+`render_template` is off by default. A template can read every state, attribute, device and area on the instance in one call, and can call functions such as `states`, `state_attr`, `device_attr` and `integration_entities`, which is why Home Assistant limits its own template developer tool to administrators. Turn on **Enable template rendering** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that access.
+
 ### Server name
 
 By default, every instance of this integration reports the name `home-assistant-mcp-server` to MCP clients (`serverInfo.name`). That only matters when one client connects to more than one Home Assistant instance: some clients derive the namespace they show for a server's tools from that name, so two servers reporting the same name become one and only one instance stays reachable. VS Code, for example, keeps the first 13 characters of the name before using it.
 
 Set **MCP server name** (Settings > Devices & Services > MCP Server > Configure) to something distinct per instance when a client connects to several. Keep the names distinct within their first 13 characters if your client shortens them. The default is the name every client saw before this option existed, so a single-instance setup can leave it alone.
+
+### Authorization
+
+By default only Home Assistant users with administrator rights can use the MCP endpoint, whichever way they authenticate. A valid token for any other user is refused with `403 insufficient_scope`. This mirrors Home Assistant itself, which restricts most of what the tools do to administrators: changing automations, scripts and scenes, calling admin-only services such as restart, rendering templates, and reading the error log. A token whose user has been deleted or deactivated is always refused.
+
+To let non-admin users in, turn off **Require administrator account** (Settings > Devices & Services > MCP Server > Configure). Do this only if you understand that any user who can get a token then has the same access through the tools as an administrator.
+
+### Audit log
+
+Every tool call is logged with the calling user's ID, how they authenticated (`oidc` or `native`), the tool, the outcome (`ok`, `error`, or `invalid` for a call rejected before it ran) and its arguments. Values under keys that look like secrets (`password`, `token`, `api_key`, `secret` and similar) are masked, and the arguments are shortened to about 500 characters. Calls to tools that can change something are logged at `info`, and read-only tools at `debug`. Home Assistant's default log level is `warning`, so raise this logger to see them:
+
+```yaml
+logger:
+  logs:
+    custom_components.mcp_server_http_transport.http: info
+```
+
+Tool calls that can change something also fire a `mcp_server_http_transport_tool_called` event, with `tool`, `user_id`, `auth_method`, `outcome` and the masked `arguments` as its data. The event's context carries the calling user's ID as well. Read-only tools fire no event, so they do not fill the recorder database. To act on the event, for example to be notified whenever a tool changes something:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: mcp_server_http_transport_tool_called
+actions:
+  - action: notify.notify
+    data:
+      message: "MCP: {{ trigger.event.data.tool }} ({{ trigger.event.data.outcome }})"
+```
 
 ## Usage with Claude in Browser (OAuth)
 
@@ -115,6 +147,16 @@ curl -o /dev/null -w '%{http_code}\n' https://your-home-assistant/api/mcp/assist
 
 Deleting the built-in integration's config entry does not release the path on its own: Home Assistant binds HTTP routes at startup and cannot unbind them, so restart afterwards.
 
+### Repeated failed logins and IP bans
+
+A request to the MCP endpoint that presents a bearer token Home Assistant rejects counts as a failed login attempt, the same as a wrong password on the login page. When the [`http` integration](https://www.home-assistant.io/integrations/http/#ip_ban_enabled) has `ip_ban_enabled` on, an address that reaches `login_attempts_threshold` failures is banned, and each failure also raises a persistent notification. A request with no `Authorization` header does not count, because MCP clients probe the endpoint without a token to find out how to authenticate, and neither does a valid token that is refused for other reasons, such as a non-administrator account. An authorized request clears the address's count again, so a client that presents an expired token once before refreshing is never banned for that. Expect one warning and one "Login attempt failed" notification per connected OAuth client each time its access token expires, which is hourly with hass-oidc-server; that matches what Home Assistant does for an expired token on its own API.
+
+### Tokens are validated without an audience check
+
+If the installed OIDC provider (hass-oidc-server) is older than 1.5.0, it cannot bind an access token to the resource it was issued for. This integration then still accepts its tokens, but without checking the audience, so a token issued for another resource on the same Home Assistant is accepted too. It logs a warning once and raises a repair named **OIDC provider does not check the token audience**.
+
+Update hass-oidc-server to 1.5.0 or newer and restart Home Assistant; the repair is gone after the restart unless the check is still unavailable.
+
 ## MCP Capabilities
 
 ### Tools
@@ -144,7 +186,7 @@ Deleting the built-in integration's config entry does not release the path on it
 | `validate_statistics` | Report statistics issues the recorder detected — the Developer Tools "Fix issues" list |
 | `adjust_statistics` | Correct a statistic's sum from a point in time onward (spike/bad reset); sum statistics only |
 | `clear_statistics` | Permanently delete a statistic's history so it can start clean (irreversible; requires `confirm=true`) |
-| `render_template` | Evaluate a Jinja2 template |
+| `render_template` | Evaluate a Jinja2 template (requires "Enable template rendering") |
 
 **Automations, Scenes & Scripts**
 
@@ -152,18 +194,18 @@ Deleting the built-in integration's config entry does not release the path on it
 |------|-------------|
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
-| `create_automation` | Create a new automation, optionally in a category |
-| `update_automation` | Update an existing automation |
+| `create_automation` | Create a new automation, optionally in a category and with an icon |
+| `update_automation` | Update an existing automation, optionally changing its icon |
 | `delete_automation` | Delete an automation |
 | `list_scenes` | List all scenes with full configuration |
 | `get_scene_config` | Get full configuration of a single scene |
-| `create_scene` | Create a new scene, optionally in a category |
-| `update_scene` | Update an existing scene |
+| `create_scene` | Create a new scene, optionally in a category and with an icon |
+| `update_scene` | Update an existing scene, optionally changing its icon |
 | `delete_scene` | Delete a scene |
 | `list_scripts` | List all scripts with full configuration |
 | `get_script_config` | Get full configuration of a single script |
-| `create_script` | Create a new script, optionally in a category |
-| `update_script` | Update an existing script |
+| `create_script` | Create a new script, optionally in a category and with an icon |
+| `update_script` | Update an existing script, optionally changing its icon |
 | `delete_script` | Delete a script |
 | `list_traces` | List recent execution traces for an automation/script (or a whole domain), newest first |
 | `get_trace` | Get the full step-by-step execution trace of one run — which trigger fired, which conditions passed/failed, and the variables at each step (`summary=true` for an outline of large traces) |
@@ -174,8 +216,8 @@ Deleting the built-in integration's config entry does not release the path on it
 |------|-------------|
 | `list_helpers` | List all helper entities, optionally filtered by domain |
 | `get_helper_config` | Get the raw stored configuration of a UI-managed helper (experimental) |
-| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule), optionally in a category (experimental) |
-| `update_helper` | Update an existing UI-managed helper by entity ID (experimental) |
+| `create_helper` | Create a new helper (input_boolean, input_number, input_text, input_select, input_datetime, input_button, counter, timer, schedule), optionally in a category and with an icon (experimental) |
+| `update_helper` | Update an existing UI-managed helper by entity ID, optionally changing its icon (experimental) |
 | `delete_helper` | Delete a UI-managed helper by entity ID (experimental) |
 
 **Categories**
@@ -184,6 +226,12 @@ Deleting the built-in integration's config entry does not release the path on it
 |------|-------------|
 | `list_categories` | List the categories for automations, scripts, scenes or helpers, with the entities in each |
 | `set_category` | Put an automation, script, scene or helper in a category (created by name if new), or take it out of one |
+
+**Icons**
+
+| Tool | Description |
+|------|-------------|
+| `set_icon` | Set or remove the icon override of any registered entity, such as an automation, without changing its config |
 
 **Config Files**
 
@@ -240,7 +288,7 @@ been copied and source identity/metadata checked for changes during copying.
 | `get_domain_stats` | Aggregate stats for a single domain (count, state breakdown, examples) |
 | `check_config` | Validate Home Assistant configuration without restarting |
 | `restart_ha` | Restart Home Assistant (requires explicit confirmation) |
-| `get_error_log` | Fetch the Home Assistant error log (last N lines) |
+| `get_error_log` | Fetch the Home Assistant error log (last N lines); tokens, API keys, and URL credentials are redacted |
 | `list_areas` | List all areas |
 | `list_devices` | List devices, optionally filtered by area |
 | `list_services` | List available services, optionally filtered by domain |

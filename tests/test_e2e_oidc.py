@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.mcp_server_http_transport.const import (
@@ -91,12 +91,17 @@ def _sign(
     private_key: rsa.RSAPrivateKey,
     *,
     aud,
+    sub: str,
     iss: str = TOKEN_ISSUER,
     exp_offset: int = 3600,
 ) -> str:
-    """Sign an access token the provider would issue, with controllable claims."""
+    """Sign an access token the provider would issue, with controllable claims.
+
+    The provider signs the id of the Home Assistant user who authorized as the
+    subject, and the server resolves that user before serving the request.
+    """
     now = int(time.time())
-    payload = {"sub": "user-1", "iat": now, "exp": now + exp_offset, "iss": iss}
+    payload = {"sub": sub, "iat": now, "exp": now + exp_offset, "iss": iss}
     if aud is not None:
         payload["aud"] = aud
     pem = private_key.private_bytes(
@@ -116,11 +121,13 @@ async def _post_initialize(client: ClientSessionGenerator, token: str, path: str
 
 
 async def test_audience_bound_token_is_accepted(
-    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+    oidc_ready: rsa.RSAPrivateKey,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_admin_user: MockUser,
 ) -> None:
     """A token whose aud is this resource passes the real OIDC validation path."""
     client = await hass_client_no_auth()
-    token = _sign(oidc_ready, aud=RESOURCE)
+    token = _sign(oidc_ready, aud=RESOURCE, sub=hass_admin_user.id)
 
     resp = await _post_initialize(client, token)
 
@@ -129,11 +136,13 @@ async def test_audience_bound_token_is_accepted(
 
 
 async def test_token_bound_to_other_resource_is_rejected(
-    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+    oidc_ready: rsa.RSAPrivateKey,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_admin_user: MockUser,
 ) -> None:
     """A valid token bound to a different resource is rejected (the contract)."""
     client = await hass_client_no_auth()
-    token = _sign(oidc_ready, aud="https://evil.example.com/api/mcp")
+    token = _sign(oidc_ready, aud="https://evil.example.com/api/mcp", sub=hass_admin_user.id)
 
     resp = await _post_initialize(client, token)
 
@@ -142,11 +151,13 @@ async def test_token_bound_to_other_resource_is_rejected(
 
 
 async def test_token_without_audience_is_rejected(
-    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+    oidc_ready: rsa.RSAPrivateKey,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_admin_user: MockUser,
 ) -> None:
     """A token with no aud claim is rejected."""
     client = await hass_client_no_auth()
-    token = _sign(oidc_ready, aud=None)
+    token = _sign(oidc_ready, aud=None, sub=hass_admin_user.id)
 
     resp = await _post_initialize(client, token)
 
@@ -154,11 +165,13 @@ async def test_token_without_audience_is_rejected(
 
 
 async def test_expired_token_is_rejected(
-    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+    oidc_ready: rsa.RSAPrivateKey,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_admin_user: MockUser,
 ) -> None:
     """An expired token is rejected even though its audience is correct."""
     client = await hass_client_no_auth()
-    token = _sign(oidc_ready, aud=RESOURCE, exp_offset=-3600)
+    token = _sign(oidc_ready, aud=RESOURCE, exp_offset=-3600, sub=hass_admin_user.id)
 
     resp = await _post_initialize(client, token)
 
@@ -187,11 +200,13 @@ async def test_unauthenticated_get_advertises_resource_metadata(
 
 
 async def test_dedicated_path_accepts_a_token_bound_to_it(
-    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+    oidc_ready: rsa.RSAPrivateKey,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_admin_user: MockUser,
 ) -> None:
     """The path this integration serves alone is a resource in its own right."""
     client = await hass_client_no_auth()
-    token = _sign(oidc_ready, aud=RESOURCE_HTTP)
+    token = _sign(oidc_ready, aud=RESOURCE_HTTP, sub=hass_admin_user.id)
 
     resp = await _post_initialize(client, token, MCP_HTTP_PATH)
 
@@ -200,7 +215,9 @@ async def test_dedicated_path_accepts_a_token_bound_to_it(
 
 
 async def test_dedicated_path_rejects_a_token_bound_to_the_other_endpoint(
-    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+    oidc_ready: rsa.RSAPrivateKey,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_admin_user: MockUser,
 ) -> None:
     """The two endpoints are separate resources, so their tokens do not cross.
 
@@ -208,7 +225,7 @@ async def test_dedicated_path_rejects_a_token_bound_to_the_other_endpoint(
     path's metadata by the 401, and asks for a token bound to it.
     """
     client = await hass_client_no_auth()
-    token = _sign(oidc_ready, aud=RESOURCE)
+    token = _sign(oidc_ready, aud=RESOURCE, sub=hass_admin_user.id)
 
     resp = await _post_initialize(client, token, MCP_HTTP_PATH)
 
@@ -242,3 +259,30 @@ async def test_dedicated_path_metadata_names_itself_as_the_resource(
 
     assert resp.status == 200
     assert (await resp.json())["resource"] == RESOURCE_HTTP
+
+
+async def test_a_non_admin_users_token_is_refused(
+    oidc_ready: rsa.RSAPrivateKey,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_read_only_user: MockUser,
+) -> None:
+    """A valid token for a user without administrator rights is refused with 403."""
+    client = await hass_client_no_auth()
+    token = _sign(oidc_ready, aud=RESOURCE, sub=hass_read_only_user.id)
+
+    resp = await _post_initialize(client, token)
+
+    assert resp.status == 403
+    assert (await resp.json())["error"] == "insufficient_scope"
+
+
+async def test_a_token_for_an_unknown_user_is_refused(
+    oidc_ready: rsa.RSAPrivateKey, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """A subject that names no Home Assistant user grants nothing."""
+    client = await hass_client_no_auth()
+    token = _sign(oidc_ready, aud=RESOURCE, sub="no-such-user")
+
+    resp = await _post_initialize(client, token)
+
+    assert resp.status == 403

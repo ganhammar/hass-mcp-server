@@ -8,12 +8,16 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from homeassistant.components.recorder.history import get_significant_states
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
 from custom_components.mcp_server_http_transport.prompts import (
     PROMPTS,
     InvalidPromptArguments,
     get_prompt,
 )
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
 
 
 class TestPrompts:
@@ -40,7 +44,7 @@ class TestPrompts:
             return_value={"jsonrpc": "2.0", "method": "prompts/list", "id": 28}
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -86,7 +90,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -114,7 +118,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -153,7 +157,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.recorder.get_instance",
                 return_value=mock_recorder,
@@ -193,7 +197,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.recorder.get_instance",
                 return_value=mock_recorder,
@@ -226,7 +230,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.recorder.get_instance",
                 return_value=mock_recorder,
@@ -253,7 +257,7 @@ class TestPrompts:
         )
         request.url.origin.return_value = "https://homeassistant.local"
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -279,7 +283,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
                 new_callable=AsyncMock,
@@ -312,7 +316,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
                 new_callable=AsyncMock,
@@ -353,7 +357,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -401,7 +405,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.recorder.get_instance",
                 return_value=mock_recorder,
@@ -436,7 +440,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -476,7 +480,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.components.recorder.get_instance",
                 return_value=mock_recorder,
@@ -507,7 +511,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -536,7 +540,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -571,7 +575,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -613,7 +617,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
                 new_callable=AsyncMock,
@@ -658,7 +662,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
                 new_callable=AsyncMock,
@@ -697,7 +701,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -729,7 +733,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -769,7 +773,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -804,7 +808,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -851,7 +855,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.prompts.workflows.ar.async_get",
                 return_value=mock_area_registry,
@@ -896,7 +900,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -957,7 +961,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -998,7 +1002,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entry",
                 new_callable=AsyncMock,
@@ -1033,7 +1037,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -1061,7 +1065,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -1095,7 +1099,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -1131,7 +1135,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -1185,7 +1189,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.prompts.workflows.ar.async_get",
                 return_value=mock_area_registry,
@@ -1220,7 +1224,7 @@ class TestPrompts:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -1245,7 +1249,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -1289,7 +1293,7 @@ class TestPrompts:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.read_list_entries",
                 new_callable=AsyncMock,
@@ -1345,7 +1349,7 @@ class TestPromptInputErrors:
         )
         request.url.origin.return_value = "https://homeassistant.local"
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         return response, json.loads(response.body)

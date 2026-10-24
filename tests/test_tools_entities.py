@@ -7,8 +7,12 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from homeassistant.core import SupportsResponse
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
 from custom_components.mcp_server_http_transport.tools import entities as entities_mod
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
 
 
 class TestGetAliasesCompat:
@@ -90,7 +94,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -127,7 +131,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -158,7 +162,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -202,7 +206,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -235,7 +239,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -266,7 +270,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -309,7 +313,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -342,7 +346,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -368,7 +372,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -404,7 +408,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -449,7 +453,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -490,7 +494,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.ar.async_get",
                 return_value=mock_registry,
@@ -539,7 +543,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
                 return_value=mock_registry,
@@ -590,7 +594,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
                 return_value=mock_registry,
@@ -653,7 +657,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
                 return_value=mock_dr,
@@ -701,7 +705,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
                 return_value=mock_dr,
@@ -746,7 +750,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
                 return_value=mock_dr,
@@ -803,7 +807,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
                 return_value=mock_dr,
@@ -846,7 +850,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -875,7 +879,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -917,7 +921,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities."
                 "async_get_all_descriptions",
@@ -954,7 +958,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities."
                 "async_get_all_descriptions",
@@ -982,7 +986,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities."
                 "async_get_all_descriptions",
@@ -1012,7 +1016,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities."
                 "async_get_all_descriptions",
@@ -1061,7 +1065,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1092,7 +1096,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -1141,7 +1145,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1202,7 +1206,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1256,7 +1260,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1308,7 +1312,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1361,7 +1365,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1410,7 +1414,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.lr.async_get",
                 return_value=mock_registry,
@@ -1443,7 +1447,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.lr.async_get",
                 return_value=mock_registry,
@@ -1502,7 +1506,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1557,7 +1561,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1614,7 +1618,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1685,7 +1689,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1718,7 +1722,7 @@ class TestToolsEntities:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -1763,7 +1767,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1809,7 +1813,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,
@@ -1856,7 +1860,7 @@ class TestToolsEntities:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
                 return_value=mock_er,

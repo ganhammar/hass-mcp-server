@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
 
 
 class TestToolsConfig:
@@ -44,7 +48,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[],
@@ -93,7 +97,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 side_effect=Exception("Permission denied"),
@@ -133,7 +137,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[{"id": "existing-id", "alias": "Old"}],
@@ -175,7 +179,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[],
@@ -212,7 +216,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[{"id": "to-delete", "alias": "Delete Me"}],
@@ -251,7 +255,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[],
@@ -290,7 +294,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[],
@@ -337,7 +341,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[{"id": "scene-1", "name": "Old Scene"}],
@@ -377,7 +381,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[{"id": "scene-1", "name": "Delete Me"}],
@@ -416,7 +420,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 side_effect=Exception("Permission denied"),
@@ -455,7 +459,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[],
@@ -491,7 +495,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_list",
                 return_value=[],
@@ -531,7 +535,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_dict",
                 return_value={},
@@ -574,7 +578,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_dict",
                 return_value={"existing_script": {"alias": "Existing"}},
@@ -614,7 +618,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_dict",
                 return_value={"morning_routine": {"alias": "Old"}},
@@ -656,7 +660,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_dict",
                 return_value={},
@@ -693,7 +697,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_dict",
                 return_value={"morning_routine": {"alias": "Delete Me"}},
@@ -732,7 +736,7 @@ class TestToolsConfig:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager._load_yaml_dict",
                 return_value={},

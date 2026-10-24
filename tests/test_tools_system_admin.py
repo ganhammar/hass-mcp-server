@@ -6,10 +6,145 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
 from custom_components.mcp_server_http_transport.tools.system_admin import (
     _format_system_log_entry,
+    redact_log_text,
 )
+
+_JWT = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJpc3MiOiJhYmNkZWYxMjM0NTYifQ."
+    "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+)
+
+
+class TestRedactLogText:
+    """redact_log_text masks credentials and leaves everything else alone."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("Bearer abc123def456ghi", "Bearer <redacted>"),
+            ("bearer abc123def456ghi", "bearer <redacted>"),
+            ("BEARER Abc.Def-123_xyz==", "BEARER <redacted>"),
+            ("sent header bearer abcdefghijklmnopqrstuv end", "sent header bearer <redacted> end"),
+        ],
+    )
+    def test_bearer_token(self, text, expected):
+        assert redact_log_text(text) == expected
+
+    def test_bearer_prose_is_kept(self):
+        text = "the bearer of bad news"
+        assert redact_log_text(text) == text
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "token",
+            "access_token",
+            "api_key",
+            "apikey",
+            "key",
+            "password",
+            "secret",
+            "auth",
+            "signature",
+            "sig",
+            "TOKEN",
+            "Api_Key",
+            "client_secret",
+        ],
+    )
+    def test_query_parameter_value_is_redacted(self, name):
+        out = redact_log_text(f"GET https://example.com/cb?x=1&{name}=s3cr3tvalue&y=2 failed")
+        assert out == f"GET https://example.com/cb?x=1&{name}=<redacted>&y=2 failed"
+
+    def test_bare_name_value_pair(self):
+        assert redact_log_text("login with password=hunter2 failed") == (
+            "login with password=<redacted> failed"
+        )
+
+    def test_query_parameter_in_parentheses(self):
+        assert redact_log_text("(https://a/b?api_key=XYZ)") == "(https://a/b?api_key=<redacted>)"
+
+    def test_parameter_names_only_match_whole_words(self):
+        text = "monkey=1 turkey=2 passcode_hint=3 keyboard=4"
+        assert redact_log_text(text) == text
+
+    def test_quoted_mapping_fields(self):
+        text = "data {'password': 'hunter2', \"access_token\": \"abc\", 'name': 'x'}"
+        assert redact_log_text(text) == (
+            "data {'password': '<redacted>', \"access_token\": \"<redacted>\", 'name': 'x'}"
+        )
+
+    def test_basic_auth_in_url(self):
+        assert redact_log_text("Fetching https://admin:p%40ss@nas.local:8443/api") == (
+            "Fetching https://<redacted>@nas.local:8443/api"
+        )
+
+    def test_basic_auth_in_url_with_at_in_password(self):
+        assert redact_log_text("mqtt://user:p@ss@broker/topic") == "mqtt://<redacted>@broker/topic"
+
+    def test_url_without_credentials_is_kept(self):
+        text = "Fetching http://localhost:8123/api/states and ssh://git@host/repo.git"
+        assert redact_log_text(text) == text
+
+    def test_jwt_is_redacted(self):
+        assert redact_log_text(f"token {_JWT} rejected") == "token <redacted> rejected"
+
+    def test_jwt_without_authorization_context(self):
+        assert redact_log_text(f"payload={_JWT};") == "payload=<redacted>;"
+
+    def test_non_jwt_dotted_text_is_kept(self):
+        text = "homeassistant.components.mqtt.client and eyJ.only.two. not a token"
+        assert redact_log_text(text) == text
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("Authorization: Bearer abc123def456ghi", "Authorization: <redacted>"),
+            ("authorization: Basic dXNlcjpwYXNz", "authorization: <redacted>"),
+            ("AUTHORIZATION=Token abcdef", "AUTHORIZATION=<redacted>"),
+            (
+                "headers {'Authorization': 'Bearer abc', 'Accept': '*/*'}",
+                "headers {'Authorization': '<redacted>', 'Accept': '*/*'}",
+            ),
+            (
+                "Proxy-Authorization: Basic Zm9v\nnext line",
+                "Proxy-Authorization: <redacted>\nnext line",
+            ),
+        ],
+    )
+    def test_authorization_header(self, text, expected):
+        assert redact_log_text(text) == expected
+
+    def test_text_with_nothing_to_redact_is_unchanged(self):
+        text = (
+            "2024-01-01 12:00:00.123 ERROR (MainThread) [homeassistant.components.hue] "
+            "Unable to connect to 192.168.1.20:443: timed out\n"
+            "The key to success is a password reset policy; return code is fine.\n"
+            "Traceback (most recent call last):\n"
+            '  File "/usr/src/homeassistant/core.py", line 42, in run\n'
+            "ValueError: invalid literal for int() with base 10: 'x'\n"
+        )
+        assert redact_log_text(text) == text
+        assert redact_log_text("") == ""
+
+    def test_status_codes_are_not_redacted(self):
+        text = "Request failed with code=404 and status_code=500"
+        assert redact_log_text(text) == text
+
+    def test_redaction_is_idempotent(self):
+        text = f"Authorization: Bearer {_JWT} https://u:p@h/x?token=abc&sig=1"
+        once = redact_log_text(text)
+        assert redact_log_text(once) == once
+        assert "abc" not in once and _JWT not in once and "u:p" not in once
+
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
 
 
 class TestToolsSystemAdmin:
@@ -46,7 +181,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -54,6 +189,88 @@ class TestToolsSystemAdmin:
         text = body["result"]["content"][0]["text"]
         assert "ERROR" in text
         assert "WARNING" in text
+
+    async def test_get_error_log_file_path_is_redacted(self, view, mock_hass, tmp_path):
+        """The on-disk tail runs through redact_log_text."""
+        log = tmp_path / "home-assistant.log"
+        log.write_text(
+            "ERROR request to https://api.example.com/v1?api_key=SUPERSECRET failed\n"
+            f"WARNING rejected Bearer {_JWT}\n"
+            "INFO nothing sensitive here\n"
+        )
+        mock_hass.config.path.return_value = str(log)
+
+        async def run_fn(fn, *args):
+            return fn(*args)
+
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=run_fn)
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_error_log", "arguments": {}},
+                "id": 290,
+            }
+        )
+
+        with patch.object(view, "_authenticate", return_value=CALLER):
+            response = await view.post(request)
+
+        text = json.loads(response.body)["result"]["content"][0]["text"]
+        assert "api_key=<redacted>" in text
+        assert "SUPERSECRET" not in text
+        assert _JWT not in text
+        assert "INFO nothing sensitive here" in text
+
+    async def test_get_error_log_buffer_fallback_is_redacted(self, view, mock_hass):
+        """The in-memory system_log fallback runs through redact_log_text."""
+        mock_hass.config.path.return_value = "/nonexistent/home-assistant.log"
+        handler = Mock()
+        handler.records.to_list.return_value = [
+            {
+                "name": "homeassistant.components.foo",
+                "message": ["Call to https://u:pw@host/x?token=SUPERSECRET failed"],
+                "level": "ERROR",
+                "source": ["components/foo/__init__.py", 42],
+                "timestamp": 1_700_000_000.0,
+                "exception": f"RuntimeError: Authorization: Bearer {_JWT}",
+                "count": 1,
+            }
+        ]
+        mock_hass.data = {"mcp_server_http_transport": True, "system_log": handler}
+        mock_hass.async_add_executor_job = AsyncMock(side_effect=FileNotFoundError())
+
+        request = Mock()
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "get_error_log", "arguments": {}},
+                "id": 291,
+            }
+        )
+
+        with patch.object(view, "_authenticate", return_value=CALLER):
+            response = await view.post(request)
+
+        text = json.loads(response.body)["result"]["content"][0]["text"]
+        assert "in-memory system log buffer" in text
+        assert "token=<redacted>" in text
+        assert "https://<redacted>@host" in text
+        assert "SUPERSECRET" not in text and "pw@" not in text
+        assert _JWT not in text
+        assert "Authorization: <redacted>" in text
+
+    def test_get_error_log_description_mentions_redaction(self):
+        from custom_components.mcp_server_http_transport.tools import TOOLS
+
+        description = TOOLS["get_error_log"]["schema"]["description"]
+        assert "redacted" in description
+        assert "raw log" in description
 
     async def test_post_tools_call_get_error_log_with_lines(self, view, mock_hass):
         """Test POST with tools/call for get_error_log with lines parameter."""
@@ -71,7 +288,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -97,7 +314,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -123,7 +340,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -147,7 +364,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -171,7 +388,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -206,7 +423,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -253,7 +470,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -287,7 +504,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -312,7 +529,7 @@ class TestToolsSystemAdmin:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.helpers.check_config.async_check_ha_config_file",
                 new_callable=AsyncMock,
@@ -344,7 +561,7 @@ class TestToolsSystemAdmin:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.helpers.check_config.async_check_ha_config_file",
                 new_callable=AsyncMock,
@@ -386,7 +603,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -413,7 +630,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -445,7 +662,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -476,7 +693,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -519,7 +736,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -551,7 +768,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -579,7 +796,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -603,7 +820,7 @@ class TestToolsSystemAdmin:
             }
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -625,7 +842,7 @@ class TestToolsSystemAdmin:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "homeassistant.helpers.check_config.async_check_ha_config_file",
                 new_callable=AsyncMock,

@@ -56,6 +56,10 @@ You can use both methods at the same time. When both are active, the server trie
 
 You can change this setting later via Settings > Devices & Services > MCP Server > Configure.
 
+### Template rendering
+
+`render_template` is off by default. A template can read every state, attribute, device and area on the instance in one call, and can call functions such as `states`, `state_attr`, `device_attr` and `integration_entities`, which is why Home Assistant limits its own template developer tool to administrators. Turn on **Enable template rendering** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that access.
+
 ### Server name
 
 By default, every instance of this integration reports the name `home-assistant-mcp-server` to MCP clients (`serverInfo.name`). That only matters when one client connects to more than one Home Assistant instance: some clients derive the namespace they show for a server's tools from that name, so two servers reporting the same name become one and only one instance stays reachable. VS Code, for example, keeps the first 13 characters of the name before using it.
@@ -169,7 +173,7 @@ Deleting the built-in integration's config entry does not release the path on it
 | `validate_statistics` | Report statistics issues the recorder detected — the Developer Tools "Fix issues" list |
 | `adjust_statistics` | Correct a statistic's sum from a point in time onward (spike/bad reset); sum statistics only |
 | `clear_statistics` | Permanently delete a statistic's history so it can start clean (irreversible; requires `confirm=true`) |
-| `render_template` | Evaluate a Jinja2 template |
+| `render_template` | Evaluate a Jinja2 template (requires "Enable template rendering") |
 
 **Automations, Scenes & Scripts**
 
@@ -271,7 +275,7 @@ been copied and source identity/metadata checked for changes during copying.
 | `get_domain_stats` | Aggregate stats for a single domain (count, state breakdown, examples) |
 | `check_config` | Validate Home Assistant configuration without restarting |
 | `restart_ha` | Restart Home Assistant (requires explicit confirmation) |
-| `get_error_log` | Fetch the Home Assistant error log (last N lines) |
+| `get_error_log` | Fetch the Home Assistant error log (last N lines); tokens, API keys, and URL credentials are redacted |
 | `list_areas` | List all areas |
 | `list_devices` | List devices, optionally filtered by area |
 | `list_services` | List available services, optionally filtered by domain |

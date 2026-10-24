@@ -23,6 +23,7 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_NATIVE_AUTH,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
+    CONF_TEMPLATE_RENDERING,
     DEFAULT_APPDAEMON_APPS_ROOT,
     DEFAULT_SERVER_NAME,
     DOMAIN,
@@ -235,6 +236,36 @@ class TestMCPServerConfigFlow:
         schema_keys = [str(k) for k in result["data_schema"].schema]
         assert CONF_NATIVE_AUTH in schema_keys
 
+    async def test_user_flow_form_has_template_rendering_default_off(self):
+        """Test user flow form offers template rendering, off by default."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_TEMPLATE_RENDERING].default() is False
+
+    async def test_user_flow_persists_template_rendering(self):
+        """Test the template rendering choice is stored on the created entry."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=[])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(
+            user_input={CONF_NATIVE_AUTH: True, CONF_TEMPLATE_RENDERING: True}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_TEMPLATE_RENDERING] is True
+
     async def test_version_is_set(self):
         """Test config flow version is set."""
         flow = MCPServerConfigFlow()
@@ -371,6 +402,34 @@ class TestMCPServerOptionsFlow:
         schema_keys = {str(k): k for k in result["data_schema"].schema}
         assert schema_keys[CONF_CAMERA_IMAGE_ACCESS].default() is True
         assert schema_keys[CONF_IMAGE_FILE_ACCESS].default() is True
+
+    async def test_init_step_template_rendering_defaults_to_false(self):
+        """Test template rendering defaults to False in the options form."""
+        flow = self._create_flow(data={})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_TEMPLATE_RENDERING].default() is False
+
+    async def test_init_step_shows_current_template_rendering_value(self):
+        """Test init step reflects the stored template rendering value."""
+        flow = self._create_flow(data={CONF_TEMPLATE_RENDERING: True})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_TEMPLATE_RENDERING].default() is True
+
+    async def test_init_step_persists_template_rendering(self):
+        """Test init step merges template rendering into entry data."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_TEMPLATE_RENDERING: True}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_TEMPLATE_RENDERING] is True
 
     async def test_init_step_defaults_appdaemon_root(self):
         """Existing entries without the new option retain the legacy root."""

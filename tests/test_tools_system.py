@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 
-from custom_components.mcp_server_http_transport.const import EVENT_TOOL_CALLED
+from custom_components.mcp_server_http_transport.const import DOMAIN, EVENT_TOOL_CALLED
 from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
+from custom_components.mcp_server_http_transport.tools.system import render_template
 
 # The view resolves every request to an authorized caller before dispatch; these
 # tests start from one so they exercise the tool rather than the auth path.
@@ -28,6 +29,7 @@ class TestToolsSystem:
         hass = Mock()
         hass.states = Mock()
         hass.services = Mock()
+        hass.data = {DOMAIN: {"template_rendering": True}}
         return hass
 
     @pytest.fixture
@@ -136,6 +138,40 @@ class TestToolsSystem:
         assert response.status == 200
         body = json.loads(response.body)
         assert "Error rendering template" in body["result"]["content"][0]["text"]
+
+    @pytest.mark.parametrize("data", [{}, {DOMAIN: {}}, {DOMAIN: {"template_rendering": False}}])
+    async def test_render_template_disabled_by_default(self, data):
+        """Without the flag the tool explains how to enable it and builds no Template."""
+        hass = Mock()
+        hass.data = data
+
+        with patch("homeassistant.helpers.template.Template") as template_cls:
+            result = await render_template(hass, {"template": "{{ states('light.x') }}"})
+
+        template_cls.assert_not_called()
+        text = result["content"][0]["text"]
+        assert "disabled" in text
+        assert "Enable template rendering" in text
+
+    async def test_render_template_enabled_renders(self):
+        """With the flag set the template is rendered with the supplied variables."""
+        hass = Mock()
+        hass.data = {DOMAIN: {"template_rendering": True}}
+        mock_tpl = Mock()
+        mock_tpl.async_render.return_value = "42"
+
+        with patch("homeassistant.helpers.template.Template", return_value=mock_tpl) as cls:
+            result = await render_template(hass, {"template": "{{ x }}", "variables": {"x": 42}})
+
+        cls.assert_called_once_with("{{ x }}", hass)
+        mock_tpl.async_render.assert_called_once_with(variables={"x": 42}, parse_result=False)
+        assert result["content"][0]["text"] == "42"
+
+    async def test_render_template_description_mentions_opt_in(self):
+        """The tool description tells clients the option must be enabled."""
+        from custom_components.mcp_server_http_transport.tools import TOOLS
+
+        assert "Enable template rendering" in TOOLS["render_template"]["schema"]["description"]
 
     async def test_post_tools_call_get_history(self, view, mock_hass):
         """Test POST with tools/call for get_history."""

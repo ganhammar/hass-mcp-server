@@ -18,9 +18,14 @@ token validator returns ``None``, so requests fall through to the native-auth
 path under test.
 """
 
+from ipaddress import ip_address
+from socket import herror
+from unittest.mock import patch
+
 import pytest
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http.ban import KEY_BAN_MANAGER, KEY_FAILED_LOGIN_ATTEMPTS
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_COMPONENT_LOADED
 from homeassistant.core import HomeAssistant
@@ -219,6 +224,138 @@ async def test_unauthenticated_get_carries_the_challenge(
     assert resp.status == 401
     assert resp.headers.get("WWW-Authenticate", "").startswith("Bearer")
     assert (await resp.json())["error"] == "invalid_token"
+
+
+@pytest.fixture
+async def banning_entry(enable_custom_integrations: None, hass: HomeAssistant) -> MockConfigEntry:
+    """The integration set up behind an http component with IP banning switched on."""
+    assert await async_setup_component(
+        hass, "http", {"http": {"ip_ban_enabled": True, "login_attempts_threshold": 10}}
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_NATIVE_AUTH: True})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    return entry
+
+
+async def test_a_rejected_bearer_token_counts_as_a_failed_login(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """A bad token reaches Home Assistant's login attempt counter, a bare probe does not."""
+    client = await hass_client_no_auth()
+    attempts = hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS]
+    request = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
+
+    # The reverse DNS lookup process_wrong_login does would hit the network.
+    with patch("homeassistant.components.http.ban.gethostbyaddr", side_effect=herror):
+        resp = await client.post("/api/mcp", json=request)
+        assert resp.status == 401
+        assert (await client.get("/api/mcp")).status == 401
+        assert attempts == {}
+
+        resp = await client.post(
+            "/api/mcp", json=request, headers={"Authorization": "Bearer not-a-real-token"}
+        )
+        assert resp.status == 401
+        assert (await resp.json())["error"] == "invalid_token"
+        assert attempts[ip_address("127.0.0.1")] == 1
+
+        resp = await client.get("/api/mcp", headers={"Authorization": "Bearer not-a-real-token"})
+        assert resp.status == 401
+        assert attempts[ip_address("127.0.0.1")] == 2
+
+
+async def test_a_valid_token_is_not_counted_as_a_failed_login(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    client = await hass_client()
+
+    resp = await client.post("/api/mcp", json={"jsonrpc": "2.0", "method": "initialize", "id": 1})
+
+    assert resp.status == 200
+    assert hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS] == {}
+
+
+async def test_an_authorized_request_clears_earlier_failures(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """An expired token presented once an hour before refreshing never adds up to a ban."""
+    client = await hass_client()
+    attempts = hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS]
+    request = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
+
+    with patch("homeassistant.components.http.ban.gethostbyaddr", side_effect=herror):
+        resp = await client.post(
+            "/api/mcp", json=request, headers={"Authorization": "Bearer expired-token"}
+        )
+    assert resp.status == 401
+    assert attempts[ip_address("127.0.0.1")] == 1
+
+    resp = await client.post("/api/mcp", json=request)
+
+    assert resp.status == 200
+    assert attempts == {}
+
+
+async def test_a_non_admin_token_is_not_counted_as_a_failed_login(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_read_only_access_token: str,
+) -> None:
+    client = await hass_client_no_auth()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        headers={"Authorization": f"Bearer {hass_read_only_access_token}"},
+    )
+
+    assert resp.status == 403
+    assert hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS] == {}
+
+
+async def test_reaching_the_threshold_bans_the_address(
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """Enough rejected tokens trip Home Assistant's own ban, which then blocks every request."""
+    assert await async_setup_component(
+        hass, "http", {"http": {"ip_ban_enabled": True, "login_attempts_threshold": 2}}
+    )
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_NATIVE_AUTH: True})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    client = await hass_client_no_auth()
+    request = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
+    bad = {"Authorization": "Bearer not-a-real-token"}
+
+    # The ban is kept in memory for the middleware and appended to ip_bans.yaml;
+    # the file write is the only part that must not reach the test config dir.
+    with (
+        patch("homeassistant.components.http.ban.gethostbyaddr", side_effect=herror),
+        patch("homeassistant.components.http.ban.IpBanManager._add_ban"),
+    ):
+        assert (await client.post("/api/mcp", json=request, headers=bad)).status == 401
+        assert (await client.post("/api/mcp", json=request, headers=bad)).status == 401
+        assert ip_address("127.0.0.1") in hass.http.app[KEY_BAN_MANAGER].ip_bans_lookup
+
+        # Banned means banned for everything from that address, probes included.
+        assert (await client.post("/api/mcp", json=request)).status == 403
+        assert (await client.get("/api/mcp")).status == 403
 
 
 async def test_dedicated_path_is_served(

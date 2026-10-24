@@ -21,6 +21,7 @@ from aiohttp import web
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http.ban import process_success_login, process_wrong_login
 from homeassistant.components.recorder import Recorder
 from homeassistant.components.recorder.history import (
     get_significant_states,
@@ -458,3 +459,32 @@ class TestJsonEncoderDefaultContract:
         # not some other exception, for a value it does not know.
         with pytest.raises(TypeError):
             json_encoder_default(object())
+
+
+class TestProcessWrongLoginContract:
+    """``process_wrong_login`` is how a failed bearer token reaches Home Assistant's
+    login attempt counter and IP ban (#107).
+
+    The view validates tokens itself, so Home Assistant's own auth middleware never
+    sees a rejection there. The public alternative is the ``ip_bans.yaml`` file and
+    the ban manager's own methods, which carry no counter or threshold. Were this
+    to break, check the new signature and what it reads off the request before
+    adapting ``MCPEndpointView._record_failed_login``.
+    """
+
+    def test_is_a_coroutine_taking_only_the_request(self):
+        assert inspect.iscoroutinefunction(process_wrong_login)
+        assert _params(process_wrong_login) == ["request"]
+
+
+class TestProcessSuccessLoginContract:
+    """``process_success_login`` clears an address's failed login count (#107).
+
+    The view calls it after every authorized request, since Home Assistant only
+    calls it from the login flow and the websocket handler, never for a bearer
+    request. It is synchronous, unlike ``process_wrong_login``.
+    """
+
+    def test_is_a_plain_function_taking_only_the_request(self):
+        assert not inspect.iscoroutinefunction(process_success_login)
+        assert _params(process_success_login) == ["request"]

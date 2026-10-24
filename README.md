@@ -147,6 +147,10 @@ curl -o /dev/null -w '%{http_code}\n' https://your-home-assistant/api/mcp/assist
 
 Deleting the built-in integration's config entry does not release the path on its own: Home Assistant binds HTTP routes at startup and cannot unbind them, so restart afterwards.
 
+### Repeated failed logins and IP bans
+
+A request to the MCP endpoint that presents a bearer token Home Assistant rejects counts as a failed login attempt, the same as a wrong password on the login page. When the [`http` integration](https://www.home-assistant.io/integrations/http/#ip_ban_enabled) has `ip_ban_enabled` on, an address that reaches `login_attempts_threshold` failures is banned, and each failure also raises a persistent notification. A request with no `Authorization` header does not count, because MCP clients probe the endpoint without a token to find out how to authenticate, and neither does a valid token that is refused for other reasons, such as a non-administrator account. An authorized request clears the address's count again, so a client that presents an expired token once before refreshing is never banned for that. Expect one warning and one "Login attempt failed" notification per connected OAuth client each time its access token expires, which is hourly with hass-oidc-server; that matches what Home Assistant does for an expired token on its own API.
+
 ## MCP Capabilities
 
 ### Tools

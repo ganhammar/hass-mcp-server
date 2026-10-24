@@ -8,6 +8,7 @@ from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
+from ..const import DOMAIN
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
@@ -186,6 +187,19 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
                 {
                     "type": "text",
                     "text": f"Error: firing system event '{event_type}' is not allowed",
+                }
+            ]
+        }
+
+    # The integration's own events are its audit trail, so this tool does not fire
+    # them. This closes the direct route only: an automation with an event action
+    # can still fire anything, so the audit event is evidence, not proof.
+    if event_type.startswith(f"{DOMAIN}_"):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Error: firing this integration's event '{event_type}' is not allowed",
                 }
             ]
         }

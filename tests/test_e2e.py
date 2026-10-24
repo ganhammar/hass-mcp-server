@@ -28,12 +28,17 @@ from homeassistant.helpers import category_registry as cr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import ATTR_COMPONENT, async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    MockUser,
+    async_capture_events,
+)
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.mcp_server_http_transport.const import (
     CONF_NATIVE_AUTH,
     DOMAIN,
+    EVENT_TOOL_CALLED,
     ISSUE_ENDPOINT_CONFLICT,
     MCP_HTTP_PATH,
     MCP_PATH,
@@ -116,6 +121,85 @@ async def test_unauthenticated_request_is_rejected(
     assert resp.status == 401
     assert resp.headers.get("WWW-Authenticate", "").startswith("Bearer")
     assert (await resp.json())["error"] == "invalid_token"
+
+
+async def test_non_admin_token_is_refused(
+    loaded_entry: MockConfigEntry,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_read_only_access_token: str,
+) -> None:
+    """A real token for a non-administrator is valid but not enough."""
+    client = await hass_client_no_auth()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        headers={"Authorization": f"Bearer {hass_read_only_access_token}"},
+    )
+
+    assert resp.status == 403
+    assert (await resp.json())["error"] == "insufficient_scope"
+    assert resp.headers["WWW-Authenticate"].startswith('Bearer error="insufficient_scope"')
+
+
+async def test_a_write_tool_fires_the_audit_event_as_its_caller(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_admin_user: MockUser,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """The event carries the caller, and so does the context Home Assistant records."""
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "fire_event",
+                "arguments": {"event_type": "mcp_e2e", "event_data": {"api_key": "k"}},
+            },
+            "id": 1,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    (event,) = events
+    assert event.data == {
+        "tool": "fire_event",
+        "user_id": hass_admin_user.id,
+        "auth_method": "native",
+        "outcome": "ok",
+        "arguments": {"event_type": "mcp_e2e", "event_data": {"api_key": "***"}},
+    }
+    assert event.context.user_id == hass_admin_user.id
+
+
+async def test_a_read_only_tool_fires_no_audit_event(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """Reads would flood the recorder, so they are only logged."""
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "get_state", "arguments": {"entity_id": "sun.sun"}},
+            "id": 1,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    assert events == []
 
 
 async def test_unauthenticated_get_carries_the_challenge(

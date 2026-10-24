@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from custom_components.mcp_server_http_transport.http import MCPEndpointView
+from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
+
+# The view resolves every request to an authorized caller before dispatch; these
+# tests start from one so they exercise the tool rather than the auth path.
+CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
 
 
 def _make_state(entity_id: str, state: str = "on", attributes: dict | None = None) -> Mock:
@@ -582,7 +586,7 @@ class TestHelperToolsViaHTTP:
             },
         )
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200
@@ -609,7 +613,7 @@ class TestHelperToolsViaHTTP:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.helpers.er.async_get",
                 return_value=mock_registry,
@@ -636,7 +640,7 @@ class TestHelperToolsViaHTTP:
         )
 
         with (
-            patch.object(view, "_validate_token", return_value={"sub": "user123"}),
+            patch.object(view, "_authenticate", return_value=CALLER),
             patch(
                 "custom_components.mcp_server_http_transport.tools.helpers.er.async_get",
                 return_value=mock_registry,
@@ -653,7 +657,7 @@ class TestHelperToolsViaHTTP:
         """Helper tools are included in the tools/list response."""
         request = self._make_request("tools/list", {})
 
-        with patch.object(view, "_validate_token", return_value={"sub": "user123"}):
+        with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
         assert response.status == 200

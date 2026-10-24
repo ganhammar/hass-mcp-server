@@ -88,9 +88,7 @@ async def test_list_registry_paginates_by_default(registry_hass):
     }
     first = _data(await registry_tools.list_entity_registry(hass, {"domain": "sensor"}))
     second = _data(
-        await registry_tools.list_entity_registry(
-            hass, {"domain": "sensor", "offset": 100}
-        )
+        await registry_tools.list_entity_registry(hass, {"domain": "sensor", "offset": 100})
     )
     assert first["total"] == second["total"] == 105
     assert len(first["entities"]) == 100
@@ -197,17 +195,13 @@ async def test_update_registry_applies_using_ha_api(registry_hass):
 
 async def test_update_registry_name_only(registry_hass):
     hass, registry = registry_hass
-    registry.async_update_entity.return_value = _make_entry(
-        "light.living_room", name="New Name"
-    )
+    registry.async_update_entity.return_value = _make_entry("light.living_room", name="New Name")
     result = _data(
         await registry_tools.update_entity_registry(
             hass, {"entity_id": "light.living_room", "name": "New Name", "apply": True}
         )
     )
-    registry.async_update_entity.assert_called_once_with(
-        "light.living_room", name="New Name"
-    )
+    registry.async_update_entity.assert_called_once_with("light.living_room", name="New Name")
     assert result["after"]["entity_id"] == "light.living_room"
     assert result["after"]["name"] == "New Name"
 
@@ -241,9 +235,7 @@ async def test_update_registry_invalid_request_does_not_mutate(registry_hass, ar
         ("invalid", "invalid entity ID"),
     ],
 )
-async def test_update_registry_delegates_id_validation_to_ha(
-    registry_hass, new_id, message
-):
+async def test_update_registry_delegates_id_validation_to_ha(registry_hass, new_id, message):
     hass, registry = registry_hass
     registry.async_update_entity.side_effect = ValueError(message)
     result = await registry_tools.update_entity_registry(
@@ -254,9 +246,7 @@ async def test_update_registry_delegates_id_validation_to_ha(
             "apply": True,
         },
     )
-    registry.async_update_entity.assert_called_once_with(
-        "light.living_room", new_entity_id=new_id
-    )
+    registry.async_update_entity.assert_called_once_with("light.living_room", new_entity_id=new_id)
     assert message in result["content"][0]["text"]
     assert "isError" not in result
 

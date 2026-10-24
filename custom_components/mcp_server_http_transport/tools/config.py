@@ -150,7 +150,9 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     # Keep the existing fast path (and its mockable CRUD contract) unchanged.
     if not dry_run and reload_automations and not validate and expected_hash is None:
         try:
-            await update_list_entry(hass, "automations.yaml", automation_id, submitted, "automation")
+            await update_list_entry(
+                hass, "automations.yaml", automation_id, submitted, "automation",
+            )
             suffix = await async_icon_suffix(
                 hass, arguments, "automation", "automation", automation_id
             )

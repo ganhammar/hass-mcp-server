@@ -9,14 +9,18 @@ from homeassistant.auth.models import User
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.ban import process_success_login, process_wrong_login
 from homeassistant.core import Context, HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 
 from .completions import complete
 from .const import (
     DEFAULT_SERVER_NAME,
     DOMAIN,
     EVENT_TOOL_CALLED,
+    ISSUE_OIDC_AUDIENCE_UNSUPPORTED,
     MCP_HTTP_PATH,
     MCP_PATH,
+    OIDC_PROVIDER_MIN_AUDIENCE_VERSION,
+    OIDC_PROVIDER_RELEASES_URL,
     RESOURCE_METADATA_PREFIX,
     VERSION,
 )
@@ -383,6 +387,7 @@ class MCPEndpointView(HomeAssistantView):
         # (user id, reason) pairs already warned about, so a client that keeps
         # retrying with a refused account leaves one warning rather than one per call.
         self._reported_refusals: set[tuple[str, str]] = set()
+        self._audience_fallback_reported = False
         if paths is not None:
             self.url, self.extra_urls = paths[0], list(paths[1:])
 
@@ -393,6 +398,33 @@ class MCPEndpointView(HomeAssistantView):
         if not auth_header.startswith("Bearer "):
             return None
         return auth_header[7:]  # Remove "Bearer " prefix
+
+    def _report_audience_fallback(self) -> None:
+        """Flag that tokens are validated without an audience check.
+
+        The warning and the repair are raised on the first fallback only; later
+        ones leave a debug line.
+        """
+        if self._audience_fallback_reported:
+            _LOGGER.debug("OIDC provider does not support audience validation")
+            return
+        self._audience_fallback_reported = True
+        _LOGGER.warning(
+            "The installed OIDC provider does not support audience validation, so access "
+            "tokens are validated without checking the audience: a token issued for another "
+            "resource on this issuer is accepted. Upgrade hass-oidc-server to %s or newer",
+            OIDC_PROVIDER_MIN_AUDIENCE_VERSION,
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_OIDC_AUDIENCE_UNSUPPORTED,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_OIDC_AUDIENCE_UNSUPPORTED,
+            translation_placeholders={"minimum_version": OIDC_PROVIDER_MIN_AUDIENCE_VERSION},
+            learn_more_url=OIDC_PROVIDER_RELEASES_URL,
+        )
 
     async def _validate_token(self, request: web.Request) -> ValidatedToken | None:
         """Validate the bearer token via OIDC (if available) then native HA auth.
@@ -422,7 +454,9 @@ class MCPEndpointView(HomeAssistantView):
                 )
             except TypeError:
                 # OIDC provider predates resource-aware validation; fall back to
-                # the legacy signature so an un-upgraded provider still works.
+                # the legacy signature so an un-upgraded provider still works, and
+                # say that the audience goes unchecked.
+                self._report_audience_fallback()
                 result = validate_access_token(self.hass, token, expected_issuer)
             sub = result.get("sub") if isinstance(result, dict) else None
             if isinstance(sub, str) and sub:

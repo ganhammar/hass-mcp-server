@@ -21,6 +21,7 @@ from aiohttp import web
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http.ban import process_wrong_login
 from homeassistant.components.recorder import Recorder
 from homeassistant.components.recorder.history import (
     get_significant_states,
@@ -458,3 +459,19 @@ class TestJsonEncoderDefaultContract:
         # not some other exception, for a value it does not know.
         with pytest.raises(TypeError):
             json_encoder_default(object())
+
+
+class TestProcessWrongLoginContract:
+    """``process_wrong_login`` is how a failed bearer token reaches Home Assistant's
+    login attempt counter and IP ban (#107).
+
+    The view validates tokens itself, so Home Assistant's own auth middleware never
+    sees a rejection there. The public alternative is the ``ip_bans.yaml`` file and
+    the ban manager's own methods, which carry no counter or threshold. Were this
+    to break, check the new signature and what it reads off the request before
+    adapting ``MCPEndpointView._record_failed_login``.
+    """
+
+    def test_is_a_coroutine_taking_only_the_request(self):
+        assert inspect.iscoroutinefunction(process_wrong_login)
+        assert _params(process_wrong_login) == ["request"]

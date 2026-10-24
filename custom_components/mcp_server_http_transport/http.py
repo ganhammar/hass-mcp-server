@@ -7,6 +7,7 @@ from typing import Any
 from aiohttp import hdrs, web
 from homeassistant.auth.models import User
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http.ban import process_wrong_login
 from homeassistant.core import Context, HomeAssistant
 
 from .completions import complete
@@ -379,17 +380,23 @@ class MCPEndpointView(HomeAssistantView):
         if paths is not None:
             self.url, self.extra_urls = paths[0], list(paths[1:])
 
+    @staticmethod
+    def _bearer_token(request: web.Request) -> str | None:
+        """The bearer token the request presented, or None when it presented none."""
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return None
+        return auth_header[7:]  # Remove "Bearer " prefix
+
     async def _validate_token(self, request: web.Request) -> ValidatedToken | None:
         """Validate the bearer token via OIDC (if available) then native HA auth.
 
         An OIDC token is only accepted when it names a subject, since the subject
         is what resolves the caller to a Home Assistant user.
         """
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
+        token = self._bearer_token(request)
+        if token is None:
             return None
-
-        token = auth_header[7:]  # Remove "Bearer " prefix
 
         # 1. Try OIDC first
         try:
@@ -428,13 +435,18 @@ class MCPEndpointView(HomeAssistantView):
     async def _authenticate(self, request: web.Request) -> Caller | web.Response:
         """Resolve the request to an authorized caller, or the response refusing it.
 
-        A token that does not validate gets the 401 challenge. A valid token whose
+        A token that does not validate gets the 401 challenge, and counts toward
+        Home Assistant's login attempt protection when the request presented one.
+        A request with no token does not count: clients probe unauthenticated to
+        discover how to authenticate. A valid token whose
         user no longer exists or is deactivated is refused, and so is a
         non-administrator while require_admin is on: Home Assistant itself
         restricts most of what the tools do to administrators.
         """
         token = await self._validate_token(request)
         if token is None:
+            if self._bearer_token(request) is not None:
+                await self._record_failed_login(request)
             return self._unauthorized(request)
 
         user = await self.hass.auth.async_get_user(token.sub)
@@ -455,6 +467,19 @@ class MCPEndpointView(HomeAssistantView):
             reason,
         )
         return _forbidden(description)
+
+    @staticmethod
+    async def _record_failed_login(request: web.Request) -> None:
+        """Count a rejected bearer token toward Home Assistant's IP ban protection.
+
+        The view validates tokens itself, so Home Assistant's own auth middleware
+        never sees the failure. Recording it must not change the 401 the caller
+        gets, whatever state the http component or the connection is in.
+        """
+        try:
+            await process_wrong_login(request)
+        except Exception:
+            _LOGGER.debug("Could not record the failed login attempt", exc_info=True)
 
     def _unauthorized(self, request: web.Request) -> web.Response:
         """Build the 401 that points a client at this resource's metadata.

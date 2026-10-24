@@ -1280,6 +1280,123 @@ class TestAdminGate:
         assert endpoint.require_admin is False
 
 
+_PROCESS_WRONG_LOGIN = f"{_HTTP_LOGGER}.process_wrong_login"
+
+
+class TestFailedLoginCounting:
+    """A rejected bearer token counts toward Home Assistant's IP ban protection.
+
+    The view sets requires_auth = False and validates tokens itself, so Home
+    Assistant's own login attempt tracking never sees a failure here. Only a
+    request that presented a token and had it rejected counts: clients probe
+    without a token to discover how to authenticate, and a valid token for a user
+    the gate refuses is not token guessing.
+    """
+
+    @pytest.fixture
+    def gate_hass(self):
+        gate_hass = Mock()
+        gate_hass.data = {DOMAIN: {"entry_id": Mock()}}
+        gate_hass.auth.async_get_user = AsyncMock(return_value=_user())
+        return gate_hass
+
+    @staticmethod
+    def _request(*, authorization: str | None = "Bearer wrong-token") -> Mock:
+        request = _jsonrpc_request("initialize")
+        request.headers = {} if authorization is None else {"Authorization": authorization}
+        request.url.origin.return_value = "https://homeassistant.local"
+        return request
+
+    async def test_an_invalid_bearer_token_is_counted_once(self, gate_hass):
+        view = MCPEndpointView(gate_hass)
+        request = self._request()
+
+        with (
+            patch.object(view, "_validate_token", return_value=None),
+            patch(_PROCESS_WRONG_LOGIN, new_callable=AsyncMock) as process_wrong_login,
+        ):
+            response = await view.post(request)
+
+        assert response.status == 401
+        process_wrong_login.assert_awaited_once_with(request)
+
+    async def test_a_get_with_an_invalid_bearer_token_is_counted(self, gate_hass):
+        view = MCPEndpointView(gate_hass)
+        request = self._request()
+
+        with (
+            patch.object(view, "_validate_token", return_value=None),
+            patch(_PROCESS_WRONG_LOGIN, new_callable=AsyncMock) as process_wrong_login,
+        ):
+            response = await view.get(request)
+
+        assert response.status == 401
+        process_wrong_login.assert_awaited_once_with(request)
+
+    async def test_a_request_without_an_authorization_header_is_not_counted(self, gate_hass):
+        view = MCPEndpointView(gate_hass)
+
+        with (
+            patch.object(view, "_validate_token", return_value=None),
+            patch(_PROCESS_WRONG_LOGIN, new_callable=AsyncMock) as process_wrong_login,
+        ):
+            response = await view.post(self._request(authorization=None))
+
+        assert response.status == 401
+        process_wrong_login.assert_not_awaited()
+
+    async def test_a_non_bearer_authorization_header_is_not_counted(self, gate_hass):
+        view = MCPEndpointView(gate_hass)
+
+        with (
+            patch.object(view, "_validate_token", return_value=None),
+            patch(_PROCESS_WRONG_LOGIN, new_callable=AsyncMock) as process_wrong_login,
+        ):
+            response = await view.post(self._request(authorization="Basic dXNlcjpwYXNz"))
+
+        assert response.status == 401
+        process_wrong_login.assert_not_awaited()
+
+    async def test_a_valid_token_is_not_counted(self, gate_hass):
+        view = MCPEndpointView(gate_hass)
+
+        with (
+            patch.object(view, "_validate_token", return_value=TOKEN),
+            patch(_PROCESS_WRONG_LOGIN, new_callable=AsyncMock) as process_wrong_login,
+        ):
+            response = await view.post(self._request())
+
+        assert response.status == 200
+        process_wrong_login.assert_not_awaited()
+
+    async def test_a_valid_token_for_a_non_admin_is_not_counted(self, gate_hass):
+        gate_hass.auth.async_get_user.return_value = _user(is_admin=False)
+        view = MCPEndpointView(gate_hass)
+
+        with (
+            patch.object(view, "_validate_token", return_value=TOKEN),
+            patch(_PROCESS_WRONG_LOGIN, new_callable=AsyncMock) as process_wrong_login,
+        ):
+            response = await view.post(self._request())
+
+        assert response.status == 403
+        process_wrong_login.assert_not_awaited()
+
+    async def test_a_failure_while_counting_still_yields_the_401(self, gate_hass):
+        view = MCPEndpointView(gate_hass)
+
+        with (
+            patch.object(view, "_validate_token", return_value=None),
+            patch(_PROCESS_WRONG_LOGIN, new_callable=AsyncMock) as process_wrong_login,
+        ):
+            process_wrong_login.side_effect = AssertionError("no remote address")
+            response = await view.post(self._request())
+
+        assert response.status == 401
+        assert json.loads(response.body)["error"] == "invalid_token"
+        process_wrong_login.assert_awaited_once()
+
+
 class TestMaskSecrets:
     """Secret-named argument values never reach the audit log or event."""
 

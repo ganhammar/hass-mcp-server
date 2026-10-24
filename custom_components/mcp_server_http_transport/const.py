@@ -81,5 +81,13 @@ RESOURCE_METADATA_PREFIX = "/.well-known/oauth-protected-resource"
 # Repairs issue raised while another integration also serves MCP_PATH.
 ISSUE_ENDPOINT_CONFLICT = "endpoint_conflict"
 
+# Repairs issue raised while the paired OIDC provider cannot bind a token's audience
+# to this resource, so tokens are validated without an audience check.
+ISSUE_OIDC_AUDIENCE_UNSUPPORTED = "oidc_audience_unsupported"
+
+# First hass-oidc-server release whose validate_access_token accepts expected_audience.
+OIDC_PROVIDER_MIN_AUDIENCE_VERSION = "1.5.0"
+OIDC_PROVIDER_RELEASES_URL = "https://github.com/ganhammar/hass-oidc-server/releases"
+
 # Bus event fired after every tool call that is not read-only, as an audit trail.
 EVENT_TOOL_CALLED = f"{DOMAIN}_tool_called"

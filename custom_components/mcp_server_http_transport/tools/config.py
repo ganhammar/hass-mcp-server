@@ -150,9 +150,7 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     # Keep the existing fast path (and its mockable CRUD contract) unchanged.
     if not dry_run and reload_automations and not validate and expected_hash is None:
         try:
-            await update_list_entry(
-                hass, "automations.yaml", automation_id, submitted, "automation"
-            )
+            await update_list_entry(hass, "automations.yaml", automation_id, submitted, "automation")
             suffix = await async_icon_suffix(
                 hass, arguments, "automation", "automation", automation_id
             )
@@ -183,6 +181,11 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 "does not match. Run dry_run again before updating."
             )
         if not changed:
+            suffix = await async_icon_suffix(
+                hass, arguments, "automation", "automation", automation_id
+            )
+            if suffix:
+                return result(f"Successfully updated automation icon{suffix}")
             return result(f"Automation {automation_id} unchanged; no action needed")
 
         path = Path(hass.config.path("automations.yaml"))
@@ -208,15 +211,22 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 ) as backup_file:
                     backup = Path(backup_file.name)
                 try:
-                    shutil.copyfile(path, backup)
+                    shutil.copy2(path, backup)
                 except Exception:
                     backup.unlink(missing_ok=True)
                     raise
 
             rows[indexes[0]] = new_config
-            temp = path.with_name(f".{path.name}.mcp_update_tmp")
+            with tempfile.NamedTemporaryFile(
+                prefix=f".{path.name}.mcp_update_",
+                suffix=".yaml",
+                dir=path.parent,
+                delete=False,
+            ) as staged:
+                temp = Path(staged.name)
             try:
                 yaml_dumper.save_yaml(str(temp), rows)
+                shutil.copymode(path, temp)
                 os.replace(temp, path)
             except Exception:
                 if backup is not None:
@@ -252,9 +262,7 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             try:
                 await hass.services.async_call("automation", "reload", blocking=True)
             except Exception as exc:
-                return result(
-                    f"Error updating automation: saved but reload failed: {exc}"
-                )
+                return result(f"Error updating automation: saved but reload failed: {exc}")
 
         suffix = await async_icon_suffix(
             hass, arguments, "automation", "automation", automation_id

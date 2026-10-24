@@ -152,9 +152,7 @@ async def test_default_update_uses_legacy_fast_path(existing_config):
 
 async def test_keys_can_be_removed(mock_hass, existing_config, tmp_path):
     new_config = {k: v for k, v in existing_config.items() if k != "conditions"}
-    response = await update_automation(
-        mock_hass, arguments(new_config, reload=False)
-    )
+    response = await update_automation(mock_hass, arguments(new_config, reload=False))
     assert "no reload performed" in message(response)
     saved = yaml.safe_load((tmp_path / "automations.yaml").read_text(encoding="utf-8"))
     assert "conditions" not in saved[0]
@@ -201,7 +199,7 @@ async def test_default_reload_without_validation(mock_hass, existing_config):
     assert "automations reloaded" in message(response)
     check.assert_not_awaited()
     mock_hass.services.async_call.assert_awaited_once_with(
-        "automation", "reload", blocking=True
+        "automation", "reload", blocking=True,
     )
 
 

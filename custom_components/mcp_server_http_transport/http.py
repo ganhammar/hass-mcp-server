@@ -7,7 +7,7 @@ from typing import Any
 from aiohttp import hdrs, web
 from homeassistant.auth.models import User
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.http.ban import process_wrong_login
+from homeassistant.components.http.ban import process_success_login, process_wrong_login
 from homeassistant.core import Context, HomeAssistant
 
 from .completions import complete
@@ -438,9 +438,11 @@ class MCPEndpointView(HomeAssistantView):
         A token that does not validate gets the 401 challenge, and counts toward
         Home Assistant's login attempt protection when the request presented one.
         A request with no token does not count: clients probe unauthenticated to
-        discover how to authenticate. A valid token whose
-        user no longer exists or is deactivated is refused, and so is a
-        non-administrator while require_admin is on: Home Assistant itself
+        discover how to authenticate. A request that is authorized clears the
+        address's count, as Home Assistant's own login flow does, so a client that
+        presents each expired token once before refreshing is never banned. A
+        valid token whose user no longer exists or is deactivated is refused, and
+        so is a non-administrator while require_admin is on: Home Assistant itself
         restricts most of what the tools do to administrators.
         """
         token = await self._validate_token(request)
@@ -458,6 +460,7 @@ class MCPEndpointView(HomeAssistantView):
             reason = "user is not an administrator"
             description = "This MCP server requires a Home Assistant administrator account"
         else:
+            self._record_successful_login(request)
             return Caller(user_id=token.sub, auth_method=token.auth_method, user=user)
 
         _LOGGER.warning(
@@ -480,6 +483,20 @@ class MCPEndpointView(HomeAssistantView):
             await process_wrong_login(request)
         except Exception:
             _LOGGER.debug("Could not record the failed login attempt", exc_info=True)
+
+    @staticmethod
+    def _record_successful_login(request: web.Request) -> None:
+        """Clear the address's failed login count after an authorized request.
+
+        Only the login flow and the websocket handler reset the count in Home
+        Assistant itself; a bearer request never does. Without this, a client whose
+        hourly refresh presents the expired token once first would reach the ban
+        threshold on expired tokens alone.
+        """
+        try:
+            process_success_login(request)
+        except Exception:
+            _LOGGER.debug("Could not reset the failed login attempt count", exc_info=True)
 
     def _unauthorized(self, request: web.Request) -> web.Response:
         """Build the 401 that points a client at this resource's metadata.

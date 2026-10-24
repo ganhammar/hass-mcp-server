@@ -1281,6 +1281,7 @@ class TestAdminGate:
 
 
 _PROCESS_WRONG_LOGIN = f"{_HTTP_LOGGER}.process_wrong_login"
+_PROCESS_SUCCESS_LOGIN = f"{_HTTP_LOGGER}.process_success_login"
 
 
 class TestFailedLoginCounting:
@@ -1306,6 +1307,45 @@ class TestFailedLoginCounting:
         request.headers = {} if authorization is None else {"Authorization": authorization}
         request.url.origin.return_value = "https://homeassistant.local"
         return request
+
+    async def test_an_authorized_request_clears_the_count(self, gate_hass):
+        view = MCPEndpointView(gate_hass, native_auth_enabled=True)
+        request = self._request(authorization="Bearer valid-token")
+
+        with (
+            patch.object(view, "_validate_token", return_value=ValidatedToken("u1", "native")),
+            patch(_PROCESS_SUCCESS_LOGIN) as process_success_login,
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
+        process_success_login.assert_called_once_with(request)
+
+    async def test_a_refused_user_does_not_clear_the_count(self, gate_hass):
+        gate_hass.auth.async_get_user = AsyncMock(return_value=_user(is_admin=False))
+        view = MCPEndpointView(gate_hass, native_auth_enabled=True)
+        request = self._request(authorization="Bearer valid-token")
+
+        with (
+            patch.object(view, "_validate_token", return_value=ValidatedToken("u1", "native")),
+            patch(_PROCESS_SUCCESS_LOGIN) as process_success_login,
+        ):
+            response = await view.post(request)
+
+        assert response.status == 403
+        process_success_login.assert_not_called()
+
+    async def test_a_failing_reset_does_not_fail_the_request(self, gate_hass):
+        view = MCPEndpointView(gate_hass, native_auth_enabled=True)
+        request = self._request(authorization="Bearer valid-token")
+
+        with (
+            patch.object(view, "_validate_token", return_value=ValidatedToken("u1", "native")),
+            patch(_PROCESS_SUCCESS_LOGIN, side_effect=RuntimeError("no http app")),
+        ):
+            response = await view.post(request)
+
+        assert response.status == 200
 
     async def test_an_invalid_bearer_token_is_counted_once(self, gate_hass):
         view = MCPEndpointView(gate_hass)

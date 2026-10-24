@@ -21,7 +21,7 @@ from aiohttp import web
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.http.ban import process_wrong_login
+from homeassistant.components.http.ban import process_success_login, process_wrong_login
 from homeassistant.components.recorder import Recorder
 from homeassistant.components.recorder.history import (
     get_significant_states,
@@ -475,3 +475,16 @@ class TestProcessWrongLoginContract:
     def test_is_a_coroutine_taking_only_the_request(self):
         assert inspect.iscoroutinefunction(process_wrong_login)
         assert _params(process_wrong_login) == ["request"]
+
+
+class TestProcessSuccessLoginContract:
+    """``process_success_login`` clears an address's failed login count (#107).
+
+    The view calls it after every authorized request, since Home Assistant only
+    calls it from the login flow and the websocket handler, never for a bearer
+    request. It is synchronous, unlike ``process_wrong_login``.
+    """
+
+    def test_is_a_plain_function_taking_only_the_request(self):
+        assert not inspect.iscoroutinefunction(process_success_login)
+        assert _params(process_success_login) == ["request"]

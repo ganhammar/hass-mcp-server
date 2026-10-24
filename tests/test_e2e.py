@@ -284,6 +284,29 @@ async def test_a_valid_token_is_not_counted_as_a_failed_login(
     assert hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS] == {}
 
 
+async def test_an_authorized_request_clears_earlier_failures(
+    banning_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """An expired token presented once an hour before refreshing never adds up to a ban."""
+    client = await hass_client()
+    attempts = hass.http.app[KEY_FAILED_LOGIN_ATTEMPTS]
+    request = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
+
+    with patch("homeassistant.components.http.ban.gethostbyaddr", side_effect=herror):
+        resp = await client.post(
+            "/api/mcp", json=request, headers={"Authorization": "Bearer expired-token"}
+        )
+    assert resp.status == 401
+    assert attempts[ip_address("127.0.0.1")] == 1
+
+    resp = await client.post("/api/mcp", json=request)
+
+    assert resp.status == 200
+    assert attempts == {}
+
+
 async def test_a_non_admin_token_is_not_counted_as_a_failed_login(
     banning_entry: MockConfigEntry,
     hass: HomeAssistant,

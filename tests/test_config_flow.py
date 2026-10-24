@@ -9,7 +9,9 @@ from homeassistant import data_entry_flow
 from homeassistant.helpers import config_validation as cv
 from voluptuous_serialize import convert
 
+from custom_components.mcp_server_http_transport import const
 from custom_components.mcp_server_http_transport.config_flow import (
+    STEP_USER_DATA_SCHEMA,
     MCPServerConfigFlow,
     MCPServerOptionsFlowHandler,
 )
@@ -524,6 +526,49 @@ class TestMCPServerOptionsFlow:
         for section in ("config", "options"):
             assert set(english[section]["error"]) == set(strings[section]["error"])
         assert set(strings["options"]["error"]) >= {"invalid_appdaemon_apps_root"}
+
+    def test_translations_mirror_strings(self):
+        """en.json is a copy of strings.json, so a key added to one is added to both.
+
+        Home Assistant reads strings.json at build time and en.json at runtime for
+        a custom integration, so a label present in only one of them is missing in
+        the UI of some installs.
+        """
+        package = pathlib.Path(__file__).parent.parent / "custom_components" / DOMAIN
+        strings = json.loads((package / "strings.json").read_text())
+        english = json.loads((package / "translations" / "en.json").read_text())
+
+        assert strings == english
+
+    def test_every_option_has_a_label_and_description(self):
+        """Each option in the schema is labelled and described for both flows.
+
+        An option without a label shows up in the UI as its raw key, and the
+        description is where the security implications of enabling it live.
+        """
+        package = pathlib.Path(__file__).parent.parent / "custom_components" / DOMAIN
+        strings = json.loads((package / "strings.json").read_text())
+        options = {str(key) for key in STEP_USER_DATA_SCHEMA.schema}
+        assert CONF_REQUIRE_ADMIN in options
+
+        for step in (strings["config"]["step"]["user"], strings["options"]["step"]["init"]):
+            assert set(step["data"]) == options
+            assert set(step["data_description"]) == options
+
+    def test_every_repair_issue_is_translated(self):
+        """Each ISSUE_* constant has a title and description under issues.
+
+        A repair without them renders as its translation key in the Repairs
+        dashboard, which tells the user nothing about what to do.
+        """
+        package = pathlib.Path(__file__).parent.parent / "custom_components" / DOMAIN
+        strings = json.loads((package / "strings.json").read_text())
+        issue_ids = {value for name, value in vars(const).items() if name.startswith("ISSUE_")}
+        assert issue_ids
+
+        assert set(strings["issues"]) == issue_ids
+        for issue in strings["issues"].values():
+            assert issue["title"] and issue["description"]
 
     async def test_init_step_persists_image_access(self):
         """Test init step merges camera and image file access into entry data."""

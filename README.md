@@ -192,7 +192,7 @@ Update hass-oidc-server to 1.5.0 or newer and restart Home Assistant; the repair
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
 | `create_automation` | Create a new automation, optionally in a category and with an icon |
-| `update_automation` | Update an existing automation, optionally changing its icon |
+| `update_automation` | Update an automation with `dry_run`, `expected_hash`, optional reload and opt-in validation/rollback; supports icon updates |
 | `delete_automation` | Delete an automation |
 | `list_scenes` | List all scenes with full configuration |
 | `get_scene_config` | Get full configuration of a single scene |
@@ -206,6 +206,18 @@ Update hass-oidc-server to 1.5.0 or newer and restart Home Assistant; the repair
 | `delete_script` | Delete a script |
 | `list_traces` | List recent execution traces for an automation/script (or a whole domain), newest first |
 | `get_trace` | Get the full step-by-step execution trace of one run — which trigger fired, which conditions passed/failed, and the variables at each step (`summary=true` for an outline of large traces) |
+
+> **Automation update options:** `update_automation` accepts an `automation_id` and a
+> complete replacement `config` object. Its default behavior remains unchanged:
+> save and reload automations, without a full configuration check or backup.
+> `dry_run=true` previews added, changed and removed top-level keys without
+> modifying anything. It returns an original configuration hash that may be sent
+> as `expected_hash` on the subsequent write to reject stale previews.
+> `reload=false` saves without calling `automation.reload`.
+> `validate=true` enables a full HA configuration check before reloading.
+> Only the original `automations.yaml` is temporarily backed up for that check;
+> a failed validation restores it without reloading. The temporary copy is removed
+> on success. Validation can be slow on large Home Assistant installations.
 
 **Helpers**
 

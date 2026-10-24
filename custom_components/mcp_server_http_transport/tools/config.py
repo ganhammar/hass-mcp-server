@@ -1,9 +1,15 @@
 """Automation, scene, and script CRUD and read tools."""
 
+import hashlib
 import logging
+import os
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.json import json_dumps_sorted
 
 from . import (
     ANNOTATION_DESTRUCTIVE,
@@ -63,20 +69,49 @@ async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return {"content": [{"type": "text", "text": f"Error creating automation: {str(e)}"}]}
 
 
+def _automation_config_hash(config: dict[str, Any]) -> str:
+    """Compute a stable original-config fingerprint for preview/apply concurrency."""
+    return hashlib.sha256(json_dumps_sorted(config).encode("utf-8")).hexdigest()
+
+
 @register_tool(
     name="update_automation",
-    description="Update an existing automation in Home Assistant",
+    description=(
+        "Update an automation. By default save and reload as before, without a full "
+        "configuration check. dry_run=true previews changes and returns an expected_hash. "
+        "Pass expected_hash to reject a stale preview. reload=false skips the reload. "
+        "validate=true opts into a full Home Assistant config check with rollback of "
+        "automations.yaml on failure."
+    ),
     input_schema={
         "type": "object",
         "properties": {
             "automation_id": {
                 "type": "string",
-                "description": "The automation ID to update",
+                "description": "The existing automation ID",
             },
             "config": {
                 "type": "object",
-                "description": "Updated automation config"
-                " (alias, trigger, action, condition, mode, etc.)",
+                "description": "Complete replacement automation configuration",
+            },
+            "dry_run": {
+                "type": "boolean",
+                "description": "Preview changed top-level keys without writing (default false)",
+            },
+            "reload": {
+                "type": "boolean",
+                "description": "Reload automations after updating (default true)",
+            },
+            "validate": {
+                "type": "boolean",
+                "description": (
+                    "Opt into full HA configuration validation and rollback on failure "
+                    "(default false; may be slow on large installations)"
+                ),
+            },
+            "expected_hash": {
+                "type": "string",
+                "description": "Optional original hash returned by a dry_run preview",
             },
             "icon": ICON_PROPERTY,
         },
@@ -85,23 +120,162 @@ async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     annotations=ANNOTATION_IDEMPOTENT,
 )
 async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Update an existing automation."""
-    from ..config_manager import update_list_entry
+    """Keep default updates cheap; offer preview, concurrency checks, and opt-in validation."""
+    from homeassistant.util.yaml import dumper as yaml_dumper
 
+    from ..config_manager import _load_yaml_list, read_list_entry, update_list_entry
+    from .config_files import _run_config_check
+
+    def result(message: str) -> dict[str, Any]:
+        return {"content": [{"type": "text", "text": message}]}
+
+    automation_id = arguments.get("automation_id")
+    submitted = arguments.get("config")
+    if not isinstance(automation_id, str) or not automation_id:
+        return result("Error updating automation: automation_id must be a non-empty string")
+    if not isinstance(submitted, dict) or not submitted:
+        return result("Error updating automation: config must be a non-empty object")
+    if "id" in submitted and str(submitted["id"]) != automation_id:
+        return result("Error updating automation: config ID differs from automation_id")
+
+    dry_run = arguments.get("dry_run", False)
+    reload_automations = arguments.get("reload", True)
+    validate = arguments.get("validate", False)
+    expected_hash = arguments.get("expected_hash")
+    if any(type(flag) is not bool for flag in (dry_run, reload_automations, validate)):
+        return result("Error updating automation: dry_run, reload and validate must be booleans")
+    if expected_hash is not None and not isinstance(expected_hash, str):
+        return result("Error updating automation: expected_hash must be a string")
+
+    # Keep the existing fast path (and its mockable CRUD contract) unchanged.
+    if not dry_run and reload_automations and not validate and expected_hash is None:
+        try:
+            await update_list_entry(
+                hass, "automations.yaml", automation_id, submitted, "automation",
+            )
+            suffix = await async_icon_suffix(
+                hass, arguments, "automation", "automation", automation_id
+            )
+            return result(f"Successfully updated automation{suffix}")
+        except Exception as exc:
+            return result(f"Error updating automation: {exc}")
+
+    new_config = {**submitted, "id": automation_id}
     try:
-        await update_list_entry(
-            hass,
-            "automations.yaml",
-            arguments["automation_id"],
-            arguments["config"],
-            "automation",
+        original = await read_list_entry(hass, "automations.yaml", automation_id)
+        original_hash = _automation_config_hash(original)
+        sentinel = object()
+        changed = sorted(
+            key
+            for key in original.keys() | new_config.keys()
+            if original.get(key, sentinel) != new_config.get(key, sentinel)
         )
+
+        if dry_run:
+            return result(
+                f"PREVIEW ONLY for {automation_id}; changed top-level keys: {changed}. "
+                f"Original hash: {original_hash}. No files modified or reloaded. "
+                "Pass this hash as expected_hash when applying the update."
+            )
+        if expected_hash is not None and expected_hash != original_hash:
+            return result(
+                "Error updating automation: changed since preview; expected_hash "
+                "does not match. Run dry_run again before updating."
+            )
+        if not changed:
+            suffix = await async_icon_suffix(
+                hass, arguments, "automation", "automation", automation_id
+            )
+            if suffix:
+                return result(f"Successfully updated automation icon{suffix}")
+            return result(f"Automation {automation_id} unchanged; no action needed")
+
+        path = Path(hass.config.path("automations.yaml"))
+
+        def write_updated() -> Path | None:
+            """Commit one YAML update, preserving only the original file when validating."""
+            rows = _load_yaml_list(str(path))
+            indexes = [
+                index for index, row in enumerate(rows) if str(row.get("id")) == automation_id
+            ]
+            if len(indexes) != 1:
+                raise ValueError(f"Expected exactly one automation with id {automation_id}")
+            current = rows[indexes[0]]
+            if current != original:
+                raise RuntimeError("Automation changed since it was read; refusing to overwrite")
+            if expected_hash is not None and _automation_config_hash(current) != expected_hash:
+                raise RuntimeError("Automation changed since preview; refusing to overwrite")
+
+            backup: Path | None = None
+            if validate:
+                with tempfile.NamedTemporaryFile(
+                    prefix=".automations.mcp_backup_", dir=path.parent, delete=False
+                ) as backup_file:
+                    backup = Path(backup_file.name)
+                try:
+                    shutil.copy2(path, backup)
+                except Exception:
+                    backup.unlink(missing_ok=True)
+                    raise
+
+            rows[indexes[0]] = new_config
+            with tempfile.NamedTemporaryFile(
+                prefix=f".{path.name}.mcp_update_",
+                suffix=".yaml",
+                dir=path.parent,
+                delete=False,
+            ) as staged:
+                temp = Path(staged.name)
+            try:
+                yaml_dumper.save_yaml(str(temp), rows)
+                shutil.copymode(path, temp)
+                os.replace(temp, path)
+            except Exception:
+                if backup is not None:
+                    backup.unlink(missing_ok=True)
+                raise
+            finally:
+                temp.unlink(missing_ok=True)
+            return backup
+
+        backup = await hass.async_add_executor_job(write_updated)
+        if validate:
+            try:
+                check = await _run_config_check(hass)
+                if not check["valid"]:
+                    raise ValueError(f"HA config validation failed: {check['errors']}")
+            except Exception as exc:
+                try:
+                    await hass.async_add_executor_job(os.replace, backup, path)
+                except Exception as restore_exc:
+                    # Preserve the backup for manual recovery if restoring fails.
+                    return result(
+                        f"Error updating automation: validation failed ({exc}); "
+                        f"CRITICAL: rollback failed ({restore_exc}). Backup: {backup}"
+                    )
+                return result(
+                    f"Error updating automation: validation failed ({exc}); "
+                    "automations.yaml restored without reload."
+                )
+            # HomeAssistant.async_add_executor_job accepts positional args only.
+            await hass.async_add_executor_job(lambda: backup.unlink(missing_ok=True))
+
+        if reload_automations:
+            try:
+                await hass.services.async_call("automation", "reload", blocking=True)
+            except Exception as exc:
+                return result(f"Error updating automation: saved but reload failed: {exc}")
+
         suffix = await async_icon_suffix(
-            hass, arguments, "automation", "automation", arguments["automation_id"]
+            hass, arguments, "automation", "automation", automation_id
         )
-        return {"content": [{"type": "text", "text": f"Successfully updated automation{suffix}"}]}
-    except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error updating automation: {str(e)}"}]}
+        status = "automations reloaded" if reload_automations else "no reload performed"
+        validation = "config validated, " if validate else ""
+        return result(
+            f"Successfully updated automation {automation_id}; {validation}{status}{suffix}"
+        )
+    except Exception as exc:
+        return result(f"Error updating automation: {exc}")
 
 
 @register_tool(

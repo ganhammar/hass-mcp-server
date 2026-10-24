@@ -64,6 +64,9 @@ SECRET_MASK = "***"
 
 # Roughly how many characters of a call's arguments the audit log and event carry.
 ARGUMENTS_PREVIEW_CHARS = 500
+# The tool name comes straight from the request, so it is cut to this before it is
+# logged or fired. Every registered name is far shorter.
+TOOL_NAME_PREVIEW_CHARS = 100
 
 
 @dataclass(frozen=True)
@@ -376,6 +379,9 @@ class MCPEndpointView(HomeAssistantView):
         self.native_auth_enabled = native_auth_enabled
         self.server_name = server_name
         self.require_admin = require_admin
+        # (user id, reason) pairs already warned about, so a client that keeps
+        # retrying with a refused account leaves one warning rather than one per call.
+        self._reported_refusals: set[tuple[str, str]] = set()
         if paths is not None:
             self.url, self.extra_urls = paths[0], list(paths[1:])
 
@@ -448,7 +454,10 @@ class MCPEndpointView(HomeAssistantView):
         else:
             return Caller(user_id=token.sub, auth_method=token.auth_method, user=user)
 
-        _LOGGER.warning(
+        first_time = (token.sub, reason) not in self._reported_refusals
+        self._reported_refusals.add((token.sub, reason))
+        _LOGGER.log(
+            logging.WARNING if first_time else logging.DEBUG,
             "Refused MCP request from user %s (%s auth): %s",
             token.sub,
             token.auth_method,
@@ -697,13 +706,14 @@ class MCPEndpointView(HomeAssistantView):
         if read_only and not _LOGGER.isEnabledFor(level):
             return
 
+        tool = str(name)[:TOOL_NAME_PREVIEW_CHARS]
         summary = truncate_arguments(mask_secrets(arguments))
         _LOGGER.log(
             level,
             "MCP tool call by user %s (%s auth): %s -> %s, arguments %s",
             caller.user_id,
             caller.auth_method,
-            name,
+            tool,
             outcome,
             dumps(summary),
         )
@@ -716,7 +726,7 @@ class MCPEndpointView(HomeAssistantView):
             self.hass.bus.async_fire(
                 EVENT_TOOL_CALLED,
                 {
-                    "tool": name,
+                    "tool": tool,
                     "user_id": caller.user_id,
                     "auth_method": caller.auth_method,
                     "outcome": outcome,
@@ -725,7 +735,7 @@ class MCPEndpointView(HomeAssistantView):
                 context=Context(user_id=caller.user_id),
             )
         except Exception:  # noqa: BLE001 - the audit event must not fail the call
-            _LOGGER.exception("Could not fire %s for tool %s", EVENT_TOOL_CALLED, name)
+            _LOGGER.exception("Could not fire %s for tool %s", EVENT_TOOL_CALLED, tool)
 
 
 def register_mcp_views(

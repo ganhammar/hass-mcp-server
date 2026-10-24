@@ -191,8 +191,9 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
             ]
         }
 
-    # The integration's own events are its audit trail. A caller that could fire
-    # one would be able to forge an entry attributed to any user.
+    # The integration's own events are its audit trail, so this tool does not fire
+    # them. This closes the direct route only: an automation with an event action
+    # can still fire anything, so the audit event is evidence, not proof.
     if event_type.startswith(f"{DOMAIN}_"):
         return {
             "content": [

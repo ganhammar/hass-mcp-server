@@ -21,6 +21,7 @@ from custom_components.mcp_server_http_transport.http import (
     REGISTERED_ENDPOINT,
     REGISTERED_ROUTES,
     SECRET_MASK,
+    TOOL_NAME_PREVIEW_CHARS,
     Caller,
     MCPEndpointView,
     MCPProtectedResourceMetadataView,
@@ -1178,6 +1179,17 @@ class TestAdminGate:
         assert "not an administrator" in caplog.text
         assert "secret-token-value" not in caplog.text
 
+    async def test_a_repeated_refusal_warns_once(self, gate_hass, caplog):
+        gate_hass.auth.async_get_user.return_value = _user(is_admin=False)
+        view = MCPEndpointView(gate_hass)
+
+        with caplog.at_level(logging.DEBUG, logger=_HTTP_LOGGER):
+            assert (await self._post(view)).status == 403
+            assert (await self._post(view)).status == 403
+
+        refusals = [r for r in caplog.records if "Refused MCP request" in r.getMessage()]
+        assert [r.levelno for r in refusals] == [logging.WARNING, logging.DEBUG]
+
     async def test_non_admin_is_served_when_the_requirement_is_off(self, gate_hass):
         gate_hass.auth.async_get_user.return_value = _user(is_admin=False)
         view = MCPEndpointView(gate_hass, require_admin=False)
@@ -1408,6 +1420,20 @@ class TestToolAuditLog:
             for c in audit_hass.bus.async_fire.call_args_list
             if c.args and c.args[0] == EVENT_TOOL_CALLED
         ]
+
+    async def test_an_overlong_tool_name_is_cut_in_the_record(self, audit_hass, caplog):
+        view = MCPEndpointView(audit_hass)
+        name = "x" * 500
+
+        with caplog.at_level(logging.INFO, logger=_HTTP_LOGGER):
+            await view._handle_message(
+                {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": name}, "id": 1},
+                self.CALLER,
+            )
+
+        (event,) = self._audit_events(audit_hass)
+        assert event.args[1]["tool"] == "x" * TOOL_NAME_PREVIEW_CHARS
+        assert name not in caplog.text
 
     async def test_a_write_tool_is_logged_at_info_with_its_caller(self, view, caplog):
         handler = AsyncMock(return_value={"content": [{"type": "text", "text": "done"}]})

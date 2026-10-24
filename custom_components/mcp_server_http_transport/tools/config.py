@@ -236,6 +236,7 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 try:
                     await hass.async_add_executor_job(os.replace, backup, path)
                 except Exception as restore_exc:
+                    # Preserve the backup for manual recovery if restoring fails.
                     return result(
                         f"Error updating automation: validation failed ({exc}); "
                         f"CRITICAL: rollback failed ({restore_exc}). Backup: {backup}"
@@ -244,9 +245,8 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                     f"Error updating automation: validation failed ({exc}); "
                     "automations.yaml restored without reload."
                 )
-            finally:
-                if backup is not None:
-                    await hass.async_add_executor_job(backup.unlink, missing_ok=True)
+            # HomeAssistant.async_add_executor_job accepts positional args only.
+            await hass.async_add_executor_job(lambda: backup.unlink(missing_ok=True))
 
         if reload_automations:
             try:

@@ -93,7 +93,7 @@ def test_schema_keeps_original_and_optional_flags():
 
 async def test_dry_run_does_not_write_validate_or_reload(mock_hass, existing_config, tmp_path):
     with patch(
-        "custom_components.mcp_server_http_transport.tools.config._run_config_check",
+        "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
         new_callable=AsyncMock,
     ) as unused:
         response = await update_automation(mock_hass, arguments(existing_config, dry_run=True))
@@ -139,7 +139,7 @@ async def test_default_update_uses_legacy_fast_path(existing_config):
             new_callable=AsyncMock,
         ) as legacy_update,
         patch(
-            "custom_components.mcp_server_http_transport.tools.config._run_config_check",
+            "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
             new_callable=AsyncMock,
         ) as check,
     ):
@@ -167,7 +167,7 @@ async def test_opt_in_validation_and_atomic_rollback(mock_hass, existing_config,
     other_file = tmp_path / "scripts.yaml"
     other_file.write_text("unchanged\n", encoding="utf-8")
     with patch(
-        "custom_components.mcp_server_http_transport.tools.config._run_config_check",
+        "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
         new_callable=AsyncMock,
         return_value={"valid": valid, "errors": [] if valid else ["bad config"]},
     ) as check:
@@ -192,7 +192,7 @@ async def test_default_reload_without_validation(mock_hass, existing_config):
     preview = await update_automation(mock_hass, arguments(existing_config, dry_run=True))
     original_hash = re.search(r"Original hash: ([0-9a-f]{64})", message(preview)).group(1)
     with patch(
-        "custom_components.mcp_server_http_transport.tools.config._run_config_check",
+        "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
         new_callable=AsyncMock,
     ) as check:
         response = await update_automation(
@@ -228,7 +228,7 @@ async def test_write_refuses_concurrent_changes(mock_hass, existing_config, tmp_
             ],
         ),
         patch(
-            "custom_components.mcp_server_http_transport.tools.config._run_config_check",
+            "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
             new_callable=AsyncMock,
         ) as check,
     ):

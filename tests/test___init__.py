@@ -49,6 +49,7 @@ class TestAsyncSetupEntry:
             mock_hass,
             False,
             server_name=DEFAULT_SERVER_NAME,
+            require_admin=True,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
@@ -67,6 +68,7 @@ class TestAsyncSetupEntry:
             mock_hass,
             False,
             server_name=DEFAULT_SERVER_NAME,
+            require_admin=True,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
@@ -85,6 +87,7 @@ class TestAsyncSetupEntry:
             mock_hass,
             True,
             server_name=DEFAULT_SERVER_NAME,
+            require_admin=True,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
@@ -103,6 +106,26 @@ class TestAsyncSetupEntry:
             mock_hass,
             False,
             server_name="ha-mcp-secundair",
+            require_admin=True,
+        )
+
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_passes_require_admin(
+        self,
+        mock_register_views,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """An entry that turned the administrator requirement off has it passed on."""
+        mock_config_entry.data = {"require_admin": False}
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        mock_register_views.assert_called_once_with(
+            mock_hass,
+            False,
+            server_name=DEFAULT_SERVER_NAME,
+            require_admin=False,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
@@ -117,6 +140,32 @@ class TestAsyncSetupEntry:
 
         assert mock_hass.data[DOMAIN]["camera_image_access"] is False
         assert mock_hass.data[DOMAIN]["image_file_access"] is False
+
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_template_rendering_defaults_off(
+        self,
+        mock_register_views,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """Test template rendering defaults to disabled in hass.data."""
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["template_rendering"] is False
+
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_wires_template_rendering_flag(
+        self,
+        mock_register_views,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """Test the template rendering flag is read into hass.data."""
+        mock_config_entry.data = {"template_rendering_enabled": True}
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["template_rendering"] is True
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_wires_image_access_flags(

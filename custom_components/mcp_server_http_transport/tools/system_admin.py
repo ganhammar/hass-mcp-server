@@ -1,6 +1,7 @@
 """System administration and diagnostic tools."""
 
 import logging
+import re
 from collections import deque
 from datetime import datetime
 from typing import Any
@@ -17,13 +18,62 @@ from . import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_REDACTED = "<redacted>"
+
+_AUTHORIZATION_RE = re.compile(
+    r"""(\bauthorization["']?\s*[:=]\s*["']?)([^\r\n"']+)""", re.IGNORECASE
+)
+_BEARER_RE = re.compile(r"(\bbearer\s+)([A-Za-z0-9\-._~+/]+=*)", re.IGNORECASE)
+_URL_CREDENTIALS_RE = re.compile(r"(://)[^/\s:@]+:[^/\s]*@")
+_JWT_RE = re.compile(
+    r"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+(?![A-Za-z0-9_\-])"
+)
+_SECRET_PARAM_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"(access_token|token|api_key|apikey|api-key|key|password|secret|auth|signature|sig)"
+    r"(=)"
+    r"[^\s&\"'<>#)\]},;]+",
+    re.IGNORECASE,
+)
+_SECRET_FIELD_RE = re.compile(
+    r"""(["'](?:[A-Za-z0-9_\-]*(?:token|password|secret|api_?key))["']\s*:\s*)(["'])[^"'\r\n]*\2""",
+    re.IGNORECASE,
+)
+# A bare word after "Bearer" is usually prose, so a token must look like one.
+_MIN_BEARER_WORD_LENGTH = 16
+
+
+def _redact_bearer(match: re.Match[str]) -> str:
+    token = match.group(2)
+    if len(token) >= _MIN_BEARER_WORD_LENGTH or any(c.isdigit() or c == "." for c in token):
+        return f"{match.group(1)}{_REDACTED}"
+    return match.group(0)
+
+
+def redact_log_text(text: str) -> str:
+    """Mask credentials that commonly leak into log lines.
+
+    Covers Authorization headers, bearer tokens, JWT-shaped values (which includes
+    Home Assistant long-lived access tokens), credentials embedded in URLs, and
+    values of secret-looking query parameters or quoted mapping fields. Text with
+    nothing matching is returned unchanged.
+    """
+    text = _AUTHORIZATION_RE.sub(rf"\g<1>{_REDACTED}", text)
+    text = _BEARER_RE.sub(_redact_bearer, text)
+    text = _URL_CREDENTIALS_RE.sub(rf"\g<1>{_REDACTED}@", text)
+    text = _JWT_RE.sub(_REDACTED, text)
+    text = _SECRET_PARAM_RE.sub(rf"\g<1>\g<2>{_REDACTED}", text)
+    return _SECRET_FIELD_RE.sub(rf"\g<1>\g<2>{_REDACTED}\g<2>", text)
+
 
 @register_tool(
     name="get_error_log",
     description=(
         "Fetch the Home Assistant error log. Returns the last N lines of the log file. "
         "If on-disk file logging is disabled, falls back to the recent WARNING/ERROR "
-        "entries Home Assistant keeps in memory"
+        "entries Home Assistant keeps in memory. Tokens, API keys, and URL credentials "
+        "are redacted from the output, but it is still a raw log and may contain other "
+        "sensitive details such as hostnames, IP addresses, and entity names"
     ),
     input_schema={
         "type": "object",
@@ -43,7 +93,7 @@ async def get_error_log(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
 
     def _read_log():
         with open(log_path) as f:
-            return "".join(deque(f, maxlen=lines))
+            return redact_log_text("".join(deque(f, maxlen=lines)))
 
     try:
         log_text = await hass.async_add_executor_job(_read_log)
@@ -91,7 +141,7 @@ def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
         if not isinstance(entries, list) or not entries:
             return None
         shown = entries[: max(1, limit)]
-        formatted = "\n".join(_format_system_log_entry(entry) for entry in shown)
+        formatted = redact_log_text("\n".join(_format_system_log_entry(entry) for entry in shown))
     except Exception as e:
         _LOGGER.debug("Could not read system log buffer: %s", e)
         return None

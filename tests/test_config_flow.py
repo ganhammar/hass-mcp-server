@@ -9,7 +9,9 @@ from homeassistant import data_entry_flow
 from homeassistant.helpers import config_validation as cv
 from voluptuous_serialize import convert
 
+from custom_components.mcp_server_http_transport import const
 from custom_components.mcp_server_http_transport.config_flow import (
+    STEP_USER_DATA_SCHEMA,
     MCPServerConfigFlow,
     MCPServerOptionsFlowHandler,
 )
@@ -19,7 +21,9 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_NATIVE_AUTH,
+    CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
+    CONF_TEMPLATE_RENDERING,
     DEFAULT_APPDAEMON_APPS_ROOT,
     DEFAULT_SERVER_NAME,
     DOMAIN,
@@ -232,6 +236,36 @@ class TestMCPServerConfigFlow:
         schema_keys = [str(k) for k in result["data_schema"].schema]
         assert CONF_NATIVE_AUTH in schema_keys
 
+    async def test_user_flow_form_has_template_rendering_default_off(self):
+        """Test user flow form offers template rendering, off by default."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_TEMPLATE_RENDERING].default() is False
+
+    async def test_user_flow_persists_template_rendering(self):
+        """Test the template rendering choice is stored on the created entry."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=[])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(
+            user_input={CONF_NATIVE_AUTH: True, CONF_TEMPLATE_RENDERING: True}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_TEMPLATE_RENDERING] is True
+
     async def test_version_is_set(self):
         """Test config flow version is set."""
         flow = MCPServerConfigFlow()
@@ -244,6 +278,36 @@ class TestMCPServerConfigFlow:
             options_flow = MCPServerConfigFlow.async_get_options_flow(mock_config_entry)
 
             assert isinstance(options_flow, MCPServerOptionsFlowHandler)
+
+    async def test_user_flow_requires_admin_by_default(self):
+        """The administrator requirement is on unless the user turns it off."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_REQUIRE_ADMIN].default() is True
+
+    async def test_user_flow_persists_require_admin_off(self):
+        """Turning the requirement off at setup is stored on the entry."""
+        mock_hass = Mock()
+        mock_hass.config_entries = Mock()
+        mock_hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        flow = MCPServerConfigFlow()
+        flow.hass = mock_hass
+
+        result = await flow.async_step_user(
+            user_input={CONF_NATIVE_AUTH: False, CONF_REQUIRE_ADMIN: False}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_REQUIRE_ADMIN] is False
 
 
 class TestMCPServerOptionsFlow:
@@ -338,6 +402,34 @@ class TestMCPServerOptionsFlow:
         schema_keys = {str(k): k for k in result["data_schema"].schema}
         assert schema_keys[CONF_CAMERA_IMAGE_ACCESS].default() is True
         assert schema_keys[CONF_IMAGE_FILE_ACCESS].default() is True
+
+    async def test_init_step_template_rendering_defaults_to_false(self):
+        """Test template rendering defaults to False in the options form."""
+        flow = self._create_flow(data={})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_TEMPLATE_RENDERING].default() is False
+
+    async def test_init_step_shows_current_template_rendering_value(self):
+        """Test init step reflects the stored template rendering value."""
+        flow = self._create_flow(data={CONF_TEMPLATE_RENDERING: True})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_TEMPLATE_RENDERING].default() is True
+
+    async def test_init_step_persists_template_rendering(self):
+        """Test init step merges template rendering into entry data."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_TEMPLATE_RENDERING: True}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_TEMPLATE_RENDERING] is True
 
     async def test_init_step_defaults_appdaemon_root(self):
         """Existing entries without the new option retain the legacy root."""
@@ -494,6 +586,49 @@ class TestMCPServerOptionsFlow:
             assert set(english[section]["error"]) == set(strings[section]["error"])
         assert set(strings["options"]["error"]) >= {"invalid_appdaemon_apps_root"}
 
+    def test_translations_mirror_strings(self):
+        """en.json is a copy of strings.json, so a key added to one is added to both.
+
+        Home Assistant reads strings.json at build time and en.json at runtime for
+        a custom integration, so a label present in only one of them is missing in
+        the UI of some installs.
+        """
+        package = pathlib.Path(__file__).parent.parent / "custom_components" / DOMAIN
+        strings = json.loads((package / "strings.json").read_text())
+        english = json.loads((package / "translations" / "en.json").read_text())
+
+        assert strings == english
+
+    def test_every_option_has_a_label_and_description(self):
+        """Each option in the schema is labelled and described for both flows.
+
+        An option without a label shows up in the UI as its raw key, and the
+        description is where the security implications of enabling it live.
+        """
+        package = pathlib.Path(__file__).parent.parent / "custom_components" / DOMAIN
+        strings = json.loads((package / "strings.json").read_text())
+        options = {str(key) for key in STEP_USER_DATA_SCHEMA.schema}
+        assert CONF_REQUIRE_ADMIN in options
+
+        for step in (strings["config"]["step"]["user"], strings["options"]["step"]["init"]):
+            assert set(step["data"]) == options
+            assert set(step["data_description"]) == options
+
+    def test_every_repair_issue_is_translated(self):
+        """Each ISSUE_* constant has a title and description under issues.
+
+        A repair without them renders as its translation key in the Repairs
+        dashboard, which tells the user nothing about what to do.
+        """
+        package = pathlib.Path(__file__).parent.parent / "custom_components" / DOMAIN
+        strings = json.loads((package / "strings.json").read_text())
+        issue_ids = {value for name, value in vars(const).items() if name.startswith("ISSUE_")}
+        assert issue_ids
+
+        assert set(strings["issues"]) == issue_ids
+        for issue in strings["issues"].values():
+            assert issue["title"] and issue["description"]
+
     async def test_init_step_persists_image_access(self):
         """Test init step merges camera and image file access into entry data."""
         flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
@@ -510,3 +645,31 @@ class TestMCPServerOptionsFlow:
         call_kwargs = flow.hass.config_entries.async_update_entry.call_args
         assert call_kwargs[1]["data"][CONF_CAMERA_IMAGE_ACCESS] is True
         assert call_kwargs[1]["data"][CONF_IMAGE_FILE_ACCESS] is True
+
+    async def test_init_step_require_admin_defaults_to_true(self):
+        """An entry created before the option existed shows it on."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_REQUIRE_ADMIN].default() is True
+
+    async def test_init_step_shows_current_require_admin(self):
+        """The form reflects a requirement the user already turned off."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True, CONF_REQUIRE_ADMIN: False})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_REQUIRE_ADMIN].default() is False
+
+    async def test_init_step_persists_require_admin(self):
+        """Changing the requirement is merged into the entry data."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_REQUIRE_ADMIN: False}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_REQUIRE_ADMIN] is False

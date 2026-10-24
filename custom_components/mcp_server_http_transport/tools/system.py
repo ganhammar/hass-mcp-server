@@ -8,6 +8,7 @@ from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
+from ..const import DOMAIN
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
@@ -16,6 +17,27 @@ from . import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _template_rendering_enabled(hass: HomeAssistant) -> bool:
+    """Return True when the template rendering option is on."""
+    return hass.data.get(DOMAIN, {}).get("template_rendering", False)
+
+
+def _template_disabled() -> dict[str, Any]:
+    """Build the response telling the caller how to enable template rendering."""
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "Template rendering is disabled. Enable it in the MCP Server integration "
+                    "settings: Settings → Devices & Services → MCP Server → Configure → "
+                    "Enable template rendering."
+                ),
+            }
+        ]
+    }
 
 
 @register_tool(
@@ -48,7 +70,11 @@ async def get_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
 
 @register_tool(
     name="render_template",
-    description="Evaluate a Jinja2 template in Home Assistant",
+    description=(
+        "Evaluate a Jinja2 template in Home Assistant. Disabled by default: it must be "
+        'enabled with "Enable template rendering" in the integration options, because a '
+        "template can read every state, attribute, device and area on the instance"
+    ),
     input_schema={
         "type": "object",
         "properties": {
@@ -67,6 +93,9 @@ async def get_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
 )
 async def render_template(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Render a Jinja2 template."""
+    if not _template_rendering_enabled(hass):
+        return _template_disabled()
+
     from homeassistant.helpers.template import Template
 
     template_str = arguments["template"]
@@ -186,6 +215,19 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
                 {
                     "type": "text",
                     "text": f"Error: firing system event '{event_type}' is not allowed",
+                }
+            ]
+        }
+
+    # The integration's own events are its audit trail, so this tool does not fire
+    # them. This closes the direct route only: an automation with an event action
+    # can still fire anything, so the audit event is evidence, not proof.
+    if event_type.startswith(f"{DOMAIN}_"):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Error: firing this integration's event '{event_type}' is not allowed",
                 }
             ]
         }

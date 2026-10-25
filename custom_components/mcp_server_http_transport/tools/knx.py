@@ -52,6 +52,45 @@ except Exception:  # pragma: no cover - Home Assistant without the telegram stor
     TelegramQuery = None
 
 
+# The KNX websocket commands validate entity data before handing it to the
+# config store, and the store relies on that: it reads typed fields off the
+# validated config (e.g. ``data.entity``) rather than raw dict keys. Passing the
+# raw tool input fails with "'dict' object has no attribute 'entity'" - and on
+# update only after HA has already removed the entity, leaving it unavailable
+# until the KNX integration is reloaded. So the write tools validate exactly
+# like ``knx/create_entity`` / ``knx/update_entity`` do.
+try:
+    from homeassistant.components.knx.storage.entity_store_validation import (
+        EntityStoreValidationException,
+        validate_entity_data,
+    )
+except Exception:  # pragma: no cover - KNX integration not available
+    EntityStoreValidationException = None
+    validate_entity_data = None
+
+
+def _validate_knx_entity(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, dict | None]:
+    """Validate a KNX UI entity payload the way HA's websocket commands do.
+
+    Returns ``(validated, None)`` on success or ``(None, error_result)`` with the
+    validation errors as tool output, so nothing is removed or written on bad input.
+    """
+    if validate_entity_data is None:
+        return None, {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "KNX entity validation is not available in this Home Assistant.",
+                }
+            ]
+        }
+    try:
+        return validate_entity_data(payload), None
+    except EntityStoreValidationException as exc:
+        error = {"validation_failed": True, **dict(exc.validation_error)}
+        return None, {"content": [{"type": "text", "text": dumps(error)}]}
+
+
 def _get_knx_module(hass: HomeAssistant):
     """Return the KNX runtime module from hass.data, or None if KNX isn't set up."""
     if KNX_MODULE_KEY is None:
@@ -347,8 +386,11 @@ async def knx_create_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     data = arguments.get("data")
     if not platform or data is None:
         return {"content": [{"type": "text", "text": "Both 'platform' and 'data' are required."}]}
+    validated, error = _validate_knx_entity({"platform": platform, "data": data})
+    if error is not None:
+        return error
     try:
-        entity_id = await knx.config_store.create_entity(platform, data)
+        entity_id = await knx.config_store.create_entity(validated["platform"], validated["data"])
     except Exception as err:  # noqa: BLE001
         return {"content": [{"type": "text", "text": f"create_entity failed: {err}"}]}
     result = {"created": True, "entity_id": entity_id, "platform": platform}
@@ -387,8 +429,15 @@ async def knx_update_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 {"type": "text", "text": "'entity_id', 'platform' and 'data' are required."}
             ]
         }
+    validated, error = _validate_knx_entity(
+        {"platform": platform, "entity_id": entity_id, "data": data}
+    )
+    if error is not None:
+        return error
     try:
-        await knx.config_store.update_entity(platform, entity_id, data)
+        await knx.config_store.update_entity(
+            validated["platform"], validated["entity_id"], validated["data"]
+        )
     except Exception as err:  # noqa: BLE001
         return {"content": [{"type": "text", "text": f"update_entity failed: {err}"}]}
     result = {"updated": True, "entity_id": entity_id, "platform": platform}

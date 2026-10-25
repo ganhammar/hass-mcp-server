@@ -78,18 +78,23 @@ except Exception:  # pragma: no cover - KNX or its telegram store not installed
 
 
 # The KNX write tools validate entity data the way HA's own websocket commands do.
-# That needs only the KNX integration itself (xknx), not its telegram store.
+# Skip only when the KNX integration's own requirement is missing: once xknx is
+# importable, a renamed or removed HA name must fail collection here rather than
+# quietly skip the contracts that would have caught it.
 try:
+    import xknx  # noqa: F401
+
+    KNX_ENTITY_STORE_AVAILABLE = True
+except ImportError:  # pragma: no cover - KNX integration requirements not installed
+    KNX_ENTITY_STORE_AVAILABLE = False
+
+if KNX_ENTITY_STORE_AVAILABLE:
     from homeassistant.components.knx.storage.config_store import KNXConfigStore
     from homeassistant.components.knx.storage.entity_store_validation import (
         EntityStoreValidationException,
         validate_entity_data,
     )
     from homeassistant.components.knx.websocket import ws_create_entity, ws_update_entity
-
-    KNX_ENTITY_STORE_AVAILABLE = True
-except Exception:  # pragma: no cover - KNX integration not installed
-    KNX_ENTITY_STORE_AVAILABLE = False
 
 
 def _params(func) -> list[str]:
@@ -380,7 +385,7 @@ class TestKnxTelegramStoreContracts:
         assert KNX_TELEGRAM_LOAD_HOURS_DEFAULT == 24
 
 
-@pytest.mark.skipif(not KNX_ENTITY_STORE_AVAILABLE, reason="KNX integration not installed")
+@pytest.mark.skipif(not KNX_ENTITY_STORE_AVAILABLE, reason="KNX requirements (xknx) not installed")
 class TestKnxEntityStoreContracts:
     """Contracts for knx_create_entity / knx_update_entity in tools/knx.py.
 

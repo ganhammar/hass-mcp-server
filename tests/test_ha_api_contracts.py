@@ -77,6 +77,26 @@ except Exception:  # pragma: no cover - KNX or its telegram store not installed
     KNX_TELEGRAM_STORE_AVAILABLE = False
 
 
+# The KNX write tools validate entity data the way HA's own websocket commands do.
+# Skip only when the KNX integration's own requirement is missing: once xknx is
+# importable, a renamed or removed HA name must fail collection here rather than
+# quietly skip the contracts that would have caught it.
+try:
+    import xknx  # noqa: F401
+
+    KNX_ENTITY_STORE_AVAILABLE = True
+except ImportError:  # pragma: no cover - KNX integration requirements not installed
+    KNX_ENTITY_STORE_AVAILABLE = False
+
+if KNX_ENTITY_STORE_AVAILABLE:
+    from homeassistant.components.knx.storage.config_store import KNXConfigStore
+    from homeassistant.components.knx.storage.entity_store_validation import (
+        EntityStoreValidationException,
+        validate_entity_data,
+    )
+    from homeassistant.components.knx.websocket import ws_create_entity, ws_update_entity
+
+
 def _params(func) -> list[str]:
     return list(inspect.signature(func).parameters)
 
@@ -363,6 +383,58 @@ class TestKnxTelegramStoreContracts:
         """The window the tool reads off the config entry, and its fallback."""
         assert CONF_KNX_TELEGRAM_DB_LOAD_HOURS == "telegram_db_load_hours"
         assert KNX_TELEGRAM_LOAD_HOURS_DEFAULT == 24
+
+
+@pytest.mark.skipif(not KNX_ENTITY_STORE_AVAILABLE, reason="KNX requirements (xknx) not installed")
+class TestKnxEntityStoreContracts:
+    """Contracts for knx_create_entity / knx_update_entity in tools/knx.py.
+
+    The tools write through `knx.config_store`, which has no compatibility promise.
+    They copy HA's own `knx/create_entity` and `knx/update_entity` websocket
+    handlers: validate first, then pass the validated platform, entity_id and data.
+    Since HA 2026.10 the store reads typed fields off the validated data, so
+    skipping validation breaks it - after the entity was already removed.
+    """
+
+    _SWITCH = {
+        "entity": {"name": "x", "device_info": None, "entity_category": None},
+        "knx": {
+            "ga_switch": {"write": "1/1/1", "state": None, "passive": []},
+            "invert": False,
+            "respond_to_read": False,
+            "sync_state": True,
+        },
+    }
+
+    def test_websocket_handlers_validate_before_the_store(self):
+        """When this breaks, read the handlers again before changing the tools."""
+        for handler in (ws_create_entity, ws_update_entity):
+            source = inspect.getsource(handler)
+            assert "validate_entity_data(" in source
+            assert "validated_data[CONF_DATA]" in source
+
+    def test_store_signatures(self):
+        assert _params(KNXConfigStore.create_entity) == ["self", "platform", "data"]
+        assert _params(KNXConfigStore.update_entity) == ["self", "platform", "entity_id", "data"]
+
+    def test_validation_keeps_the_keys_the_tools_read(self):
+        validated = validate_entity_data(
+            {"platform": "switch", "entity_id": "switch.x", "data": self._SWITCH}
+        )
+        assert validated["platform"] == "switch"
+        assert validated["entity_id"] == "switch.x"
+        assert "data" in validated
+
+    def test_validation_error_carries_errors(self):
+        """The tools return exc.validation_error as the result text."""
+        with pytest.raises(EntityStoreValidationException) as exc:
+            validate_entity_data(
+                {"platform": "switch", "data": {"entity": {"name": "x"}, "knx": {}}}
+            )
+        error = exc.value.validation_error
+        assert error["success"] is False
+        assert error["errors"]
+        assert {"path", "message"} <= set(error["errors"][0])
 
 
 class _ContractView(HomeAssistantView):

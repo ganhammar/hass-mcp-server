@@ -9,6 +9,29 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.mcp_server_http_transport.tools import knx as knx_mod
 
+
+class _FakeValidationError(Exception):
+    def __init__(self, validation_error):
+        super().__init__(validation_error)
+        self.validation_error = validation_error
+
+
+def _raise_validation(payload):
+    raise _FakeValidationError(
+        {
+            "success": False,
+            "error_base": "required key not provided",
+            "errors": [
+                {
+                    "path": ["data", "knx", "ga_switch"],
+                    "error_message": "required key not provided",
+                    "error_class": "Invalid",
+                }
+            ],
+        }
+    )
+
+
 _KEY = "knx_test_module_key"
 
 _TELEGRAMS = [
@@ -336,13 +359,33 @@ class TestKnxEntityTools:
     async def test_create_entity_calls_config_store(self):
         module = Mock()
         module.config_store.create_entity = AsyncMock(return_value="light.knx_new")
-        result = await knx_mod.knx_create_entity(
-            self._hass(module), {"platform": "light", "data": {"name": "x"}}
-        )
+        typed = object()
+        validate = Mock(return_value={"platform": "light", "data": typed})
+        with patch.object(knx_mod, "validate_entity_data", validate):
+            result = await knx_mod.knx_create_entity(
+                self._hass(module), {"platform": "light", "data": {"name": "x"}}
+            )
         data = _unpack(result)
         assert data["created"] is True
         assert data["entity_id"] == "light.knx_new"
-        module.config_store.create_entity.assert_awaited_once_with("light", {"name": "x"})
+        validate.assert_called_once_with({"platform": "light", "data": {"name": "x"}})
+        # the store gets HA's validated config, not the raw tool input
+        module.config_store.create_entity.assert_awaited_once_with("light", typed)
+
+    async def test_create_entity_invalid_data_never_reaches_the_store(self):
+        module = Mock()
+        module.config_store.create_entity = AsyncMock()
+        with (
+            patch.object(knx_mod, "validate_entity_data", _raise_validation),
+            patch.object(knx_mod, "EntityStoreValidationException", _FakeValidationError),
+        ):
+            result = await knx_mod.knx_create_entity(
+                self._hass(module), {"platform": "light", "data": {"name": "x"}}
+            )
+        data = _unpack(result)
+        assert data["validation_failed"] is True
+        assert data["errors"][0]["path"] == ["data", "knx", "ga_switch"]
+        module.config_store.create_entity.assert_not_awaited()
 
     async def test_create_entity_requires_args(self):
         result = await knx_mod.knx_create_entity(self._hass(Mock()), {"platform": "light"})
@@ -352,12 +395,51 @@ class TestKnxEntityTools:
     async def test_update_entity_calls_config_store(self):
         module = Mock()
         module.config_store.update_entity = AsyncMock(return_value=None)
-        result = await knx_mod.knx_update_entity(
-            self._hass(module), {"entity_id": "light.x", "platform": "light", "data": {"a": 1}}
-        )
+        typed = object()
+        validate = Mock(return_value={"platform": "light", "entity_id": "light.x", "data": typed})
+        with patch.object(knx_mod, "validate_entity_data", validate):
+            result = await knx_mod.knx_update_entity(
+                self._hass(module), {"entity_id": "light.x", "platform": "light", "data": {"a": 1}}
+            )
         data = _unpack(result)
         assert data["updated"] is True
-        module.config_store.update_entity.assert_awaited_once_with("light", "light.x", {"a": 1})
+        validate.assert_called_once_with(
+            {"platform": "light", "entity_id": "light.x", "data": {"a": 1}}
+        )
+        module.config_store.update_entity.assert_awaited_once_with("light", "light.x", typed)
+
+    async def test_update_entity_invalid_data_never_reaches_the_store(self):
+        # HA removes the entity before re-creating it, so invalid input must be
+        # rejected before update_entity is called - otherwise the entity is left
+        # unavailable until the KNX integration is reloaded.
+        module = Mock()
+        module.config_store.update_entity = AsyncMock()
+        with (
+            patch.object(knx_mod, "validate_entity_data", _raise_validation),
+            patch.object(knx_mod, "EntityStoreValidationException", _FakeValidationError),
+        ):
+            result = await knx_mod.knx_update_entity(
+                self._hass(module), {"entity_id": "light.x", "platform": "light", "data": {}}
+            )
+        data = _unpack(result)
+        assert data["validation_failed"] is True
+        module.config_store.update_entity.assert_not_awaited()
+
+    async def test_write_tools_report_missing_validation(self):
+        module = Mock()
+        module.config_store.update_entity = AsyncMock()
+        module.config_store.create_entity = AsyncMock()
+        with patch.object(knx_mod, "validate_entity_data", None):
+            upd = await knx_mod.knx_update_entity(
+                self._hass(module), {"entity_id": "light.x", "platform": "light", "data": {}}
+            )
+            new = await knx_mod.knx_create_entity(
+                self._hass(module), {"platform": "light", "data": {}}
+            )
+        assert "validation is not available" in upd["content"][0]["text"]
+        assert "validation is not available" in new["content"][0]["text"]
+        module.config_store.update_entity.assert_not_awaited()
+        module.config_store.create_entity.assert_not_awaited()
 
     async def test_delete_entity_calls_config_store(self):
         module = Mock()

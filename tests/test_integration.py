@@ -833,7 +833,7 @@ class TestMCPClientSession:
                 side_effect=mock_load_list,
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
                 side_effect=mock_save,
             ),
         ):
@@ -947,7 +947,7 @@ class TestMCPClientSession:
                 side_effect=mock_load_dict,
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
                 side_effect=mock_save,
             ),
         ):
@@ -1063,7 +1063,7 @@ class TestMCPClientSession:
                 side_effect=mock_load_list,
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
                 side_effect=mock_save,
             ),
         ):

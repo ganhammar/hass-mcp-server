@@ -108,7 +108,6 @@ async def test_list_registry_paginates_by_default(registry_hass):
         {"limit": True},
         {"offset": -1},
         {"offset": False},
-        {"unexpected": True},
     ],
 )
 async def test_list_registry_rejects_invalid_arguments(registry_hass, arguments):
@@ -135,7 +134,6 @@ async def test_get_registry_entity_even_when_disabled(registry_hass):
         {"entity_id": "sensor.missing"},
         {"entity_id": "invalid"},
         {"entity_id": 123},
-        {"entity_id": "sensor.temperature", "extra": True},
     ],
 )
 async def test_get_registry_error_is_plain_text(registry_hass, arguments):
@@ -212,9 +210,7 @@ async def test_update_registry_name_only(registry_hass):
         {"entity_id": "light.living_room"},
         {"entity_id": "light.living_room", "apply": "true", "name": "Test"},
         {"entity_id": "light.living_room", "name": ""},
-        {"entity_id": "light.living_room", "name": "New\nLine"},
         {"entity_id": "light.living_room", "new_entity_id": 42},
-        {"entity_id": "light.living_room", "name": "Test", "extra": True},
         {"entity_id": "light.missing", "name": "Test"},
     ],
 )

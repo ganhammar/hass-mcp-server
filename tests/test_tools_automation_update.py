@@ -247,3 +247,69 @@ async def test_noop_without_reloading(mock_hass, existing_config, tmp_path):
     assert "unchanged" in message(response)
     assert (tmp_path / "automations.yaml").read_text(encoding="utf-8") == OLD_YAML
     mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "overrides,expected",
+    [
+        ({"automation_id": ""}, "automation_id must be a non-empty string"),
+        ({"expected_hash": 123}, "expected_hash must be a string"),
+    ],
+)
+async def test_invalid_scalar_arguments_not_written(
+    mock_hass, existing_config, overrides, expected
+):
+    response = await update_automation(mock_hass, {**arguments(existing_config), **overrides})
+    assert expected in message(response)
+    mock_hass.async_add_executor_job.assert_not_awaited()
+
+
+async def test_noop_still_applies_icon(mock_hass, existing_config, tmp_path):
+    with patch(
+        "custom_components.mcp_server_http_transport.tools.config.async_icon_suffix",
+        new_callable=AsyncMock,
+        return_value=", with icon mdi:lamp",
+    ):
+        response = await update_automation(
+            mock_hass,
+            {
+                "automation_id": AUTOMATION_ID,
+                "config": existing_config,
+                "reload": False,
+                "icon": "mdi:lamp",
+            },
+        )
+    assert message(response) == "Successfully updated automation icon, with icon mdi:lamp"
+    assert (tmp_path / "automations.yaml").read_text(encoding="utf-8") == OLD_YAML
+
+
+async def test_validation_then_reload(mock_hass, existing_config, tmp_path):
+    with patch(
+        "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+        new_callable=AsyncMock,
+        return_value={"valid": True, "errors": []},
+    ):
+        response = await update_automation(mock_hass, arguments(existing_config, validate=True))
+    assert "config validated, automations reloaded" in message(response)
+    assert "Updated" in (tmp_path / "automations.yaml").read_text(encoding="utf-8")
+    assert not list(tmp_path.glob(".automations.yaml.backup_*"))
+    mock_hass.services.async_call.assert_awaited_once_with("automation", "reload", blocking=True)
+
+
+async def test_failed_rollback_reports_backup_path(mock_hass, existing_config, tmp_path):
+    async def check_and_lose_backup(hass):
+        for backup in tmp_path.glob(".automations.yaml.backup_*"):
+            backup.unlink()
+        return {"valid": False, "errors": ["bad config"]}
+
+    with patch(
+        "custom_components.mcp_server_http_transport.tools.config_files._run_config_check",
+        side_effect=check_and_lose_backup,
+    ):
+        response = await update_automation(mock_hass, arguments(existing_config, validate=True))
+    text = message(response)
+    assert "validation failed" in text
+    assert "CRITICAL: rollback failed" in text
+    assert ".automations.yaml.backup_" in text
+    assert "Updated" in (tmp_path / "automations.yaml").read_text(encoding="utf-8")
+    mock_hass.services.async_call.assert_not_awaited()

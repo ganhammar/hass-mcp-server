@@ -54,7 +54,7 @@ class TestToolsConfig:
                 return_value=[],
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.uuid.uuid4",
@@ -143,7 +143,7 @@ class TestToolsConfig:
                 return_value=[{"id": "existing-id", "alias": "Old"}],
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
         ):
             response = await view.post(request)
@@ -222,7 +222,7 @@ class TestToolsConfig:
                 return_value=[{"id": "to-delete", "alias": "Delete Me"}],
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
         ):
             response = await view.post(request)
@@ -300,7 +300,7 @@ class TestToolsConfig:
                 return_value=[],
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
             patch(
                 "custom_components.mcp_server_http_transport.config_manager.uuid.uuid4",
@@ -347,7 +347,7 @@ class TestToolsConfig:
                 return_value=[{"id": "scene-1", "name": "Old Scene"}],
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
         ):
             response = await view.post(request)
@@ -387,7 +387,7 @@ class TestToolsConfig:
                 return_value=[{"id": "scene-1", "name": "Delete Me"}],
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
         ):
             response = await view.post(request)
@@ -541,7 +541,7 @@ class TestToolsConfig:
                 return_value={},
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
         ):
             response = await view.post(request)
@@ -624,7 +624,7 @@ class TestToolsConfig:
                 return_value={"morning_routine": {"alias": "Old"}},
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
         ):
             response = await view.post(request)
@@ -703,7 +703,7 @@ class TestToolsConfig:
                 return_value={"morning_routine": {"alias": "Delete Me"}},
             ),
             patch(
-                "custom_components.mcp_server_http_transport.config_manager.yaml_dumper.save_yaml",
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
             ),
         ):
             response = await view.post(request)

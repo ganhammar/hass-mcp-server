@@ -1,9 +1,8 @@
 """Read and narrowly update Home Assistant's entity registry, never raw storage."""
 
-import unicodedata
 from typing import Any
 
-from homeassistant.core import HomeAssistant, valid_entity_id
+from homeassistant.core import HomeAssistant, valid_domain, valid_entity_id
 from homeassistant.helpers import entity_registry as er
 
 from ..json_utils import dumps
@@ -81,11 +80,8 @@ def _valid_id(value: Any) -> bool:
 )
 async def list_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Return sorted and bounded registry entries, not live states."""
-    if set(arguments) - {"domain", "limit", "offset"}:
-        return _error("Only domain, limit and offset are supported.")
-
     domain = arguments.get("domain")
-    if domain is not None and (not isinstance(domain, str) or not _valid_id(f"{domain}.example")):
+    if domain is not None and (not isinstance(domain, str) or not valid_domain(domain)):
         return _error("domain must be a valid entity domain.")
 
     limit = arguments.get("limit", 100)
@@ -128,8 +124,8 @@ async def list_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) -
 )
 async def get_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Look up the registry, not hass.states."""
-    if set(arguments) - {"entity_id"} or not _valid_id(arguments.get("entity_id")):
-        return _error("Only a valid entity_id is supported.")
+    if not _valid_id(arguments["entity_id"]):
+        return _error("entity_id must be a valid entity ID (domain.object_id).")
     entry = er.async_get(hass).async_get(arguments["entity_id"])
     if entry is None:
         return _error("Entity is not in the registry.")
@@ -152,7 +148,7 @@ async def get_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) ->
             },
             "name": {
                 "type": "string",
-                "description": "Nonblank display name without control characters.",
+                "description": "Non-blank display name.",
             },
             "apply": {
                 "type": "boolean",
@@ -167,10 +163,7 @@ async def get_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) ->
 )
 async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Preview changes or let Home Assistant validate and perform the update."""
-    if set(arguments) - {"entity_id", "new_entity_id", "name", "apply"}:
-        return _error("Only entity_id, new_entity_id, name and apply are supported.")
-
-    entity_id = arguments.get("entity_id")
+    entity_id = arguments["entity_id"]
     if not _valid_id(entity_id):
         return _error("Invalid entity_id; expected domain.object_id.")
 
@@ -184,12 +177,8 @@ async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any])
 
     if "name" in changes:
         name = changes["name"]
-        if (
-            not isinstance(name, str)
-            or not name.strip()
-            or any(unicodedata.category(char).startswith("C") for char in name)
-        ):
-            return _error("name must be a nonblank string without control characters.")
+        if not isinstance(name, str) or not name.strip():
+            return _error("name must be a non-blank string.")
 
     new_id = changes.get("new_entity_id", entity_id)
     if not isinstance(new_id, str):

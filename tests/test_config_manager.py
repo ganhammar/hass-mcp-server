@@ -1,16 +1,22 @@
 """Tests for config_manager YAML helpers."""
 
+import stat
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+import yaml
 
 from custom_components.mcp_server_http_transport.config_manager import (
+    _copy_aside,
     _load_yaml_dict,
     _load_yaml_list,
+    _save_yaml,
     read_dict_entries,
     read_dict_entry,
     read_list_entries,
     read_list_entry,
+    update_list_entry,
 )
 
 
@@ -254,3 +260,133 @@ class TestReadDictEntry:
             pytest.raises(ValueError, match="not found"),
         ):
             await read_dict_entry(mock_hass, "scripts.yaml", "nonexistent")
+
+
+class TestSaveYaml:
+    """Tests for _save_yaml."""
+
+    def test_replaces_file_atomically_and_keeps_mode(self, tmp_path):
+        path = tmp_path / "automations.yaml"
+        path.write_text("- id: a\n", encoding="utf-8")
+        path.chmod(0o600)
+
+        _save_yaml(str(path), [{"id": "b"}])
+
+        assert yaml.safe_load(path.read_text(encoding="utf-8")) == [{"id": "b"}]
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert [p.name for p in tmp_path.iterdir()] == ["automations.yaml"]
+
+    def test_failed_dump_leaves_file_untouched(self, tmp_path):
+        path = tmp_path / "automations.yaml"
+        path.write_text("- id: a\n", encoding="utf-8")
+
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager."
+                "yaml_dumper.save_yaml",
+                side_effect=RuntimeError("boom"),
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            _save_yaml(str(path), [{"id": "b"}])
+
+        assert path.read_text(encoding="utf-8") == "- id: a\n"
+        assert [p.name for p in tmp_path.iterdir()] == ["automations.yaml"]
+
+
+class TestUpdateListEntry:
+    """Tests for update_list_entry's expected, backup and reload options."""
+
+    @pytest.fixture
+    def hass(self, tmp_path):
+        hass = Mock()
+        hass.config.path = Mock(side_effect=lambda name: str(tmp_path / name))
+        hass.services.async_call = AsyncMock()
+
+        async def run(fn, *args):
+            return fn(*args)
+
+        hass.async_add_executor_job = AsyncMock(side_effect=run)
+        (tmp_path / "automations.yaml").write_text("- id: a\n  alias: Old\n", encoding="utf-8")
+        return hass
+
+    async def test_writes_and_reloads_by_default(self, hass, tmp_path):
+        backup = await update_list_entry(
+            hass, "automations.yaml", "a", {"alias": "New"}, "automation"
+        )
+
+        assert backup is None
+        saved = yaml.safe_load((tmp_path / "automations.yaml").read_text(encoding="utf-8"))
+        assert saved == [{"id": "a", "alias": "New"}]
+        hass.services.async_call.assert_awaited_once_with("automation", "reload", blocking=True)
+
+    async def test_reload_can_be_skipped(self, hass):
+        await update_list_entry(
+            hass, "automations.yaml", "a", {"alias": "New"}, "automation", reload=False
+        )
+
+        hass.services.async_call.assert_not_awaited()
+
+    async def test_expected_refuses_a_changed_entry(self, hass, tmp_path):
+        with pytest.raises(ValueError, match="changed since it was read"):
+            await update_list_entry(
+                hass,
+                "automations.yaml",
+                "a",
+                {"alias": "New"},
+                "automation",
+                expected={"id": "a", "alias": "Older"},
+            )
+
+        assert (tmp_path / "automations.yaml").read_text(
+            encoding="utf-8"
+        ) == "- id: a\n  alias: Old\n"
+        hass.services.async_call.assert_not_awaited()
+
+    async def test_backup_returns_a_copy_of_the_original(self, hass, tmp_path):
+        backup = await update_list_entry(
+            hass, "automations.yaml", "a", {"alias": "New"}, "automation", backup=True
+        )
+
+        assert backup is not None
+        assert Path(backup).parent == tmp_path
+        assert Path(backup).read_text(encoding="utf-8") == "- id: a\n  alias: Old\n"
+        assert "New" in (tmp_path / "automations.yaml").read_text(encoding="utf-8")
+
+    async def test_missing_entry_raises(self, hass):
+        with pytest.raises(ValueError, match="not found"):
+            await update_list_entry(hass, "automations.yaml", "zzz", {"alias": "New"}, "automation")
+
+    async def test_failed_write_removes_the_backup(self, hass, tmp_path):
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager._save_yaml",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError),
+        ):
+            await update_list_entry(
+                hass, "automations.yaml", "a", {"alias": "New"}, "automation", backup=True
+            )
+
+        assert [p.name for p in tmp_path.iterdir()] == ["automations.yaml"]
+        hass.services.async_call.assert_not_awaited()
+
+
+class TestCopyAside:
+    """Tests for _copy_aside."""
+
+    def test_failed_copy_leaves_no_temp_file(self, tmp_path):
+        path = tmp_path / "automations.yaml"
+        path.write_text("- id: a\n", encoding="utf-8")
+
+        with (
+            patch(
+                "custom_components.mcp_server_http_transport.config_manager.shutil.copy2",
+                side_effect=OSError("denied"),
+            ),
+            pytest.raises(OSError),
+        ):
+            _copy_aside(str(path))
+
+        assert [p.name for p in tmp_path.iterdir()] == ["automations.yaml"]

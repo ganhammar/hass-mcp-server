@@ -151,7 +151,11 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     if not dry_run and reload_automations and not validate and expected_hash is None:
         try:
             await update_list_entry(
-                hass, "automations.yaml", automation_id, submitted, "automation",
+                hass,
+                "automations.yaml",
+                automation_id,
+                submitted,
+                "automation",
             )
             suffix = await async_icon_suffix(
                 hass, arguments, "automation", "automation", automation_id
@@ -266,9 +270,7 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             except Exception as exc:
                 return result(f"Error updating automation: saved but reload failed: {exc}")
 
-        suffix = await async_icon_suffix(
-            hass, arguments, "automation", "automation", automation_id
-        )
+        suffix = await async_icon_suffix(hass, arguments, "automation", "automation", automation_id)
         status = "automations reloaded" if reload_automations else "no reload performed"
         validation = "config validated, " if validate else ""
         return result(

@@ -45,8 +45,7 @@ def yaml_io():
             side_effect=lambda path: yaml.safe_load(Path(path).read_text(encoding="utf-8")),
         ),
         patch(
-            "custom_components.mcp_server_http_transport.config_manager."
-            "yaml_dumper.save_yaml",
+            "custom_components.mcp_server_http_transport.config_manager." "yaml_dumper.save_yaml",
             side_effect=lambda path, rows: Path(path).write_text(
                 yaml.safe_dump(rows), encoding="utf-8"
             ),
@@ -199,7 +198,9 @@ async def test_default_reload_without_validation(mock_hass, existing_config):
     assert "automations reloaded" in message(response)
     check.assert_not_awaited()
     mock_hass.services.async_call.assert_awaited_once_with(
-        "automation", "reload", blocking=True,
+        "automation",
+        "reload",
+        blocking=True,
     )
 
 

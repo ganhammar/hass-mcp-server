@@ -28,6 +28,7 @@ from custom_components.mcp_server_http_transport.tools.icons import set_icon
 
 _CONFIG_MANAGER = "custom_components.mcp_server_http_transport.config_manager"
 _HELPERS = "custom_components.mcp_server_http_transport.tools.helpers"
+_CONFIG = {"alias": "Test"}
 
 
 def _register(hass: HomeAssistant, domain: str, platform: str, unique_id: str) -> str:
@@ -129,7 +130,7 @@ class TestUpdateWithIcon:
 
         with patch(f"{_CONFIG_MANAGER}.update_list_entry", AsyncMock()):
             result = await update_automation(
-                hass, {"automation_id": "abc", "config": {}, "icon": "mdi:lightbulb"}
+                hass, {"automation_id": "abc", "config": _CONFIG, "icon": "mdi:lightbulb"}
             )
 
         assert _icon(hass, automation) == "mdi:lightbulb"
@@ -142,7 +143,7 @@ class TestUpdateWithIcon:
 
         with patch(f"{_CONFIG_MANAGER}.update_list_entry", AsyncMock()):
             result = await update_automation(
-                hass, {"automation_id": "abc", "config": {}, "icon": ""}
+                hass, {"automation_id": "abc", "config": _CONFIG, "icon": ""}
             )
 
         assert _icon(hass, automation) is None
@@ -152,7 +153,7 @@ class TestUpdateWithIcon:
         er.async_get(hass).async_update_entity(automation, icon="mdi:lamp")
 
         with patch(f"{_CONFIG_MANAGER}.update_list_entry", AsyncMock()):
-            result = await update_automation(hass, {"automation_id": "abc", "config": {}})
+            result = await update_automation(hass, {"automation_id": "abc", "config": _CONFIG})
 
         assert _icon(hass, automation) == "mdi:lamp"
         assert result["content"][0]["text"] == "Successfully updated automation"

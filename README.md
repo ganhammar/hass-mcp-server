@@ -168,6 +168,9 @@ Update hass-oidc-server to 1.5.0 or newer and restart Home Assistant; the repair
 | `get_state` | Get the current state of any entity (optional `fields` to limit attributes) |
 | `batch_get_state` | Get state for multiple entities in one call (max 50) |
 | `list_entities` | List all entities, with optional `domain`, `detailed`, and `fields` parameters |
+| `list_entity_registry` | List registered entities (including disabled ones), filter by `domain`, page with `limit` (default 100, max 500) and `offset`; returns total count and `has_more` |
+| `get_entity_registry` | Read registry metadata for an entity, including disabled or unavailable entities |
+| `update_entity_registry` | Preview by default or apply a `name` / same-domain `new_entity_id` change (`apply=true`). HA validates IDs on apply; **references in automations, scripts, dashboards and templates are not migrated** |
 | `search_entities` | Search entities by friendly name, device class, domain, or area |
 | `get_device_details` | Get a device and every entity registered to it (all domains), with optional states |
 | `call_service` | Call any Home Assistant service |

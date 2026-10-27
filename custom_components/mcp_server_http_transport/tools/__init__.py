@@ -162,6 +162,7 @@ from . import (  # noqa: E402
     config_files,  # noqa: F401
     dashboards,  # noqa: F401
     entities,  # noqa: F401
+    entity_registry,  # noqa: F401
     helpers,  # noqa: F401
     icons,  # noqa: F401
     images,  # noqa: F401

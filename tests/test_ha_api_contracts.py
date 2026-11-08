@@ -35,12 +35,18 @@ from homeassistant.components.recorder.statistics import (
     list_statistic_ids,
     validate_statistics,
 )
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.category_registry import CategoryEntry, CategoryRegistry
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.entity_registry import EntityRegistry, RegistryEntry
 from homeassistant.helpers.json import json_encoder_default
+from homeassistant.helpers.label_registry import LabelEntry, LabelRegistry
 from homeassistant.helpers.recorder import DATA_INSTANCE
 from homeassistant.loader import Integration, async_get_integration
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mcp_server_http_transport.const import MCP_PATH
 
@@ -238,6 +244,84 @@ class TestRecorderContracts:
 
     def test_async_clear_statistics_signature(self):
         assert _params(Recorder.async_clear_statistics) == ["self", "statistic_ids", "on_done"]
+
+
+class TestLabelContracts:
+    """Contracts for tools/labels.py and list_labels.
+
+    Labels have no service; the frontend manages them over the websocket API,
+    which writes the same registry these call. The signatures are pinned as
+    keyword-only options after the name or ID, which is how the tools pass them.
+    """
+
+    def test_label_registry_signatures(self):
+        assert _params(LabelRegistry.async_create) == [
+            "self",
+            "name",
+            "color",
+            "icon",
+            "description",
+        ]
+        assert _params(LabelRegistry.async_update) == [
+            "self",
+            "label_id",
+            "color",
+            "description",
+            "icon",
+            "name",
+        ]
+        assert _params(LabelRegistry.async_delete) == ["self", "label_id"]
+        assert _params(LabelRegistry.async_get_label) == ["self", "label_id"]
+        assert _params(LabelRegistry.async_get_label_by_name) == ["self", "name"]
+        assert _params(LabelRegistry.async_list_labels) == ["self"]
+
+    def test_options_are_keyword_only(self):
+        """A positional color would silently land in the wrong field."""
+        for func in (LabelRegistry.async_create, LabelRegistry.async_update):
+            kinds = {
+                name: p.kind
+                for name, p in inspect.signature(func).parameters.items()
+                if name not in ("self", "name", "label_id")
+            }
+            assert set(kinds.values()) == {inspect.Parameter.KEYWORD_ONLY}
+
+    def test_label_entry_carries_the_listed_fields(self):
+        fields = {f.name for f in dataclasses.fields(LabelEntry)}
+        assert {"label_id", "name", "color", "icon", "description"} <= fields
+
+    async def test_duplicate_name_on_create_raises_value_error(self, hass):
+        """create_label reports the registry's refusal rather than checking for itself."""
+        registry = lr.async_get(hass)
+        registry.async_create("Outdoor")
+        with pytest.raises(ValueError):
+            registry.async_create("OUTDOOR")
+
+    async def test_unknown_label_on_update_raises_key_error(self, hass):
+        """update_label looks the label up first so that this never reaches a caller."""
+        with pytest.raises(KeyError):
+            lr.async_get(hass).async_update("nope", name="X")
+
+    async def test_deleting_a_label_strips_it_from_entities_devices_and_areas(self, hass):
+        """delete_label does no cleanup of its own; it relies on the registries doing it."""
+        label = lr.async_get(hass).async_create("Doomed")
+        entities = er.async_get(hass)
+        entity_id = entities.async_get_or_create("light", "hue", "l1").entity_id
+        entities.async_update_entity(entity_id, labels={label.label_id})
+        config_entry = MockConfigEntry(domain="hue")
+        config_entry.add_to_hass(hass)
+        devices = dr.async_get(hass)
+        device = devices.async_get_or_create(
+            config_entry_id=config_entry.entry_id, identifiers={("hue", "d1")}
+        )
+        devices.async_update_device(device.id, labels={label.label_id})
+        area = ar.async_get(hass).async_create("Garden", labels={label.label_id})
+
+        lr.async_get(hass).async_delete(label.label_id)
+        await hass.async_block_till_done()
+
+        assert entities.async_get(entity_id).labels == set()
+        assert devices.async_get(device.id).labels == set()
+        assert ar.async_get(hass).async_get_area(area.id).labels == set()
 
 
 class TestCategoryContracts:

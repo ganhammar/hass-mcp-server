@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+import voluptuous as vol
 from aiohttp import web
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
@@ -36,6 +37,7 @@ from homeassistant.components.recorder.statistics import (
     validate_statistics,
 )
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
@@ -49,6 +51,7 @@ from homeassistant.loader import Integration, async_get_integration
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mcp_server_http_transport.const import MCP_PATH
+from custom_components.mcp_server_http_transport.tools.labels import THEME_COLORS
 
 # Core's built-in MCP server is what claims /api/mcp (#81). Importing it needs
 # aiohttp_sse, which only its own manifest pulls in, and the streamable endpoint
@@ -288,6 +291,23 @@ class TestLabelContracts:
     def test_label_entry_carries_the_listed_fields(self):
         fields = {f.name for f in dataclasses.fields(LabelEntry)}
         assert {"label_id", "name", "color", "icon", "description"} <= fields
+
+    def test_core_accepts_every_theme_color_the_tools_accept(self):
+        """labels.py keeps its own copy of the color names core's websocket command allows.
+
+        The registry stores any string, so the tools enforce the names themselves. If
+        core drops or renames one, labels created with it would no longer round-trip
+        through the frontend: update THEME_COLORS to match.
+        """
+        from homeassistant.components.config.label_registry import (
+            SUPPORTED_LABEL_THEME_COLORS,
+        )
+
+        assert THEME_COLORS <= SUPPORTED_LABEL_THEME_COLORS
+        accepts = vol.Any(cv.color_hex, vol.In(SUPPORTED_LABEL_THEME_COLORS), None)
+        assert accepts("#ff9800") == "#ff9800"
+        with pytest.raises(vol.Invalid):
+            accepts("Red")
 
     async def test_duplicate_name_on_create_raises_value_error(self, hass):
         """create_label reports the registry's refusal rather than checking for itself."""

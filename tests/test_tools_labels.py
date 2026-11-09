@@ -14,6 +14,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.mcp_server_http_transport.resources import _read_labels
 from custom_components.mcp_server_http_transport.tools import (
     TOOLS,
     InvalidToolArguments,
@@ -23,6 +24,7 @@ from custom_components.mcp_server_http_transport.tools.entities import list_labe
 from custom_components.mcp_server_http_transport.tools.labels import (
     create_label,
     delete_label,
+    label_json,
     update_label,
 )
 
@@ -96,6 +98,40 @@ class TestCreateLabel:
         result = await create_label(hass, {"name": "Bad", "icon": "tree"})
 
         assert _text(result).startswith("Error creating label:")
+        assert not list(lr.async_get(hass).async_list_labels())
+
+    @pytest.mark.parametrize("color", ["red", "light-green", "blue-grey", "#ff9800", "#FF9800"])
+    async def test_accepts_what_the_frontend_accepts(self, hass: HomeAssistant, color: str):
+        await create_label(hass, {"name": "L", "color": color})
+
+        (label,) = lr.async_get(hass).async_list_labels()
+        assert label.color == color
+
+    @pytest.mark.parametrize(
+        "color",
+        ["Red", "light green", "chartreuse", "#fff", "ff9800", "#ff98", "#gggggg", "rgb(1,2,3)"],
+    )
+    async def test_invalid_color_is_refused_and_nothing_is_created(
+        self, hass: HomeAssistant, color: str
+    ):
+        result = await create_label(hass, {"name": "L", "color": color})
+
+        assert _text(result).startswith(f"Error creating label: '{color}' is not a valid color")
+        assert "#RRGGBB" in _text(result)
+        assert "light-green" in _text(result)
+        assert not list(lr.async_get(hass).async_list_labels())
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("name", 5), ("color", 5), ("icon", True), ("description", 5), ("description", ["a"])],
+    )
+    async def test_non_string_arguments_are_refused(self, hass: HomeAssistant, field: str, value):
+        arguments = {"name": "L", field: value}
+
+        result = await create_label(hass, arguments)
+
+        type_name = type(value).__name__
+        assert _text(result) == f"Error creating label: '{field}' must be a string, not {type_name}"
         assert not list(lr.async_get(hass).async_list_labels())
 
     async def test_created_label_is_listed(self, hass: HomeAssistant):
@@ -174,6 +210,38 @@ class TestUpdateLabel:
         unchanged = lr.async_get(hass).async_get_label(label.label_id)
         assert (unchanged.name, unchanged.icon) == ("Outdoor", "mdi:tree")
 
+    async def test_invalid_color_is_refused_and_nothing_changes(self, hass: HomeAssistant, label):
+        result = await update_label(
+            hass, {"label_id": label.label_id, "name": "Renamed", "color": "Red"}
+        )
+
+        assert _text(result).startswith("Error updating label: 'Red' is not a valid color")
+        unchanged = lr.async_get(hass).async_get_label(label.label_id)
+        assert (unchanged.name, unchanged.color) == ("Outdoor", "green")
+
+    async def test_hex_color_is_accepted(self, hass: HomeAssistant, label):
+        await update_label(hass, {"label_id": label.label_id, "color": "#ff9800"})
+
+        assert lr.async_get(hass).async_get_label(label.label_id).color == "#ff9800"
+
+    @pytest.mark.parametrize(
+        ("field", "value"), [("name", 5), ("color", 5), ("icon", 5), ("description", {"a": 1})]
+    )
+    async def test_non_string_arguments_are_refused(
+        self, hass: HomeAssistant, label, field: str, value
+    ):
+        result = await update_label(hass, {"label_id": label.label_id, field: value})
+
+        type_name = type(value).__name__
+        assert _text(result) == f"Error updating label: '{field}' must be a string, not {type_name}"
+        unchanged = lr.async_get(hass).async_get_label(label.label_id)
+        assert (unchanged.name, unchanged.color, unchanged.icon, unchanged.description) == (
+            "Outdoor",
+            "green",
+            "mdi:tree",
+            "Garden",
+        )
+
     async def test_no_fields_is_reported(self, hass: HomeAssistant, label):
         result = await update_label(hass, {"label_id": label.label_id})
 
@@ -224,7 +292,20 @@ class TestDeleteLabel:
         assert entities.async_get(entity_id).labels == {keep.label_id}
         assert devices.async_get(device.id).labels == set()
         assert areas.async_get_area(area.id).labels == set()
-        assert _text(result).endswith(", removing it from 1 entities, 1 devices, 1 areas")
+        assert _text(result).endswith(", removing it from 1 entity, 1 device, 1 area")
+
+    async def test_counts_are_plural_above_one(self, hass: HomeAssistant):
+        doomed = lr.async_get(hass).async_create("Doomed")
+        entities = er.async_get(hass)
+        for unique_id in ("l1", "l2"):
+            entity_id = entities.async_get_or_create("light", "hue", unique_id).entity_id
+            entities.async_update_entity(entity_id, labels={doomed.label_id})
+        ar.async_get(hass).async_create("Garden", labels={doomed.label_id})
+        ar.async_get(hass).async_create("Porch", labels={doomed.label_id})
+
+        result = await delete_label(hass, {"label_id": doomed.label_id})
+
+        assert _text(result).endswith(", removing it from 2 entities, 2 areas")
 
     async def test_unknown_label_is_reported_and_nothing_is_deleted(self, hass: HomeAssistant):
         lr.async_get(hass).async_create("Outdoor")
@@ -238,6 +319,22 @@ class TestDeleteLabel:
 
     async def test_is_marked_destructive(self):
         assert TOOLS["delete_label"]["schema"]["annotations"]["destructiveHint"] is True
+
+
+class TestLabelShape:
+    """list_labels, hass://labels and the label tools' own replies report one shape."""
+
+    async def test_the_tool_resource_and_replies_agree(self, hass: HomeAssistant):
+        created = await create_label(
+            hass, {"name": "Outdoor", "color": "green", "icon": "mdi:tree", "description": "Garden"}
+        )
+        (label,) = lr.async_get(hass).async_list_labels()
+
+        (listed,) = json.loads(_text(await list_labels(hass, {})))
+        (resource,) = json.loads(_read_labels(hass, "hass://labels")[0]["text"])
+
+        assert listed == resource == label_json(label) == _json_after("Created label ", created)
+        assert set(listed) == {"label_id", "name", "color", "icon", "description"}
 
 
 class TestDispatch:

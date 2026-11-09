@@ -7,6 +7,7 @@ registries each listen for the removal and drop the label from what carried it.
 
 from typing import Any
 
+import voluptuous as vol
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import config_validation as cv
@@ -41,9 +42,45 @@ DESCRIPTION_PROPERTY = {
 # Optional label fields an update may change, in the order they are reported.
 _OPTIONAL_FIELDS = ("color", "icon", "description")
 
+# The color names the frontend's label dialog offers, and the only ones the websocket
+# command accepts besides #RRGGBB (SUPPORTED_LABEL_THEME_COLORS in core's
+# components/config/label_registry.py). The registry itself stores any string, so
+# this is the one place they are enforced; test_ha_api_contracts.py checks core
+# still accepts every name here.
+THEME_COLORS = frozenset(
+    {
+        "primary",
+        "accent",
+        "disabled",
+        "red",
+        "pink",
+        "purple",
+        "deep-purple",
+        "indigo",
+        "blue",
+        "light-blue",
+        "cyan",
+        "teal",
+        "green",
+        "light-green",
+        "lime",
+        "yellow",
+        "amber",
+        "orange",
+        "deep-orange",
+        "brown",
+        "light-grey",
+        "grey",
+        "dark-grey",
+        "blue-grey",
+        "black",
+        "white",
+    }
+)
 
-def _label_json(label: lr.LabelEntry) -> dict[str, Any]:
-    """The fields list_labels reports for a label."""
+
+def label_json(label: lr.LabelEntry) -> dict[str, Any]:
+    """The fields list_labels and hass://labels report for a label."""
     return {
         "label_id": label.label_id,
         "name": label.name,
@@ -60,17 +97,43 @@ def _get_label(registry: lr.LabelRegistry, label_id: str) -> lr.LabelEntry:
     return label
 
 
-def _clean_name(name: str) -> str:
-    name = name.strip()
+def _string_argument(arguments: dict[str, Any], field: str) -> str | None:
+    """Return a string argument, None if absent or null, and refuse any other type.
+
+    call_tool checks that required arguments are present, not what type they are.
+    """
+    value = arguments.get(field)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"'{field}' must be a string, not {type(value).__name__}")
+    return value
+
+
+def _clean_name(name: str | None) -> str:
+    name = (name or "").strip()
     if not name:
         raise ValueError("A label needs a name")
     return name
 
 
+def _color(value: str) -> str:
+    """Accept what the websocket command does: #RRGGBB or a theme color name."""
+    if value in THEME_COLORS:
+        return value
+    try:
+        return cv.color_hex(value)
+    except vol.Invalid:
+        raise ValueError(
+            f"'{value}' is not a valid color: use #RRGGBB or one of "
+            f"{', '.join(sorted(THEME_COLORS))}"
+        ) from None
+
+
 def _optional_value(field: str, value: str | None) -> str | None:
-    """Normalize an optional field's argument: empty means none, an icon must be valid."""
+    """Normalize an optional field's argument: empty means none, otherwise it must be valid."""
     if not value:
         return None
+    if field == "color":
+        return _color(value)
     return cv.icon(value) if field == "icon" else value
 
 
@@ -100,12 +163,12 @@ async def create_label(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     """Create a label."""
     try:
         label = lr.async_get(hass).async_create(
-            _clean_name(arguments["name"]),
-            **{f: _optional_value(f, arguments.get(f)) for f in _OPTIONAL_FIELDS},
+            _clean_name(_string_argument(arguments, "name")),
+            **{f: _optional_value(f, _string_argument(arguments, f)) for f in _OPTIONAL_FIELDS},
         )
     except Exception as e:
         return _error("creating label", e)
-    return {"content": [{"type": "text", "text": f"Created label {dumps(_label_json(label))}"}]}
+    return {"content": [{"type": "text", "text": f"Created label {dumps(label_json(label))}"}]}
 
 
 @register_tool(
@@ -136,13 +199,12 @@ async def update_label(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         registry = lr.async_get(hass)
         label = _get_label(registry, arguments["label_id"])
 
-        changes: dict[str, Any] = {
-            f: _optional_value(f, arguments[f])
-            for f in _OPTIONAL_FIELDS
-            if arguments.get(f) is not None
-        }
-        if arguments.get("name") is not None:
-            name = _clean_name(arguments["name"])
+        changes: dict[str, Any] = {}
+        for field in _OPTIONAL_FIELDS:
+            if (value := _string_argument(arguments, field)) is not None:
+                changes[field] = _optional_value(field, value)
+        if (name := _string_argument(arguments, "name")) is not None:
+            name = _clean_name(name)
             taken = registry.async_get_label_by_name(name)
             if taken is not None and taken.label_id != label.label_id:
                 raise ValueError(f"The name '{name}' is already used by label '{taken.label_id}'")
@@ -153,7 +215,7 @@ async def update_label(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         label = registry.async_update(label.label_id, **changes)
     except Exception as e:
         return _error("updating label", e)
-    return {"content": [{"type": "text", "text": f"Updated label {dumps(_label_json(label))}"}]}
+    return {"content": [{"type": "text", "text": f"Updated label {dumps(label_json(label))}"}]}
 
 
 @register_tool(
@@ -182,19 +244,23 @@ async def delete_label(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         label_id = label.label_id
 
         carriers = {
-            "entities": len(
-                [e for e in er.async_get(hass).entities.values() if label_id in e.labels]
+            ("entity", "entities"): sum(
+                label_id in e.labels for e in er.async_get(hass).entities.values()
             ),
-            "devices": len(
-                [d for d in dr.async_get(hass).devices.values() if label_id in d.labels]
+            ("device", "devices"): sum(
+                label_id in d.labels for d in dr.async_get(hass).devices.values()
             ),
-            "areas": len([a for a in ar.async_get(hass).areas.values() if label_id in a.labels]),
+            ("area", "areas"): sum(label_id in a.labels for a in ar.async_get(hass).areas.values()),
         }
         registry.async_delete(label_id)
     except Exception as e:
         return _error("deleting label", e)
 
-    removed = ", ".join(f"{count} {kind}" for kind, count in carriers.items() if count)
+    removed = ", ".join(
+        f"{count} {singular if count == 1 else plural}"
+        for (singular, plural), count in carriers.items()
+        if count
+    )
     suffix = f", removing it from {removed}" if removed else ""
     return {
         "content": [{"type": "text", "text": f"Deleted label '{label.name}' ({label_id}){suffix}"}]

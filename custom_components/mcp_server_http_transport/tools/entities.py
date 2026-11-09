@@ -16,6 +16,7 @@ from . import (
     dumps,
     register_tool,
 )
+from .labels import label_json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -599,16 +600,7 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
 async def list_labels(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List all labels."""
     registry = lr.async_get(hass)
-    labels = [
-        {
-            "label_id": label.label_id,
-            "name": label.name,
-            "color": label.color,
-            "icon": label.icon,
-            "description": label.description,
-        }
-        for label in registry.async_list_labels()
-    ]
+    labels = [label_json(label) for label in registry.async_list_labels()]
 
     return {"content": [{"type": "text", "text": dumps(labels)}]}
 

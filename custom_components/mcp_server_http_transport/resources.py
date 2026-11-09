@@ -10,6 +10,7 @@ from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
 
 from .json_utils import dumps
+from .tools.labels import label_json
 
 RESOURCES = [
     {
@@ -318,16 +319,7 @@ def _read_entities_domain(hass: HomeAssistant, uri: str, domain: str) -> list[di
 def _read_labels(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
     """Read all labels as a resource."""
     registry = lr.async_get(hass)
-    labels = [
-        {
-            "label_id": label.label_id,
-            "name": label.name,
-            "color": label.color,
-            "icon": label.icon,
-            "description": label.description,
-        }
-        for label in registry.async_list_labels()
-    ]
+    labels = [label_json(label) for label in registry.async_list_labels()]
     return [
         {
             "uri": uri,

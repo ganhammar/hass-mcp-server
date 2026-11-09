@@ -239,6 +239,15 @@ Update hass-oidc-server to 1.5.0 or newer and restart Home Assistant; the repair
 | `list_categories` | List the categories for automations, scripts, scenes or helpers, with the entities in each |
 | `set_category` | Put an automation, script, scene or helper in a category (created by name if new), or take it out of one |
 
+**Labels**
+
+| Tool | Description |
+|------|-------------|
+| `list_labels` | List all labels for cross-domain grouping |
+| `create_label` | Create a label with an optional color, icon and description |
+| `update_label` | Rename a label or change its color, icon or description; an empty string clears an optional field |
+| `delete_label` | Delete a label and remove it from every entity, device and area that carries it |
+
 **Icons**
 
 | Tool | Description |
@@ -306,7 +315,6 @@ been copied and source identity/metadata checked for changes during copying.
 | `list_services` | List available services, optionally filtered by domain |
 | `describe_service` | Get a service's full parameter schema: fields, selectors, examples, and targets |
 | `list_integrations` | List installed integrations and their status |
-| `list_labels` | List all labels for cross-domain grouping |
 
 **KNX**
 

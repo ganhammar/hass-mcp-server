@@ -11,6 +11,7 @@ from homeassistant.helpers import label_registry as lr
 
 from .json_utils import dumps
 from .tools.labels import label_json
+from .tools.registries import area_json, floor_json
 
 RESOURCES = [
     {
@@ -161,14 +162,7 @@ def _read_config(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
 def _read_areas(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
     """Read all areas as a resource."""
     registry = ar.async_get(hass)
-    areas = [
-        {
-            "id": area.id,
-            "name": area.name,
-            "floor_id": area.floor_id,
-        }
-        for area in registry.async_list_areas()
-    ]
+    areas = [area_json(area) for area in registry.async_list_areas()]
     return [
         {
             "uri": uri,
@@ -231,16 +225,7 @@ def _read_services(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
 def _read_floors(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
     """Read all floors as a resource."""
     registry = fr.async_get(hass)
-    floors = [
-        {
-            "floor_id": floor.floor_id,
-            "name": floor.name,
-            "icon": floor.icon,
-            "level": floor.level,
-            "aliases": sorted(floor.aliases) if floor.aliases else [],
-        }
-        for floor in registry.async_list_floors()
-    ]
+    floors = [floor_json(floor) for floor in registry.async_list_floors()]
     return [
         {
             "uri": uri,

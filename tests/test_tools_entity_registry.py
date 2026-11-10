@@ -22,6 +22,7 @@ def _make_entry(entity_id, name=None, disabled_by=None):
         area_id="living_room",
         disabled_by=disabled_by,
         hidden_by=None,
+        labels=set(),
     )
 
 

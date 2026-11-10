@@ -136,16 +136,25 @@ def mock_area_registry():
     area_living.id = "living_room"
     area_living.name = "Living Room"
     area_living.floor_id = "ground_floor"
+    area_living.icon = None
+    area_living.labels = set()
+    area_living.aliases = set()
 
     area_bedroom = Mock()
     area_bedroom.id = "bedroom"
     area_bedroom.name = "Bedroom"
     area_bedroom.floor_id = "first_floor"
+    area_bedroom.icon = None
+    area_bedroom.labels = set()
+    area_bedroom.aliases = set()
 
     area_kitchen = Mock()
     area_kitchen.id = "kitchen"
     area_kitchen.name = "Kitchen"
     area_kitchen.floor_id = "ground_floor"
+    area_kitchen.icon = None
+    area_kitchen.labels = set()
+    area_kitchen.aliases = set()
 
     registry = Mock()
     registry.async_list_areas.return_value = [area_living, area_bedroom, area_kitchen]
@@ -264,7 +273,7 @@ class TestMCPClientSession:
         # Step 2: Discover tools
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 100
+        assert len(tool_names) == 108
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool

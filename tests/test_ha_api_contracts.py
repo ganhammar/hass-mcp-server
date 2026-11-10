@@ -43,6 +43,7 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.category_registry import CategoryEntry, CategoryRegistry
 from homeassistant.helpers.data_entry_flow import FlowManagerResourceView
@@ -352,6 +353,68 @@ class TestLabelContracts:
         assert entities.async_get(entity_id).labels == set()
         assert devices.async_get(device.id).labels == set()
         assert ar.async_get(hass).async_get_area(area.id).labels == set()
+
+
+class TestRegistryWriteContracts:
+    """Contracts for tools/registries.py and update_entity_registry.
+
+    Areas, floors and devices have no service for these writes; the frontend makes
+    them over the websocket API, which calls the same registry methods. The options
+    the tools pass are pinned as keyword-only, since each signature grows between
+    releases and a positional argument would land in the wrong field.
+    """
+
+    @pytest.mark.parametrize(
+        ("func", "positional", "options"),
+        [
+            (
+                ar.AreaRegistry.async_create,
+                ["name"],
+                {"aliases", "floor_id", "icon", "labels"},
+            ),
+            (
+                ar.AreaRegistry.async_update,
+                ["area_id"],
+                {"aliases", "floor_id", "icon", "labels", "name"},
+            ),
+            (fr.FloorRegistry.async_create, ["name"], {"aliases", "icon", "level"}),
+            (fr.FloorRegistry.async_update, ["floor_id"], {"aliases", "icon", "level", "name"}),
+            (
+                dr.DeviceRegistry.async_update_device,
+                ["device_id"],
+                {"area_id", "disabled_by", "labels", "name_by_user"},
+            ),
+            (
+                EntityRegistry.async_update_entity,
+                ["entity_id"],
+                {"area_id", "disabled_by", "hidden_by", "labels", "name", "new_entity_id"},
+            ),
+        ],
+    )
+    def test_writes_take_the_options_the_tools_pass(self, func, positional, options):
+        parameters = inspect.signature(func).parameters
+
+        assert list(parameters)[: len(positional) + 1] == ["self", *positional]
+        assert options <= set(parameters)
+        assert {parameters[name].kind for name in options} == {inspect.Parameter.KEYWORD_ONLY}
+
+    def test_lookups_and_deletes_take_an_id(self):
+        assert _params(ar.AreaRegistry.async_get_area) == ["self", "area_id"]
+        assert _params(ar.AreaRegistry.async_delete) == ["self", "area_id"]
+        assert _params(fr.FloorRegistry.async_get_floor) == ["self", "floor_id"]
+        assert _params(fr.FloorRegistry.async_delete) == ["self", "floor_id"]
+        assert _params(fr.FloorRegistry.async_list_floors) == ["self"]
+
+    def test_entries_carry_the_reported_fields(self):
+        assert {"id", "name", "floor_id", "icon", "labels", "aliases"} <= {
+            f.name for f in dataclasses.fields(ar.AreaEntry)
+        }
+        assert {"floor_id", "name", "icon", "level", "aliases"} <= {
+            f.name for f in dataclasses.fields(fr.FloorEntry)
+        }
+        assert dr.DeviceEntryDisabler.USER.value == "user"
+        assert er.RegistryEntryDisabler.USER.value == "user"
+        assert er.RegistryEntryHider.USER.value == "user"
 
 
 class TestCategoryContracts:

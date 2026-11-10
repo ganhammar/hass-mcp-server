@@ -87,6 +87,9 @@ RESOURCE_METADATA_PREFIX = "/.well-known/oauth-protected-resource"
 
 # Repairs issue raised while another integration also serves MCP_PATH.
 ISSUE_ENDPOINT_CONFLICT = "endpoint_conflict"
+# Raised while more than one config entry exists. They share one set of options, so
+# only the entry set up last is in effect.
+ISSUE_MULTIPLE_ENTRIES = "multiple_entries"
 
 # Repairs issue raised while the paired OIDC provider cannot bind a token's audience
 # to this resource, so tokens are validated without an audience check.

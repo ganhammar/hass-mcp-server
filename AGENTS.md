@@ -87,6 +87,12 @@ the change is not read-only. A withheld tool raises `ToolNotAvailable`, an
 tools is stored by name, so renaming a tool silently switches it back on for
 anyone who had disabled it.
 
+A new tool, resource or prompt needs a row in `docs/tools.md`, which is written
+by hand so each can be described for a person rather than for the model.
+`tests/test_docs.py` fails when one is missing, and when a link between the
+README and the pages under `docs/` leads nowhere. The README links to those pages
+by full URL because HACS shows it outside the repository.
+
 `get_prompt` does the same for `prompts/get`: an unknown name, non-object
 `arguments`, or a `required` argument that is absent or null raises
 `InvalidPromptRequest` and never reaches a handler. Some clients call

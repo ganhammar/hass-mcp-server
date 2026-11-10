@@ -76,6 +76,12 @@ DEFAULT_DASHBOARD = {
 
 
 def _text(result: dict) -> str:
+    assert "isError" not in result
+    return result["content"][0]["text"]
+
+
+def _error_text(result: dict) -> str:
+    assert result["isError"] is True
     return result["content"][0]["text"]
 
 
@@ -422,7 +428,7 @@ class TestToolLimits:
     ],
 )
 async def test_invalid_arguments_are_explained(hass: HomeAssistant, arguments, message):
-    text = _text(await search_config(hass, arguments))
+    text = _error_text(await search_config(hass, arguments))
 
     assert text.startswith("Error searching config: ")
     assert message in text

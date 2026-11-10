@@ -11,6 +11,7 @@ from . import (
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -34,7 +35,7 @@ async def list_dashboards_tool(hass: HomeAssistant, arguments: dict[str, Any]) -
         dashboards = await list_dashboards(hass)
         return {"content": [{"type": "text", "text": dumps(dashboards)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error listing dashboards: {str(e)}"}]}
+        return error_result(f"Error listing dashboards: {str(e)}")
 
 
 @register_tool(
@@ -102,24 +103,17 @@ async def get_dashboard_config_tool(
                 view = resolve_pointer(config, pointer)
                 result = summarize_view(view, tokens, int(tokens[1]))
             else:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"summary=true supports the whole config (omit path) or a "
-                                f"single view (path='/views/0'), not '{pointer}'. "
-                                f"Call again without summary to read '{pointer}' in full."
-                            ),
-                        }
-                    ]
-                }
+                return error_result(
+                    f"summary=true supports the whole config (omit path) or a "
+                    f"single view (path='/views/0'), not '{pointer}'. "
+                    f"Call again without summary to read '{pointer}' in full."
+                )
         else:
             result = resolve_pointer(config, pointer) if pointer else config
 
         return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error getting dashboard config: {str(e)}"}]}
+        return error_result(f"Error getting dashboard config: {str(e)}")
 
 
 @register_tool(
@@ -166,7 +160,7 @@ async def save_dashboard_config_tool(
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error saving dashboard config: {str(e)}"}]}
+        return error_result(f"Error saving dashboard config: {str(e)}")
 
 
 def _count(value: Any) -> int:
@@ -279,7 +273,7 @@ async def patch_dashboard_config_tool(
         lines.extend(_view_overview(config))
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error patching dashboard config: {str(e)}"}]}
+        return error_result(f"Error patching dashboard config: {str(e)}")
 
 
 @register_tool(
@@ -320,7 +314,7 @@ async def delete_dashboard_config_tool(
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error deleting dashboard config: {str(e)}"}]}
+        return error_result(f"Error deleting dashboard config: {str(e)}")
 
 
 @register_tool(
@@ -382,7 +376,7 @@ async def create_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error creating dashboard: {str(e)}"}]}
+        return error_result(f"Error creating dashboard: {str(e)}")
 
 
 @register_tool(
@@ -437,7 +431,7 @@ async def update_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error updating dashboard: {str(e)}"}]}
+        return error_result(f"Error updating dashboard: {str(e)}")
 
 
 @register_tool(
@@ -474,4 +468,4 @@ async def delete_dashboard_tool(hass: HomeAssistant, arguments: dict[str, Any]) 
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error deleting dashboard: {str(e)}"}]}
+        return error_result(f"Error deleting dashboard: {str(e)}")

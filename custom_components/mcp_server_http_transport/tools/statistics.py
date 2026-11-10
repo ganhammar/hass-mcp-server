@@ -12,6 +12,7 @@ from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -73,17 +74,9 @@ async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
     period = arguments.get("period", "hour")
 
     if period not in _VALID_PERIODS:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"Invalid period '{period}'. "
-                        f"Must be one of: {', '.join(sorted(_VALID_PERIODS))}"
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            f"Invalid period '{period}'. " f"Must be one of: {', '.join(sorted(_VALID_PERIODS))}"
+        )
 
     try:
         # recorder.get_statistics is the supported way in. It is declared
@@ -116,7 +109,7 @@ async def get_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
         return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         _LOGGER.error("Error getting statistics: %s", e)
-        return {"content": [{"type": "text", "text": f"Error getting statistics: {str(e)}"}]}
+        return error_result(f"Error getting statistics: {str(e)}")
 
 
 @register_tool(
@@ -153,17 +146,10 @@ async def list_statistic_ids(hass: HomeAssistant, arguments: dict[str, Any]) -> 
 
     statistic_type = arguments.get("statistic_type")
     if statistic_type is not None and statistic_type not in _VALID_STATISTIC_TYPES:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"Invalid statistic_type '{statistic_type}'. "
-                        f"Must be one of: {', '.join(sorted(_VALID_STATISTIC_TYPES))}"
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            f"Invalid statistic_type '{statistic_type}'. "
+            f"Must be one of: {', '.join(sorted(_VALID_STATISTIC_TYPES))}"
+        )
 
     ids = arguments.get("statistic_ids")
     id_set = set(ids) if ids else None
@@ -175,7 +161,7 @@ async def list_statistic_ids(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         return {"content": [{"type": "text", "text": dumps(metadata)}]}
     except Exception as e:
         _LOGGER.error("Error listing statistic IDs: %s", e)
-        return {"content": [{"type": "text", "text": f"Error listing statistic IDs: {str(e)}"}]}
+        return error_result(f"Error listing statistic IDs: {str(e)}")
 
 
 @register_tool(
@@ -207,7 +193,7 @@ async def validate_statistics(hass: HomeAssistant, arguments: dict[str, Any]) ->
         return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         _LOGGER.error("Error validating statistics: %s", e)
-        return {"content": [{"type": "text", "text": f"Error validating statistics: {str(e)}"}]}
+        return error_result(f"Error validating statistics: {str(e)}")
 
 
 @register_tool(
@@ -262,14 +248,7 @@ async def adjust_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> d
 
     start_time = dt_util.parse_datetime(arguments["start_time"])
     if start_time is None:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"Invalid start_time '{arguments['start_time']}'. Use ISO format.",
-                }
-            ]
-        }
+        return error_result(f"Invalid start_time '{arguments['start_time']}'. Use ISO format.")
     start_time = dt_util.as_utc(start_time)
 
     try:
@@ -279,46 +258,32 @@ async def adjust_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         )
     except Exception as e:
         _LOGGER.error("Error adjusting statistics: %s", e)
-        return {"content": [{"type": "text", "text": f"Error adjusting statistics: {str(e)}"}]}
+        return error_result(f"Error adjusting statistics: {str(e)}")
 
     if not metadatas:
-        return {"content": [{"type": "text", "text": f"Unknown statistic ID '{statistic_id}'."}]}
+        return error_result(f"Unknown statistic ID '{statistic_id}'.")
     metadata = metadatas[0]
 
     if not metadata.get("has_sum"):
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"Statistic '{statistic_id}' has no sum to adjust. "
-                        "adjust_statistics only applies to accumulating statistics."
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            f"Statistic '{statistic_id}' has no sum to adjust. "
+            "adjust_statistics only applies to accumulating statistics."
+        )
 
     stat_unit = metadata.get("statistics_unit_of_measurement")
     adjustment_unit = arguments.get("adjustment_unit", stat_unit)
     if adjustment_unit != stat_unit:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"adjustment_unit '{adjustment_unit}' must match the statistic's unit "
-                        f"'{stat_unit}'. Unit conversion is not supported; express the "
-                        "adjustment in the statistic's own unit."
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            f"adjustment_unit '{adjustment_unit}' must match the statistic's unit "
+            f"'{stat_unit}'. Unit conversion is not supported; express the "
+            "adjustment in the statistic's own unit."
+        )
 
     try:
         instance.async_adjust_statistics(statistic_id, start_time, adjustment, adjustment_unit)
     except Exception as e:
         _LOGGER.error("Error adjusting statistics: %s", e)
-        return {"content": [{"type": "text", "text": f"Error adjusting statistics: {str(e)}"}]}
+        return error_result(f"Error adjusting statistics: {str(e)}")
 
     return {
         "content": [
@@ -365,30 +330,16 @@ async def clear_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     )
 
     if arguments.get("confirm") is not True:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "clear_statistics requires confirm=true. This permanently deletes the "
-                        "statistics for the given IDs and cannot be undone."
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            "clear_statistics requires confirm=true. This permanently deletes the "
+            "statistics for the given IDs and cannot be undone."
+        )
 
     statistic_ids = arguments["statistic_ids"]
     if not isinstance(statistic_ids, list) or not all(isinstance(s, str) for s in statistic_ids):
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "statistic_ids must be an array of statistic ID strings.",
-                }
-            ]
-        }
+        return error_result("statistic_ids must be an array of statistic ID strings.")
     if not statistic_ids:
-        return {"content": [{"type": "text", "text": "statistic_ids must not be empty."}]}
+        return error_result("statistic_ids must not be empty.")
 
     # Verify every ID exists before deleting anything, so a typo can't be reported as a
     # successful clear of history that never existed. This is irreversible.
@@ -399,21 +350,12 @@ async def clear_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         )
     except Exception as e:
         _LOGGER.error("Error clearing statistics: %s", e)
-        return {"content": [{"type": "text", "text": f"Error clearing statistics: {str(e)}"}]}
+        return error_result(f"Error clearing statistics: {str(e)}")
 
     known = {metadata.get("statistic_id") for metadata in metadatas}
     unknown = [statistic_id for statistic_id in statistic_ids if statistic_id not in known]
     if unknown:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"Unknown statistic ID(s): {', '.join(unknown)}. Nothing was cleared."
-                    ),
-                }
-            ]
-        }
+        return error_result(f"Unknown statistic ID(s): {', '.join(unknown)}. Nothing was cleared.")
 
     done = asyncio.Event()
 
@@ -425,20 +367,13 @@ async def clear_statistics(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         async with asyncio.timeout(_CLEAR_STATISTICS_TIMEOUT):
             await done.wait()
     except TimeoutError:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "clear_statistics timed out waiting for the recorder. The deletion may "
-                        "still complete in the background."
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            "clear_statistics timed out waiting for the recorder. The deletion may "
+            "still complete in the background."
+        )
     except Exception as e:
         _LOGGER.error("Error clearing statistics: %s", e)
-        return {"content": [{"type": "text", "text": f"Error clearing statistics: {str(e)}"}]}
+        return error_result(f"Error clearing statistics: {str(e)}")
 
     return {
         "content": [

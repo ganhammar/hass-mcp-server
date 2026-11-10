@@ -13,6 +13,7 @@ from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -102,22 +103,15 @@ async def get_error_log(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         fallback = _read_system_log_buffer(hass, lines)
         if fallback is not None:
             return {"content": [{"type": "text", "text": fallback}]}
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"Log file not found at {log_path}, and Home Assistant's in-memory "
-                        "system log buffer is empty or unavailable. Home Assistant may not be "
-                        "configured to write logs to disk; enable file logging via the "
-                        "'logger:' integration in configuration.yaml."
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            f"Log file not found at {log_path}, and Home Assistant's in-memory "
+            "system log buffer is empty or unavailable. Home Assistant may not be "
+            "configured to write logs to disk; enable file logging via the "
+            "'logger:' integration in configuration.yaml."
+        )
     except Exception as e:
         _LOGGER.error("Error reading error log: %s", e)
-        return {"content": [{"type": "text", "text": f"Error reading error log: {str(e)}"}]}
+        return error_result(f"Error reading error log: {str(e)}")
 
 
 def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
@@ -211,24 +205,17 @@ async def restart_ha(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
     confirm = arguments.get("confirm", False)
 
     if confirm is not True:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "Restart requires confirm=true. "
-                        "This will restart Home Assistant and temporarily interrupt all operations."
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            "Restart requires confirm=true. "
+            "This will restart Home Assistant and temporarily interrupt all operations."
+        )
 
     try:
         await hass.services.async_call("homeassistant", "restart", blocking=False)
         return {"content": [{"type": "text", "text": "Home Assistant restart has been initiated"}]}
     except Exception as e:
         _LOGGER.error("Error restarting Home Assistant: %s", e)
-        return {"content": [{"type": "text", "text": f"Error restarting Home Assistant: {str(e)}"}]}
+        return error_result(f"Error restarting Home Assistant: {str(e)}")
 
 
 @register_tool(
@@ -346,7 +333,7 @@ async def check_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         _LOGGER.error("Error checking config: %s", e)
-        return {"content": [{"type": "text", "text": f"Error checking config: {str(e)}"}]}
+        return error_result(f"Error checking config: {str(e)}")
 
 
 @register_tool(

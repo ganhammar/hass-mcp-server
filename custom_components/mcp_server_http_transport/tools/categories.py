@@ -14,7 +14,7 @@ from homeassistant.helpers import category_registry as cr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
 
-from . import ANNOTATION_IDEMPOTENT, ANNOTATION_READ_ONLY, dumps, register_tool
+from . import ANNOTATION_IDEMPOTENT, ANNOTATION_READ_ONLY, dumps, error_result, register_tool
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -198,4 +198,4 @@ async def set_category(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         outcome = await async_assign_category(hass, entity_id, arguments["category"])
         return {"content": [{"type": "text", "text": f"{entity_id} now has {outcome}"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error setting category: {str(e)}"}]}
+        return error_result(f"Error setting category: {str(e)}")

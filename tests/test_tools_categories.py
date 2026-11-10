@@ -53,6 +53,7 @@ class TestCreateWithCategory:
         assert er.async_get(hass).async_get(automation).categories == {
             "automation": category.category_id
         }
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert text.startswith("Successfully created automation with id: abc")
         assert "Lighting" in text
@@ -62,6 +63,7 @@ class TestCreateWithCategory:
             result = await create_automation(hass, {"config": {}})
 
         assert er.async_get(hass).async_get(automation).categories == {}
+        assert "isError" not in result
         assert result["content"][0]["text"] == "Successfully created automation with id: abc"
 
     async def test_scene_is_looked_up_on_the_homeassistant_platform(self, hass: HomeAssistant):
@@ -86,6 +88,7 @@ class TestCreateWithCategory:
         with patch(f"{_CONFIG_MANAGER}.create_list_entry", AsyncMock(return_value="missing")):
             result = await create_automation(hass, {"config": {}, "category": "Lighting"})
 
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert text.startswith("Successfully created automation with id: missing")
         assert "category could not be set" in text
@@ -114,6 +117,7 @@ class TestSetCategory:
         assert er.async_get(hass).async_get(automation).categories == {
             "automation": existing.category_id
         }
+        assert "isError" not in result
         assert "Lighting" in result["content"][0]["text"]
 
     async def test_category_of_another_scope_is_not_matched(
@@ -136,6 +140,7 @@ class TestSetCategory:
         result = await set_category(hass, {"entity_id": automation, "category": ""})
 
         assert er.async_get(hass).async_get(automation).categories == {"other": "x"}
+        assert "isError" not in result
         assert "no category" in result["content"][0]["text"]
 
     @pytest.mark.parametrize("domain", ["input_boolean", "counter", "timer", "schedule"])
@@ -160,6 +165,7 @@ class TestSetCategory:
 
         result = await set_category(hass, {"entity_id": light, "category": "Lighting"})
 
+        assert result["isError"] is True
         assert "cannot be categorized" in result["content"][0]["text"]
         assert er.async_get(hass).async_get(light).categories == {}
         assert not list(cr.async_get(hass).async_list_categories(scope="helpers"))
@@ -167,6 +173,7 @@ class TestSetCategory:
     async def test_an_unknown_entity_is_reported(self, hass: HomeAssistant):
         result = await set_category(hass, {"entity_id": "automation.nope", "category": "X"})
 
+        assert result["isError"] is True
         assert "not in the entity registry" in result["content"][0]["text"]
 
 
@@ -182,6 +189,7 @@ class TestListCategories:
 
         result = await list_categories(hass, {})
 
+        assert "isError" not in result
         categories = {c["name"]: c for c in json.loads(result["content"][0]["text"])}
         assert set(categories) == {"Lighting", "Empty"}
         assert categories["Lighting"] == {
@@ -197,4 +205,5 @@ class TestListCategories:
 
         result = await list_categories(hass, {"scope": "helpers"})
 
+        assert "isError" not in result
         assert [c["name"] for c in json.loads(result["content"][0]["text"])] == ["Presence"]

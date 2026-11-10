@@ -14,6 +14,7 @@ from . import (
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -76,19 +77,12 @@ def _validate_knx_entity(payload: dict[str, Any]) -> tuple[dict[str, Any] | None
     validation errors as tool output, so nothing is removed or written on bad input.
     """
     if validate_entity_data is None:
-        return None, {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "KNX entity validation is not available in this Home Assistant.",
-                }
-            ]
-        }
+        return None, error_result("KNX entity validation is not available in this Home Assistant.")
     try:
         return validate_entity_data(payload), None
     except EntityStoreValidationException as exc:
         error = {"validation_failed": True, **dict(exc.validation_error)}
-        return None, {"content": [{"type": "text", "text": dumps(error)}]}
+        return None, error_result(dumps(error))
 
 
 def _get_knx_module(hass: HomeAssistant):
@@ -185,19 +179,12 @@ async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -
     """Return filtered recent KNX telegrams from the group-monitor buffer."""
     knx = _get_knx_module(hass)
     if knx is None:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "KNX integration is not set up on this Home Assistant instance.",
-                }
-            ]
-        }
+        return error_result("KNX integration is not set up on this Home Assistant instance.")
 
     try:
         telegrams = await _load_recent_telegrams(knx)
     except ValueError as err:
-        return {"content": [{"type": "text", "text": str(err)}]}
+        return error_result(str(err))
 
     try:
         ga_re = re.compile(arguments["filter_ga"]) if arguments.get("filter_ga") else None
@@ -207,7 +194,7 @@ async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -
             else None
         )
     except re.error as err:
-        return {"content": [{"type": "text", "text": f"Invalid regex: {err}"}]}
+        return error_result(f"Invalid regex: {err}")
 
     matched = [
         t
@@ -235,7 +222,7 @@ async def knx_recent_telegrams(hass: HomeAssistant, arguments: dict[str, Any]) -
 
 
 def _not_setup() -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": "KNX integration is not set up."}]}
+    return error_result("KNX integration is not set up.")
 
 
 def _supported_platforms_ui():
@@ -321,18 +308,11 @@ async def knx_get_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     try:
         mapping = dict(knx.group_address_entities)
     except AttributeError:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "KNX group-address/entity mapping unavailable on this HA version.",
-                }
-            ]
-        }
+        return error_result("KNX group-address/entity mapping unavailable on this HA version.")
     try:
         ga_re = re.compile(arguments["filter_ga"]) if arguments.get("filter_ga") else None
     except re.error as err:
-        return {"content": [{"type": "text", "text": f"Invalid regex: {err}"}]}
+        return error_result(f"Invalid regex: {err}")
 
     rows = []
     for ga, identifiers in mapping.items():
@@ -385,14 +365,14 @@ async def knx_create_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     platform = arguments.get("platform")
     data = arguments.get("data")
     if not platform or data is None:
-        return {"content": [{"type": "text", "text": "Both 'platform' and 'data' are required."}]}
+        return error_result("Both 'platform' and 'data' are required.")
     validated, error = _validate_knx_entity({"platform": platform, "data": data})
     if error is not None:
         return error
     try:
         entity_id = await knx.config_store.create_entity(validated["platform"], validated["data"])
     except Exception as err:  # noqa: BLE001
-        return {"content": [{"type": "text", "text": f"create_entity failed: {err}"}]}
+        return error_result(f"create_entity failed: {err}")
     result = {"created": True, "entity_id": entity_id, "platform": platform}
     return {"content": [{"type": "text", "text": dumps(result)}]}
 
@@ -424,11 +404,7 @@ async def knx_update_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     platform = arguments.get("platform")
     data = arguments.get("data")
     if not entity_id or not platform or data is None:
-        return {
-            "content": [
-                {"type": "text", "text": "'entity_id', 'platform' and 'data' are required."}
-            ]
-        }
+        return error_result("'entity_id', 'platform' and 'data' are required.")
     validated, error = _validate_knx_entity(
         {"platform": platform, "entity_id": entity_id, "data": data}
     )
@@ -439,7 +415,7 @@ async def knx_update_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             validated["platform"], validated["entity_id"], validated["data"]
         )
     except Exception as err:  # noqa: BLE001
-        return {"content": [{"type": "text", "text": f"update_entity failed: {err}"}]}
+        return error_result(f"update_entity failed: {err}")
     result = {"updated": True, "entity_id": entity_id, "platform": platform}
     return {"content": [{"type": "text", "text": dumps(result)}]}
 
@@ -464,10 +440,10 @@ async def knx_delete_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return _not_setup()
     entity_id = arguments.get("entity_id")
     if not entity_id:
-        return {"content": [{"type": "text", "text": "'entity_id' is required."}]}
+        return error_result("'entity_id' is required.")
     try:
         await knx.config_store.delete_entity(entity_id)
     except Exception as err:  # noqa: BLE001
-        return {"content": [{"type": "text", "text": f"delete_entity failed: {err}"}]}
+        return error_result(f"delete_entity failed: {err}")
     result = {"deleted": True, "entity_id": entity_id}
     return {"content": [{"type": "text", "text": dumps(result)}]}

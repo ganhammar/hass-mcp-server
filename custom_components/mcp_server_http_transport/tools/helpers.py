@@ -12,6 +12,7 @@ from . import (
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 from .categories import CATEGORY_PROPERTY, async_category_suffix
@@ -102,17 +103,10 @@ async def list_helpers(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     domain_filter = arguments.get("domain")
 
     if domain_filter and domain_filter not in HELPER_DOMAINS:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"Unknown helper domain '{domain_filter}'. "
-                        f"Supported: {', '.join(sorted(HELPER_DOMAINS))}"
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            f"Unknown helper domain '{domain_filter}'. "
+            f"Supported: {', '.join(sorted(HELPER_DOMAINS))}"
+        )
 
     domains = {domain_filter} if domain_filter else HELPER_DOMAINS
     registry = er.async_get(hass)
@@ -168,7 +162,7 @@ async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             )
         return {"content": [{"type": "text", "text": dumps(item)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error getting helper config: {str(e)}"}]}
+        return error_result(f"Error getting helper config: {str(e)}")
 
 
 @register_tool(
@@ -209,17 +203,9 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     config = arguments["config"]
 
     if domain not in HELPER_DOMAINS:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"Unknown helper domain '{domain}'. "
-                        f"Supported: {', '.join(sorted(HELPER_DOMAINS))}"
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            f"Unknown helper domain '{domain}'. " f"Supported: {', '.join(sorted(HELPER_DOMAINS))}"
+        )
 
     try:
         collection = _get_collection(hass, domain)
@@ -235,7 +221,7 @@ async def create_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error creating helper: {str(e)}"}]}
+        return error_result(f"Error creating helper: {str(e)}")
 
 
 @register_tool(
@@ -269,7 +255,7 @@ async def update_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         suffix = await async_icon_suffix(hass, arguments, domain, domain, item_id)
         return {"content": [{"type": "text", "text": f"Successfully updated helper{suffix}"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error updating helper: {str(e)}"}]}
+        return error_result(f"Error updating helper: {str(e)}")
 
 
 @register_tool(
@@ -295,4 +281,4 @@ async def delete_helper(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         await collection.async_delete_item(item_id)
         return {"content": [{"type": "text", "text": "Successfully deleted helper"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error deleting helper: {str(e)}"}]}
+        return error_result(f"Error deleting helper: {str(e)}")

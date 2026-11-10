@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import translation
 
-from . import ANNOTATION_READ_ONLY, dumps, register_tool
+from . import ANNOTATION_READ_ONLY, dumps, error_result, register_tool
 from .system_admin import redact_log_text
 
 DEFAULT_BACKUP_LIMIT = 20
@@ -129,7 +129,9 @@ async def list_repairs(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
 async def get_system_health(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Return the system health information of every integration that reports any."""
     if "system_health" not in hass.config.components:
-        return _text("System health is not available: the system_health integration is not loaded.")
+        return error_result(
+            "System health is not available: the system_health integration is not loaded."
+        )
 
     from homeassistant.components import system_health
 
@@ -137,7 +139,7 @@ async def get_system_health(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         async with asyncio.timeout(SYSTEM_HEALTH_TIMEOUT):
             report = await system_health.get_info(hass)
     except TimeoutError:
-        return _text(
+        return error_result(
             f"System health did not answer within {SYSTEM_HEALTH_TIMEOUT} seconds, usually "
             "because an integration is waiting on a server it cannot reach."
         )
@@ -210,13 +212,13 @@ async def list_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     """List backups and the state of automatic backups."""
     limit = arguments.get("limit", DEFAULT_BACKUP_LIMIT)
     if type(limit) is not int or not 1 <= limit <= MAX_BACKUP_LIMIT:
-        return _text(f"limit must be an integer between 1 and {MAX_BACKUP_LIMIT}.")
+        return error_result(f"limit must be an integer between 1 and {MAX_BACKUP_LIMIT}.")
 
     from homeassistant.components.backup.const import DATA_MANAGER
 
     manager = hass.data.get(DATA_MANAGER)
     if manager is None:
-        return _text("Backups are not available: the backup integration is not loaded.")
+        return error_result("Backups are not available: the backup integration is not loaded.")
 
     backups, agent_errors = await manager.async_get_backups()
     newest_first = sorted(backups.values(), key=_backup_time, reverse=True)

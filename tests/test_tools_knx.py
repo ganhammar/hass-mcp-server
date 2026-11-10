@@ -77,6 +77,13 @@ def _hass_with_knx(telegrams):
 def _unpack(result: dict) -> dict:
     """Unpack the MCP content envelope into the payload dict."""
     assert "content" in result, f"Expected envelope with 'content', got: {result.keys()}"
+    assert "isError" not in result
+    return json.loads(result["content"][0]["text"])
+
+
+def _unpack_error(result: dict) -> dict:
+    """Unpack a failed MCP result, asserting it is flagged as an error."""
+    assert result["isError"] is True
     return json.loads(result["content"][0]["text"])
 
 
@@ -100,6 +107,7 @@ class TestKnxRecentTelegrams:
         hass.data = {}
         result = await knx_mod.knx_recent_telegrams(hass, {})
         assert "content" in result
+        assert result["isError"] is True
         assert "not set up" in result["content"][0]["text"]
 
     async def test_returns_all_with_buffer_span(self):
@@ -152,6 +160,7 @@ class TestKnxRecentTelegrams:
         hass = _hass_with_knx(_TELEGRAMS)
         result = await knx_mod.knx_recent_telegrams(hass, {"filter_ga": "("})
         assert "content" in result
+        assert result["isError"] is True
         assert "Invalid regex" in result["content"][0]["text"]
 
     async def test_history_unavailable_attribute_error(self):
@@ -166,6 +175,7 @@ class TestKnxRecentTelegrams:
         hass.data = {_KEY: module}
         result = await knx_mod.knx_recent_telegrams(hass, {})
         assert "content" in result
+        assert result["isError"] is True
         assert "unavailable" in result["content"][0]["text"]
 
 
@@ -278,6 +288,7 @@ class TestKnxRecentTelegramsDbStore:
         hass.data[_KEY].telegrams.store = None
         with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
             result = await knx_mod.knx_recent_telegrams(hass, {})
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "not initialized" in text
         assert "version" not in text
@@ -288,6 +299,7 @@ class TestKnxRecentTelegramsDbStore:
         )
         with patch.object(knx_mod, "TelegramQuery", Mock(side_effect=lambda **kw: kw)):
             result = await knx_mod.knx_recent_telegrams(hass, {})
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "database error" in text
         assert "db locked" in text
@@ -355,6 +367,7 @@ class TestKnxEntityTools:
         hass.data = {}
         result = await knx_mod.knx_get_entities(hass, {})
         assert "content" in result
+        assert result["isError"] is True
 
     async def test_create_entity_calls_config_store(self):
         module = Mock()
@@ -382,7 +395,7 @@ class TestKnxEntityTools:
             result = await knx_mod.knx_create_entity(
                 self._hass(module), {"platform": "light", "data": {"name": "x"}}
             )
-        data = _unpack(result)
+        data = _unpack_error(result)
         assert data["validation_failed"] is True
         assert data["errors"][0]["path"] == ["data", "knx", "ga_switch"]
         module.config_store.create_entity.assert_not_awaited()
@@ -390,6 +403,7 @@ class TestKnxEntityTools:
     async def test_create_entity_requires_args(self):
         result = await knx_mod.knx_create_entity(self._hass(Mock()), {"platform": "light"})
         assert "content" in result
+        assert result["isError"] is True
         assert "required" in result["content"][0]["text"]
 
     async def test_update_entity_calls_config_store(self):
@@ -421,7 +435,7 @@ class TestKnxEntityTools:
             result = await knx_mod.knx_update_entity(
                 self._hass(module), {"entity_id": "light.x", "platform": "light", "data": {}}
             )
-        data = _unpack(result)
+        data = _unpack_error(result)
         assert data["validation_failed"] is True
         module.config_store.update_entity.assert_not_awaited()
 
@@ -436,7 +450,9 @@ class TestKnxEntityTools:
             new = await knx_mod.knx_create_entity(
                 self._hass(module), {"platform": "light", "data": {}}
             )
+        assert upd["isError"] is True
         assert "validation is not available" in upd["content"][0]["text"]
+        assert new["isError"] is True
         assert "validation is not available" in new["content"][0]["text"]
         module.config_store.update_entity.assert_not_awaited()
         module.config_store.create_entity.assert_not_awaited()
@@ -452,3 +468,4 @@ class TestKnxEntityTools:
     async def test_delete_entity_requires_id(self):
         result = await knx_mod.knx_delete_entity(self._hass(Mock()), {})
         assert "content" in result
+        assert result["isError"] is True

@@ -57,11 +57,13 @@ class TestDisabledByDefault:
     async def test_camera_disabled(self):
         hass = _make_hass(camera=False)
         result = await get_camera_image(hass, {"entity_id": "camera.front_door"})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
     async def test_image_file_disabled(self, tmp_path):
         hass = _make_hass(config_dir=tmp_path, image_file=False)
         result = await get_image_file(hass, {"path": "snap.png"})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
 
@@ -73,6 +75,7 @@ class TestGetCameraImage:
         with patch.dict(sys.modules, {"homeassistant.components.camera": fake}):
             result = await get_camera_image(hass, {"entity_id": "camera.front_door"})
 
+        assert "isError" not in result
         block = result["content"][0]
         assert block["type"] == "image"
         assert block["mimeType"] == "image/png"
@@ -94,6 +97,7 @@ class TestGetCameraImage:
     async def test_rejects_non_camera_entity(self):
         hass = _make_hass(camera=True)
         result = await get_camera_image(hass, {"entity_id": "light.kitchen"})
+        assert result["isError"] is True
         assert "not a camera entity" in result["content"][0]["text"]
 
     async def test_handles_capture_error(self):
@@ -101,6 +105,7 @@ class TestGetCameraImage:
         fake = _fake_camera_module(raises=RuntimeError("camera offline"))
         with patch.dict(sys.modules, {"homeassistant.components.camera": fake}):
             result = await get_camera_image(hass, {"entity_id": "camera.front_door"})
+        assert result["isError"] is True
         assert "Error capturing image" in result["content"][0]["text"]
         assert "camera offline" in result["content"][0]["text"]
 
@@ -111,6 +116,7 @@ class TestGetCameraImage:
         fake = _fake_camera_module(image)
         with patch.dict(sys.modules, {"homeassistant.components.camera": fake}):
             result = await get_camera_image(hass, {"entity_id": "camera.front_door"})
+        assert result["isError"] is True
         assert "too large" in result["content"][0]["text"]
 
 
@@ -120,6 +126,7 @@ class TestGetImageFile:
         hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=True)
         result = await get_image_file(hass, {"path": "snap.png"})
 
+        assert "isError" not in result
         block = result["content"][0]
         assert block["type"] == "image"
         assert block["mimeType"] == "image/png"
@@ -135,6 +142,7 @@ class TestGetImageFile:
         hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=True)
         result = await get_image_file(hass, {"path": str(target)})
 
+        assert "isError" not in result
         block = result["content"][0]
         assert block["mimeType"] == "image/jpeg"
         assert base64.b64decode(block["data"]) == _PNG_BYTES
@@ -142,28 +150,33 @@ class TestGetImageFile:
     async def test_rejects_unsupported_extension(self, tmp_path):
         hass = _make_hass(config_dir=tmp_path, image_file=True)
         result = await get_image_file(hass, {"path": "secrets.yaml"})
+        assert result["isError"] is True
         assert "Unsupported image type" in result["content"][0]["text"]
 
     async def test_rejects_disallowed_path(self, tmp_path):
         hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=False)
         result = await get_image_file(hass, {"path": "/etc/some.png"})
+        assert result["isError"] is True
         assert "not allowed" in result["content"][0]["text"]
 
     async def test_missing_file(self, tmp_path):
         hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=True)
         result = await get_image_file(hass, {"path": "nope.png"})
+        assert result["isError"] is True
         assert "does not exist" in result["content"][0]["text"]
 
     async def test_rejects_directory(self, tmp_path):
         (tmp_path / "shots.png").mkdir()
         hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=True)
         result = await get_image_file(hass, {"path": "shots.png"})
+        assert result["isError"] is True
         assert "is not a file" in result["content"][0]["text"]
 
     async def test_handles_read_error(self, tmp_path):
         hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=True)
         hass.async_add_executor_job = AsyncMock(side_effect=OSError("disk error"))
         result = await get_image_file(hass, {"path": "snap.png"})
+        assert result["isError"] is True
         assert "Error reading image file" in result["content"][0]["text"]
         assert "disk error" in result["content"][0]["text"]
 
@@ -172,4 +185,5 @@ class TestGetImageFile:
         (tmp_path / "big.png").write_bytes(b"12345")
         hass = _make_hass(config_dir=tmp_path, image_file=True, is_allowed=True)
         result = await get_image_file(hass, {"path": "big.png"})
+        assert result["isError"] is True
         assert "too large" in result["content"][0]["text"]

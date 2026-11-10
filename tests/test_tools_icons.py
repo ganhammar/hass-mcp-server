@@ -55,6 +55,7 @@ class TestCreateWithIcon:
             result = await create_automation(hass, {"config": {}, "icon": "mdi:lightbulb"})
 
         assert _icon(hass, automation) == "mdi:lightbulb"
+        assert "isError" not in result
         assert result["content"][0]["text"] == (
             "Successfully created automation with id: abc, with icon mdi:lightbulb"
         )
@@ -64,6 +65,7 @@ class TestCreateWithIcon:
             result = await create_automation(hass, {"config": {}})
 
         assert _icon(hass, automation) is None
+        assert "isError" not in result
         assert result["content"][0]["text"] == "Successfully created automation with id: abc"
 
     async def test_icon_and_category_are_both_applied(self, hass: HomeAssistant, automation: str):
@@ -75,6 +77,7 @@ class TestCreateWithIcon:
         entry = er.async_get(hass).async_get(automation)
         assert entry.icon == "mdi:lamp"
         assert "automation" in entry.categories
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Lighting" in text and "with icon mdi:lamp" in text
 
@@ -113,6 +116,7 @@ class TestCreateWithIcon:
             result = await create_automation(hass, {"config": {}, "icon": "lightbulb"})
 
         assert _icon(hass, automation) is None
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert text.startswith("Successfully created automation with id: abc")
         assert "icon could not be set" in text
@@ -121,6 +125,7 @@ class TestCreateWithIcon:
         with patch(f"{_CONFIG_MANAGER}.create_list_entry", AsyncMock(return_value="missing")):
             result = await create_automation(hass, {"config": {}, "icon": "mdi:lamp"})
 
+        assert "isError" not in result
         assert "icon could not be set" in result["content"][0]["text"]
 
 
@@ -134,6 +139,7 @@ class TestUpdateWithIcon:
             )
 
         assert _icon(hass, automation) == "mdi:lightbulb"
+        assert "isError" not in result
         assert result["content"][0]["text"] == (
             "Successfully updated automation, with icon mdi:lightbulb"
         )
@@ -147,6 +153,7 @@ class TestUpdateWithIcon:
             )
 
         assert _icon(hass, automation) is None
+        assert "isError" not in result
         assert "with no icon override" in result["content"][0]["text"]
 
     async def test_without_icon_the_override_is_kept(self, hass: HomeAssistant, automation: str):
@@ -156,6 +163,7 @@ class TestUpdateWithIcon:
             result = await update_automation(hass, {"automation_id": "abc", "config": _CONFIG})
 
         assert _icon(hass, automation) == "mdi:lamp"
+        assert "isError" not in result
         assert result["content"][0]["text"] == "Successfully updated automation"
 
     async def test_scene(self, hass: HomeAssistant):
@@ -184,6 +192,7 @@ class TestUpdateWithIcon:
             )
 
         assert _icon(hass, helper) == "mdi:account"
+        assert "isError" not in result
         assert result["content"][0]["text"] == "Successfully updated helper, with icon mdi:account"
 
 
@@ -192,6 +201,7 @@ class TestSetIcon:
         result = await set_icon(hass, {"entity_id": automation, "icon": "mdi:lamp"})
 
         assert _icon(hass, automation) == "mdi:lamp"
+        assert "isError" not in result
         assert result["content"][0]["text"] == f"{automation} now has icon mdi:lamp"
 
     async def test_empty_icon_removes_the_override(self, hass: HomeAssistant, automation: str):
@@ -200,6 +210,7 @@ class TestSetIcon:
         result = await set_icon(hass, {"entity_id": automation, "icon": ""})
 
         assert _icon(hass, automation) is None
+        assert "isError" not in result
         assert result["content"][0]["text"] == f"{automation} now has no icon override"
 
     async def test_any_registered_entity_can_be_given_an_icon(self, hass: HomeAssistant):
@@ -212,10 +223,12 @@ class TestSetIcon:
     async def test_malformed_icon_is_refused(self, hass: HomeAssistant, automation: str):
         result = await set_icon(hass, {"entity_id": automation, "icon": "lamp"})
 
+        assert result["isError"] is True
         assert result["content"][0]["text"].startswith("Error setting icon:")
         assert _icon(hass, automation) is None
 
     async def test_an_unknown_entity_is_reported(self, hass: HomeAssistant):
         result = await set_icon(hass, {"entity_id": "automation.nope", "icon": "mdi:lamp"})
 
+        assert result["isError"] is True
         assert "not in the entity registry" in result["content"][0]["text"]

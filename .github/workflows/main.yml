@@ -57,7 +57,7 @@ jobs:
     # tests; this run is the one on the locked dependency set and the one
     # coverage is measured from.
     - name: Run unit tests with coverage
-      run: poetry run pytest tests/ --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
+      run: poetry run pytest tests/ -rs --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v7
@@ -69,9 +69,9 @@ jobs:
   knx-telegram-store-test:
     runs-on: ubuntu-latest
     name: knx telegram store (HA 2026.8.3)
-    # The KNX telegram store landed in HA 2026.7, above every version the other
-    # test jobs pin, and its contracts in test_ha_api_contracts.py skip without
-    # it. This leg installs the KNX integration's own requirements at the
+    # The KNX contracts in test_ha_api_contracts.py need the KNX integration's
+    # own requirements, which no other job installs, so they skip everywhere
+    # else. The telegram store landed in HA 2026.7. This leg installs them at the
     # versions HA 2026.8.3 declares, so the store the tool queries is the real
     # one. Bump deliberately to test newer releases.
     steps:
@@ -139,13 +139,15 @@ jobs:
     # Runs before the OIDC provider is vendored: these tests drive the stand-in
     # for it that tests/conftest.py installs when the real one is absent.
     - name: Run unit and contract tests
-      run: .venv/bin/pytest tests/ -v --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py
+      run: .venv/bin/pytest tests/ -v -rs --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py
 
     # Vendor the paired OIDC provider so the audience-contract tests in
     # test_e2e_oidc.py run against the real validate_access_token. Pinned to a
     # provider commit for reproducibility; bump deliberately to test newer
-    # provider versions.
+    # provider versions. These two steps run after a unit test failure as well,
+    # so a leg reports both results.
     - name: Vendor paired OIDC provider
+      if: ${{ !cancelled() }}
       env:
         OIDC_PROVIDER_REF: e1b6b18ed7d4a3155541a900281ba05db170c365
       run: |
@@ -154,4 +156,5 @@ jobs:
         cp -r /tmp/oidc-provider/custom_components/oidc_provider custom_components/oidc_provider
 
     - name: Run integration and end-to-end tests
-      run: .venv/bin/pytest tests/test_integration.py tests/test_e2e.py tests/test_e2e_oidc.py -v
+      if: ${{ !cancelled() }}
+      run: .venv/bin/pytest tests/test_integration.py tests/test_e2e.py tests/test_e2e_oidc.py -v -rs

@@ -19,8 +19,9 @@ from .registries import (
 )
 
 _WARNING = (
-    "References are not migrated by this tool. Audit automations, scripts, scenes, "
-    "dashboards, templates and external consumers separately. Home Assistant may notify "
+    "References are not migrated by this tool. Find them in automations, scripts, scenes "
+    "and dashboards with search_config, and audit templates and external consumers "
+    "separately. Home Assistant may notify "
     "listeners and update live entities; this tool does not reload or restart anything. "
     "A preview does not validate whether the proposed entity ID will be accepted."
 )

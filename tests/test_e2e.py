@@ -1011,6 +1011,66 @@ async def test_diagnostics_are_read_over_http(
     assert (backups["backups"], backups["total"], backups["state"]) == ([], 0, "idle")
 
 
+async def test_config_search_finds_references_over_http(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    tmp_path,
+) -> None:
+    """One search finds an entity in every kind of config this core stores.
+
+    The dashboard is saved through save_dashboard_config, so the pointer the search
+    returns is checked against the config that tool wrote on this core's Lovelace.
+    """
+    (tmp_path / "automations.yaml").write_text(
+        '- id: "1"\n  alias: Kitchen motion\n  triggers: []\n'
+        "  actions:\n    - action: light.turn_on\n      target:\n"
+        "        entity_id: light.kitchen\n"
+    )
+    (tmp_path / "scripts.yaml").write_text(
+        "evening:\n  sequence:\n    - action: light.turn_off\n"
+        "      target:\n        entity_id: light.kitchen\n"
+    )
+    (tmp_path / "scenes.yaml").write_text(
+        '- id: "2"\n  name: Dinner\n  entities:\n    light.kitchen:\n      state: "on"\n'
+    )
+    hass.config.config_dir = str(tmp_path)
+    assert await async_setup_component(hass, "lovelace", {})
+    client = await hass_client()
+
+    async def call(name: str, arguments: dict) -> str:
+        resp = await client.post(
+            MCP_HTTP_PATH,
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+                "id": 1,
+            },
+        )
+        result = (await resp.json())["result"]
+        assert "isError" not in result, result
+        return result["content"][0]["text"]
+
+    dashboard = {"views": [{"cards": [{"type": "tile", "entity": "light.kitchen"}]}]}
+    saved = await call("save_dashboard_config", {"url_path": "default", "config": dashboard})
+    assert saved.startswith("Successfully saved"), saved
+
+    found = json.loads(await call("search_config", {"query": "Light.Kitchen"}))
+
+    assert found["counts"] == {"automation": 1, "script": 1, "scene": 1, "dashboard": 1}
+    assert {(item["type"], item["id"]): item["matches"] for item in found["items"]} == {
+        ("automation", "1"): [{"path": "/actions/0/target/entity_id", "value": "light.kitchen"}],
+        ("script", "evening"): [{"path": "/sequence/0/target/entity_id", "value": "light.kitchen"}],
+        ("scene", "2"): [{"path": "/entities/light.kitchen", "key": "light.kitchen"}],
+        ("dashboard", "default"): [{"path": "/views/0/cards/0/entity", "value": "light.kitchen"}],
+    }
+    pointed = await call(
+        "get_dashboard_config", {"url_path": "default", "path": "/views/0/cards/0/entity"}
+    )
+    assert json.loads(pointed) == "light.kitchen"
+
+
 async def test_read_only_mode_and_disabled_tools_limit_what_a_client_can_reach(
     enable_custom_integrations: None,
     hass: HomeAssistant,

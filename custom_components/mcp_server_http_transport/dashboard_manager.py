@@ -99,6 +99,50 @@ async def get_dashboard_config(hass: HomeAssistant, url_path: str) -> dict[str, 
     return config if config is not None else {}
 
 
+async def read_dashboards(
+    hass: HomeAssistant,
+) -> tuple[list[tuple[str, str | None, Any, str | None]], dict[str, str]]:
+    """Return the config of every dashboard that has one, as get_dashboard_config reads it.
+
+    Each dashboard comes back as (url_path, title, config, mode), with "default"
+    for the Overview dashboard and "storage" or "yaml" for the mode. A dashboard
+    Home Assistant generates on the fly has no config and is left out. The second
+    value maps the url_path of any dashboard whose config failed to load to the
+    error.
+    """
+    from homeassistant.components.lovelace.const import LOVELACE_DATA, ConfigNotFound
+
+    data = hass.data.get(LOVELACE_DATA)
+    if data is None:
+        raise ValueError("Lovelace is not loaded")
+
+    found: list[tuple[str, str | None, Any, str | None]] = []
+    failed: dict[str, str] = {}
+    for key, dashboard in list(data.dashboards.items()):
+        url_path = "default" if key is None else key
+        try:
+            config = await dashboard.async_load(force=False)
+        except ConfigNotFound:
+            continue
+        except Exception as exc:  # noqa: BLE001 - one dashboard must not end the read
+            failed[url_path] = str(exc) or type(exc).__name__
+            continue
+        metadata = dashboard.config if isinstance(dashboard.config, dict) else {}
+        title = metadata.get("title")
+        if not title and isinstance(config, dict):
+            title = config.get("title")
+        mode = getattr(dashboard, "mode", None)
+        found.append(
+            (
+                url_path,
+                title if isinstance(title, str) else None,
+                config,
+                mode if isinstance(mode, str) else None,
+            )
+        )
+    return found, failed
+
+
 async def save_dashboard_config(hass: HomeAssistant, url_path: str, config: dict[str, Any]) -> None:
     """Save (replace) the full dashboard configuration."""
     from homeassistant.components.lovelace.const import LOVELACE_DATA

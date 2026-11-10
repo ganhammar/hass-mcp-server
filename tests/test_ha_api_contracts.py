@@ -55,6 +55,7 @@ from homeassistant.helpers.json import json_encoder_default
 from homeassistant.helpers.label_registry import LabelEntry, LabelRegistry
 from homeassistant.helpers.recorder import DATA_INSTANCE
 from homeassistant.loader import Integration, async_get_integration
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     MockModule,
@@ -600,6 +601,71 @@ class TestDiagnosticsContracts:
             "translation_key",
             "translation_placeholders",
         } <= {f.name for f in dataclasses.fields(ir.IssueEntry)}
+
+
+class TestLovelaceContracts:
+    """Contracts for dashboard_manager.py, which the dashboard tools and search_config share.
+
+    Dashboards have no service; the frontend reads and saves them over the websocket
+    API, whose handlers look the dashboard up in hass.data[LOVELACE_DATA] and call
+    async_load and async_save on it. The tools do the same. search_config also tells
+    storage-mode dashboards apart by their mode and takes their title from their
+    config, the metadata the dashboards collection keeps.
+    """
+
+    def test_load_takes_force(self):
+        from homeassistant.components.lovelace.dashboard import LovelaceConfig
+
+        assert _params(LovelaceConfig.async_load) == ["self", "force"]
+        assert _params(LovelaceConfig.async_save) == ["self", "config"]
+
+    async def test_dashboards_are_keyed_by_url_path_with_their_mode_and_title(
+        self, hass: HomeAssistant, hass_ws_client, tmp_path: Path
+    ):
+        from homeassistant.components.lovelace.const import LOVELACE_DATA, MODE_STORAGE, MODE_YAML
+
+        hass.config.config_dir = str(tmp_path)
+        (tmp_path / "yaml-dash.yaml").write_text("views: []\n")
+        assert await async_setup_component(
+            hass,
+            "lovelace",
+            {
+                "lovelace": {
+                    "dashboards": {
+                        "yaml-dash": {"mode": "yaml", "filename": "yaml-dash.yaml", "title": "Y"}
+                    }
+                }
+            },
+        )
+        client = await hass_ws_client(hass)
+        await client.send_json_auto_id(
+            {"type": "lovelace/dashboards/create", "url_path": "my-dash", "title": "Mine"}
+        )
+        assert (await client.receive_json())["success"]
+
+        dashboards = hass.data[LOVELACE_DATA].dashboards
+        assert dashboards[None].mode == MODE_STORAGE
+        assert dashboards["my-dash"].mode == MODE_STORAGE
+        assert dashboards["my-dash"].config["title"] == "Mine"
+        assert dashboards["yaml-dash"].mode == MODE_YAML
+
+    async def test_a_storage_dashboard_loads_what_the_frontend_saved(
+        self, hass: HomeAssistant, hass_ws_client
+    ):
+        """Nothing stored raises ConfigNotFound, which is how a generated dashboard looks."""
+        from homeassistant.components.lovelace.const import LOVELACE_DATA, ConfigNotFound
+
+        assert await async_setup_component(hass, "lovelace", {})
+        default = hass.data[LOVELACE_DATA].dashboards[None]
+        with pytest.raises(ConfigNotFound):
+            await default.async_load(force=False)
+
+        config = {"views": [{"cards": [{"type": "tile", "entity": "light.kitchen"}]}]}
+        client = await hass_ws_client(hass)
+        await client.send_json_auto_id({"type": "lovelace/config/save", "config": config})
+        assert (await client.receive_json())["success"]
+
+        assert await default.async_load(force=False) == config
 
 
 class TestCategoryContracts:

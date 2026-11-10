@@ -69,7 +69,7 @@ Two options decide which tools a client is offered at all (Settings > Devices & 
 
 Both apply on top of the feature options below, which still decide whether tools such as `render_template` or `get_camera_image` do anything.
 
-A tool whose own feature option is off is left out of the tool list as well, and so are the KNX tools while the KNX integration is not loaded. The KNX tools go by whether KNX is set up, the same check they make when called. On a default setup that is 35 of the 116 tools, which a client would otherwise carry in its context without being able to use them. A client usually reads the tool list once when it connects, so reconnect it after switching an option on.
+A tool whose own feature option is off is left out of the tool list as well, and so are the KNX tools while the KNX integration is not loaded. The KNX tools go by whether KNX is set up, the same check they make when called. On a default setup that is 35 of the 117 tools, which a client would otherwise carry in its context without being able to use them. A client usually reads the tool list once when it connects, so reconnect it after switching an option on.
 
 The limits cover tools only. Resources such as `hass://entities` are still served, so disabling a listing tool does not hide the data it lists. A call to a withheld tool is logged at `info` and fires the audit event, whether or not the tool only reads.
 
@@ -212,6 +212,7 @@ Update hass-oidc-server to 1.5.0 or newer and restart Home Assistant; the repair
 
 | Tool | Description |
 |------|-------------|
+| `search_config` | Find every automation, script, scene and dashboard whose config mentions some text (an entity ID, service, device, area, label or helper), with a JSON Pointer and snippet per match; narrow with `types`, cap with `limit` (default 20 items) and `matches_per_item` (default 5) |
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
 | `create_automation` | Create a new automation, optionally in a category and with an icon |

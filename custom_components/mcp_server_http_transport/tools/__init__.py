@@ -95,7 +95,7 @@ def tool_is_read_only(name: Any) -> bool:
     return tool["schema"].get("annotations", {}).get("readOnlyHint") is True
 
 
-def _unavailable_reason(hass: HomeAssistant, name: str) -> str | None:
+def tool_unavailable_reason(hass: HomeAssistant, name: str) -> str | None:
     """Return why the server's options withhold a registered tool, or None.
 
     Read-only mode goes by the readOnlyHint annotation alone, so that annotation
@@ -160,7 +160,7 @@ def get_tool_schemas(hass: HomeAssistant) -> list[dict[str, Any]]:
     return [
         tool["schema"]
         for name, tool in TOOLS.items()
-        if _unavailable_reason(hass, name) is None and _is_usable(hass, name)
+        if tool_unavailable_reason(hass, name) is None and _is_usable(hass, name)
     ]
 
 
@@ -208,7 +208,7 @@ async def call_tool(hass: HomeAssistant, name: str, arguments: dict[str, Any]) -
     if tool is None:
         raise UnknownTool(f"Unknown tool: {name}")
 
-    if reason := _unavailable_reason(hass, name):
+    if reason := tool_unavailable_reason(hass, name):
         raise ToolNotAvailable(reason)
 
     if not isinstance(arguments, dict):
@@ -245,6 +245,7 @@ from . import (  # noqa: E402
     categories,  # noqa: F401
     config,  # noqa: F401
     config_files,  # noqa: F401
+    config_search,  # noqa: F401
     dashboards,  # noqa: F401
     diagnostics,  # noqa: F401
     entities,  # noqa: F401

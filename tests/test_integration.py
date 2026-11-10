@@ -280,7 +280,7 @@ class TestMCPClientSession:
         list_every_tool(view.hass)
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
-        assert len(tool_names) == 116
+        assert len(tool_names) == 117
         # Verify all tools have required schema fields
         for tool in result["result"]["tools"]:
             assert "name" in tool

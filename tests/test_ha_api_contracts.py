@@ -439,7 +439,13 @@ class TestRegistryWriteContracts:
         """
         fields = {f.name for f in attr.fields(dr.DeviceEntry)}
 
-        if "config_entry_id" not in fields:
+        if "config_entry_id" in fields:
+            assert isinstance(dr.DeviceEntry.config_entries, property)
+            assert {"id", "parent_device_id"} <= {f.name for f in attr.fields(dr.ChildDeviceEntry)}
+            assert hasattr(dr.DeviceRegistry, "child_devices") or "child_devices" in (
+                dr.DeviceRegistry.__annotations__
+            )
+        else:
             assert "config_entries" in fields
             assert "remove_config_entry_id" in _params(dr.DeviceRegistry.async_update_device)
 

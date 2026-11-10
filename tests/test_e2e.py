@@ -862,7 +862,7 @@ async def test_areas_devices_and_entities_are_managed_over_http(
     )
 
     deleted = await call("delete_device", {"device_id": device.id, "confirm": True})
-    assert deleted == f"Deleted device 'Plug' ({device.id}) and its 1 entity"
+    assert deleted == f"Deleted device 'Plug' ({device.id}), with 1 entity"
     await hass.async_block_till_done()
     assert devices.async_get(device.id) is None
     assert entities.async_get(entity_id) is None

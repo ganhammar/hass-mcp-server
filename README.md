@@ -187,7 +187,7 @@ Update hass-oidc-server to 1.5.0 or newer and restart Home Assistant; the repair
 | `list_entities` | List all entities, with optional `domain`, `detailed`, and `fields` parameters |
 | `list_entity_registry` | List registered entities (including disabled ones), filter by `domain`, page with `limit` (default 100, max 500) and `offset`; returns total count and `has_more` |
 | `get_entity_registry` | Read registry metadata for an entity, including disabled or unavailable entities |
-| `update_entity_registry` | Preview by default or apply a `name` / same-domain `new_entity_id` change (`apply=true`). HA validates IDs on apply; **references in automations, scripts, dashboards and templates are not migrated** |
+| `update_entity_registry` | Preview by default or apply (`apply=true`) a change to an entity's `name`, same-domain `new_entity_id`, area, labels, or whether it is disabled or hidden. HA validates IDs on apply; **references in automations, scripts, dashboards and templates are not migrated** |
 | `search_entities` | Search entities by friendly name, device class, domain, or area |
 | `get_device_details` | Get a device and every entity registered to it (all domains), with optional states |
 | `call_service` | Call any Home Assistant service |
@@ -329,6 +329,14 @@ been copied and source identity/metadata checked for changes during copying.
 | `get_error_log` | Fetch the Home Assistant error log (last N lines); tokens, API keys, and URL credentials are redacted |
 | `list_areas` | List all areas |
 | `list_devices` | List devices, optionally filtered by area |
+| `update_device` | Rename a device, move it to an area, set its labels, or disable or enable it |
+| `create_area` | Create an area with an optional floor, icon, labels and aliases |
+| `update_area` | Rename an area or change its floor, icon, labels or aliases; an empty value clears a field |
+| `delete_area` | Delete an area, leaving its devices and entities without one |
+| `list_floors` | List all floors |
+| `create_floor` | Create a floor with an optional level, icon and aliases |
+| `update_floor` | Rename a floor or change its level, icon or aliases |
+| `delete_floor` | Delete a floor, leaving its areas without one |
 | `list_services` | List available services, optionally filtered by domain |
 | `describe_service` | Get a service's full parameter schema: fields, selectors, examples, and targets |
 | `list_integrations` | List installed integrations and their status |

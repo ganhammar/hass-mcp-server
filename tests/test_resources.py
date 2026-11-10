@@ -98,6 +98,9 @@ class TestResources:
         mock_area.id = "living_room"
         mock_area.name = "Living Room"
         mock_area.floor_id = "ground_floor"
+        mock_area.icon = None
+        mock_area.labels = set()
+        mock_area.aliases = set()
 
         mock_registry = Mock()
         mock_registry.async_list_areas.return_value = [mock_area]

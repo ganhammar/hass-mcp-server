@@ -17,6 +17,7 @@ from . import (
     register_tool,
 )
 from .labels import label_json
+from .registries import area_json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -263,14 +264,7 @@ async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
 async def list_areas(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List all areas."""
     registry = ar.async_get(hass)
-    areas = [
-        {
-            "id": area.id,
-            "name": area.name,
-            "floor_id": area.floor_id,
-        }
-        for area in registry.async_list_areas()
-    ]
+    areas = [area_json(area) for area in registry.async_list_areas()]
 
     return {"content": [{"type": "text", "text": dumps(areas)}]}
 

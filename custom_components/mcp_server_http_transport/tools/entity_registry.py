@@ -2,11 +2,20 @@
 
 from typing import Any
 
+from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
 from homeassistant.core import HomeAssistant, valid_domain, valid_entity_id
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from ..json_utils import dumps
 from . import ANNOTATION_DESTRUCTIVE, ANNOTATION_READ_ONLY, register_tool
+from .registries import (
+    AREA_ID_PROPERTY,
+    LABELS_PROPERTY,
+    area_id_argument,
+    boolean_argument,
+    labels_argument,
+)
 
 _WARNING = (
     "References are not migrated by this tool. Audit automations, scripts, scenes, "
@@ -29,20 +38,43 @@ def _error(message: str) -> dict[str, Any]:
 def _entry(entry: er.RegistryEntry) -> dict[str, Any]:
     """Expose selected registry metadata, not runtime state or integration options."""
     return {
-        key: getattr(entry, key)
-        for key in (
-            "entity_id",
-            "name",
-            "original_name",
-            "unique_id",
-            "platform",
-            "config_entry_id",
-            "device_id",
-            "area_id",
-            "disabled_by",
-            "hidden_by",
-        )
+        **{
+            key: getattr(entry, key)
+            for key in (
+                "entity_id",
+                "name",
+                "original_name",
+                "unique_id",
+                "platform",
+                "config_entry_id",
+                "device_id",
+                "area_id",
+                "disabled_by",
+                "hidden_by",
+            )
+        },
+        "labels": sorted(entry.labels),
     }
+
+
+def _device_is_disabled(hass: HomeAssistant, entry: er.RegistryEntry) -> bool:
+    device = dr.async_get(hass).async_get(entry.device_id) if entry.device_id else None
+    return device is not None and device.disabled
+
+
+def _enabling_takes_effect(hass: HomeAssistant, entry: er.RegistryEntry) -> str:
+    """Say when an entity that was just enabled comes back, as core tells the frontend."""
+    config_entry = (
+        hass.config_entries.async_get_entry(entry.config_entry_id)
+        if entry.config_entry_id
+        else None
+    )
+    if config_entry is None or not config_entry.supports_unload:
+        return "The entity is enabled once Home Assistant restarts."
+    return (
+        "The entity is enabled once Home Assistant reloads its integration, about "
+        f"{RELOAD_AFTER_UPDATE_DELAY} seconds from now."
+    )
 
 
 def _valid_id(value: Any) -> bool:
@@ -135,8 +167,9 @@ async def get_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) ->
 @register_tool(
     name="update_entity_registry",
     description=(
-        "Preview (default) or apply an entity registry name/ID update. Only name and "
-        "same-domain new_entity_id are writable. References are NOT migrated."
+        "Preview (default) or apply an entity registry update: name, same-domain "
+        "new_entity_id, area, labels, and whether the entity is disabled or hidden. Only "
+        "the fields given are changed. References are NOT migrated when the ID changes."
     ),
     input_schema={
         "type": "object",
@@ -149,6 +182,29 @@ async def get_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) ->
             "name": {
                 "type": "string",
                 "description": "Non-blank display name.",
+            },
+            "area_id": {
+                **AREA_ID_PROPERTY,
+                "description": (
+                    f"{AREA_ID_PROPERTY['description']}, so the entity follows its device's area"
+                ),
+            },
+            "labels": LABELS_PROPERTY,
+            "disabled": {
+                "type": "boolean",
+                "description": (
+                    "True disables the entity, removing it from live states; false enables "
+                    "it, which takes effect once its integration is reloaded or Home "
+                    "Assistant restarts. The result says which."
+                ),
+            },
+            "hidden": {
+                "type": "boolean",
+                "description": (
+                    "True hides the entity from generated dashboards and leaves it out of "
+                    "service calls that target its area, device or label, while it keeps "
+                    "updating; false shows it again."
+                ),
             },
             "apply": {
                 "type": "boolean",
@@ -172,8 +228,6 @@ async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any])
         return _error("apply must be a boolean, not a string or number.")
 
     changes = {key: arguments[key] for key in ("new_entity_id", "name") if key in arguments}
-    if not changes:
-        return _error("Supply new_entity_id and/or name.")
 
     if "name" in changes:
         name = changes["name"]
@@ -189,16 +243,47 @@ async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any])
     if entry is None:
         return _error(f"Entity is not in the registry: {entity_id}")
 
+    try:
+        area_given, area_id = area_id_argument(hass, arguments)
+        labels = labels_argument(hass, arguments)
+        disabled = boolean_argument(arguments, "disabled")
+        hidden = boolean_argument(arguments, "hidden")
+    except ValueError as err:
+        return _error(str(err))
+
+    if area_given:
+        changes["area_id"] = area_id
+    if labels is not None:
+        changes["labels"] = labels
+    # An entity something else disabled or hid stays attributed to that; only the
+    # user's own choice is set here, as in the frontend.
+    if disabled is not None and disabled != (entry.disabled_by is not None):
+        if not disabled and _device_is_disabled(hass, entry):
+            return _error("The entity's device is disabled. Enable it with update_device.")
+        changes["disabled_by"] = er.RegistryEntryDisabler.USER if disabled else None
+    if hidden is not None and hidden != (entry.hidden_by is not None):
+        changes["hidden_by"] = er.RegistryEntryHider.USER if hidden else None
+
+    if not changes and disabled is None and hidden is None:
+        return _error("Supply new_entity_id, name, area_id, labels, disabled or hidden.")
+
     before = _entry(entry)
     after = {**before, "entity_id": new_id}
-    if "name" in changes:
-        after["name"] = changes["name"]
+    for key in ("name", "area_id", "disabled_by", "hidden_by"):
+        if key in changes:
+            after[key] = changes[key]
+    if "labels" in changes:
+        after["labels"] = sorted(changes["labels"])
 
+    takes_effect = {}
     if apply and after != before:
         try:
-            after = _entry(registry.async_update_entity(entity_id, **changes))
+            updated = registry.async_update_entity(entity_id, **changes)
         except ValueError as err:
             return _error(f"Registry update rejected: {err}")
+        after = _entry(updated)
+        if "disabled_by" in changes and not disabled:
+            takes_effect = {"takes_effect": _enabling_takes_effect(hass, updated)}
 
     return _result(
         {
@@ -207,6 +292,7 @@ async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any])
             "mode": "applied" if apply else "preview",
             "before": before,
             "after": after,
+            **takes_effect,
             "warning": _WARNING,
         }
     )

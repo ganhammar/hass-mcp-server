@@ -473,11 +473,17 @@ class TestToolsEntities:
         mock_area1.id = "living_room"
         mock_area1.name = "Living Room"
         mock_area1.floor_id = "ground_floor"
+        mock_area1.icon = None
+        mock_area1.labels = set()
+        mock_area1.aliases = set()
 
         mock_area2 = Mock()
         mock_area2.id = "kitchen"
         mock_area2.name = "Kitchen"
         mock_area2.floor_id = "ground_floor"
+        mock_area2.icon = None
+        mock_area2.labels = set()
+        mock_area2.aliases = set()
 
         mock_registry = Mock()
         mock_registry.async_list_areas.return_value = [mock_area1, mock_area2]

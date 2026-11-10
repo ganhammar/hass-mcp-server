@@ -21,6 +21,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
 
+from ..const import DOMAIN
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_IDEMPOTENT,
@@ -418,6 +419,10 @@ async def create_floor(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             },
             "name": {"type": "string", "description": "New name; must not be in use"},
             "level": LEVEL_PROPERTY,
+            "clear_level": {
+                "type": "boolean",
+                "description": "True removes the floor's level, leaving it unordered",
+            },
             "icon": ICON_PROPERTY,
             "aliases": ALIASES_PROPERTY,
         },
@@ -434,6 +439,10 @@ async def update_floor(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             raise ValueError(f"No floor with floor_id '{floor_id}' (see list_floors)")
 
         changes = _floor_changes(arguments)
+        if boolean_argument(arguments, "clear_level"):
+            if "level" in changes:
+                raise ValueError("Give a level or clear_level, not both")
+            changes["level"] = None
         if (name := _name(arguments, "A floor")) is not None:
             changes["name"] = name
         if not changes:
@@ -578,7 +587,9 @@ def _already_detached(domains: list[str]) -> str:
         "support removing a device allow it, and what happens to a device that is still "
         "connected is up to the integration: some refuse, some let Home Assistant add it "
         "again, and some remove it from their network for real (Matter unpairs the "
-        "device). This cannot be undone. Requires explicit confirmation"
+        "device). This cannot be undone. Requires explicit confirmation. Disabled by "
+        'default: it must be enabled with "Enable integration management" in the '
+        "integration options"
     ),
     input_schema={
         "type": "object",
@@ -598,6 +609,12 @@ def _already_detached(domains: list[str]) -> str:
 )
 async def delete_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete a device the way the frontend does, with its integrations' consent."""
+    if not hass.data.get(DOMAIN, {}).get("integration_management", False):
+        return _text(
+            "Deleting a device is part of integration management, which is disabled. Enable "
+            "it in the MCP Server integration settings: Settings → Devices & Services → "
+            "MCP Server → Configure → Enable integration management."
+        )
     if arguments["confirm"] is not True:
         return _text(
             "Deleting a device requires confirm=true. It removes the device together with "

@@ -39,12 +39,15 @@ except ImportError:
 
 
 @pytest.fixture
-def list_every_tool():
+def list_every_tool(monkeypatch):
     """Return a function that sets a stand-in hass up to list the whole catalogue.
 
     A tool is left out of the listing while the option that switches its group on
-    is off, and the KNX tools while KNX is not loaded.
+    is off, and the KNX tools while KNX is not set up.
     """
+    from custom_components.mcp_server_http_transport.tools import knx
+
+    monkeypatch.setattr(knx, "_get_knx_module", lambda hass: object())
 
     from custom_components.mcp_server_http_transport.const import DOMAIN
 
@@ -59,7 +62,6 @@ def list_every_tool():
                 "template_rendering": True,
             }
         )
-        hass.config.components = {"knx"}
 
     return apply
 

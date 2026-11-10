@@ -271,7 +271,10 @@ async def list_areas(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
 
 @register_tool(
     name="list_devices",
-    description="List devices in Home Assistant, optionally filtered by area",
+    description=(
+        "List devices in Home Assistant with their area, labels and whether they are "
+        "disabled, optionally filtered by area"
+    ),
     input_schema={
         "type": "object",
         "properties": {

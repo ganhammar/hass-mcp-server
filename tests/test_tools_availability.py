@@ -4,16 +4,19 @@ Both are enforced where tools are listed and where they are dispatched, so a
 client neither sees a withheld tool nor reaches it by calling it anyway.
 """
 
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from custom_components.mcp_server_http_transport import tools
 from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.tools import (
     TOOLS,
     ToolNotAvailable,
     call_tool,
     get_tool_schemas,
+    knx,
     tool_is_read_only,
 )
 
@@ -31,7 +34,6 @@ def _hass(**options) -> Mock:
     """A set-up server with every group of tools switched on, limited by the options."""
     hass = Mock()
     hass.data = {DOMAIN: {"read_only": False, **EVERY_TOOL_OPTION, **options}}
-    hass.config.components = {"knx"}
     hass.states.get.return_value = None
     hass.services.async_call = AsyncMock()
     return hass
@@ -51,14 +53,22 @@ _BY_OPTION = {
 }
 
 
+@pytest.fixture(autouse=True)
+def knx_set_up(monkeypatch) -> dict:
+    """Stand in for the KNX integration being set up; clear "module" to take it away."""
+    state = {"module": object()}
+    monkeypatch.setattr(knx, "_get_knx_module", lambda hass: state["module"])
+    return state
+
+
 class TestListing:
     def test_every_tool_is_listed_with_every_group_switched_on(self):
         assert _listed(_hass()) == set(TOOLS)
 
-    def test_a_default_setup_lists_no_tool_that_is_switched_off(self):
+    def test_a_default_setup_lists_no_tool_that_is_switched_off(self, knx_set_up):
         """Such a tool could only answer that it is off, at the cost of its schema."""
         hass = _hass(**dict.fromkeys(EVERY_TOOL_OPTION, False))
-        hass.config.components = set()
+        knx_set_up["module"] = None
 
         hidden = set(TOOLS) - _listed(hass)
 
@@ -75,12 +85,40 @@ class TestListing:
         assert tool not in _listed(off)
         assert tool in _listed(on)
 
-    def test_knx_tools_are_listed_only_with_knx_loaded(self):
+    def test_knx_tools_are_listed_only_while_knx_is_set_up(self, knx_set_up):
+        """The listing asks what the KNX tools themselves ask when called."""
         hass = _hass()
         assert "knx_get_entities" in _listed(hass)
 
-        hass.config.components = set()
+        knx_set_up["module"] = None
         assert "knx_get_entities" not in _listed(hass)
+
+    def test_every_tool_behind_an_option_is_in_the_listing_rule(self):
+        """A module that reads an option must have its tools mapped to that option.
+
+        Otherwise a tool added behind an option would stay listed while it is off.
+        """
+        mapped: dict[str, set[str]] = {}
+        for module, option in tools._OPTION_BY_MODULE.items():
+            mapped.setdefault(module, set()).add(option)
+        for name, option in tools._OPTION_BY_TOOL.items():
+            module = TOOLS[name]["handler"].__module__.rpartition(".")[2]
+            mapped.setdefault(module, set()).add(option)
+        # The flow tools read template rendering to refuse template helpers; no
+        # tool of theirs is switched on by it.
+        mapped.setdefault("integrations", set()).add("template_rendering")
+
+        unmapped = {}
+        for path in Path(tools.__file__).parent.glob("*.py"):
+            read = {
+                option
+                for option in EVERY_TOOL_OPTION
+                if f'"{option}"' in path.read_text() and path.stem != "__init__"
+            }
+            if missing := read - mapped.get(path.stem, set()):
+                unmapped[path.stem] = missing
+
+        assert unmapped == {}
 
     async def test_a_tool_left_out_for_being_off_still_says_how_to_switch_it_on(self):
         hass = _hass(config_file_access=False)

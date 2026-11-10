@@ -27,14 +27,18 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.mcp_server_http_transport.const import DOMAIN
-from custom_components.mcp_server_http_transport.resources import _read_areas, _read_floors
+from custom_components.mcp_server_http_transport.resources import (
+    _read_areas,
+    _read_devices,
+    _read_floors,
+)
 from custom_components.mcp_server_http_transport.tools import (
     TOOLS,
     call_tool,
     registries,
     tool_is_read_only,
 )
-from custom_components.mcp_server_http_transport.tools.entities import list_areas
+from custom_components.mcp_server_http_transport.tools.entities import list_areas, list_devices
 from custom_components.mcp_server_http_transport.tools.entity_registry import (
     delete_entity,
     update_entity_registry,
@@ -449,6 +453,17 @@ class TestUpdateDevice:
             await update_device(hass, {"device_id": device.id, "disabled": False}),
         )
         assert enabled["disabled_by"] is None
+
+    async def test_a_disabled_device_is_listed_as_disabled_with_its_labels(
+        self, hass, device, label
+    ):
+        await update_device(hass, {"device_id": device.id, "disabled": True, "labels": [label]})
+
+        (listed,) = _json(await list_devices(hass, {}))
+        resource = json.loads(_read_devices(hass, "hass://devices")[0]["text"])
+
+        assert (listed["disabled_by"], listed["labels"]) == ("user", [label])
+        assert resource == [listed]
 
     async def test_a_device_something_else_disabled_keeps_that_reason(self, hass, device):
         registry = dr.async_get(hass)

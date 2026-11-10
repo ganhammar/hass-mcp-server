@@ -134,8 +134,6 @@ _OPTION_BY_TOOL = {
     "get_image_file": "image_file_access",
     "render_template": "template_rendering",
 }
-# The Home Assistant integration a module's tools cannot work without.
-_COMPONENT_BY_MODULE = {"knx": "knx"}
 
 
 def _is_usable(hass: HomeAssistant, name: str) -> bool:
@@ -149,8 +147,8 @@ def _is_usable(hass: HomeAssistant, name: str) -> bool:
     options = hass.data.get(DOMAIN)
     if option and isinstance(options, dict) and not options.get(option, False):
         return False
-    component = _COMPONENT_BY_MODULE.get(module)
-    return component is None or component in hass.config.components
+    # The KNX tools go by the same check they make themselves when called.
+    return module != "knx" or knx._get_knx_module(hass) is not None
 
 
 def get_tool_schemas(hass: HomeAssistant) -> list[dict[str, Any]]:

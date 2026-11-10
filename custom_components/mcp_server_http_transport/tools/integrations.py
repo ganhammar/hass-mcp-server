@@ -100,9 +100,8 @@ def _own_flow() -> dict[str, Any]:
     """Refuse a flow that would change what this connection is allowed to do.
 
     The MCP Server's options decide which tools a client may use, so a client that
-    could run these flows could lift its own limits. A second entry would do the
-    same, since setting one up replaces the limits of the first. The OIDC provider
-    decides who may connect at all.
+    could run these flows could lift its own limits. The OIDC provider decides who
+    may connect at all.
     """
     return _text(
         "Refusing to configure the MCP Server itself or its OIDC provider: their options "
@@ -115,8 +114,10 @@ def _blocked(hass: HomeAssistant, domain: str) -> dict[str, Any] | None:
     """Return the refusal for a domain no flow may touch, or None.
 
     Besides the protected integrations, a template helper renders whatever
-    template it is given into its state, which would get around template
-    rendering being switched off.
+    template it is given into its state, which is what switching template
+    rendering off says a client should not do. Other integrations' flows and
+    scripts also take templates, so this keeps to the option's intent and is not
+    a boundary.
     """
     if domain in _PROTECTED_DOMAINS:
         return _own_flow()

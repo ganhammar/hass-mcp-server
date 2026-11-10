@@ -407,8 +407,9 @@ async def create_floor(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
 @register_tool(
     name="update_floor",
     description=(
-        "Update a floor's name, level, icon or aliases. Only the fields given are "
-        "changed. The floor_id stays the same when the floor is renamed"
+        "Update a floor's name, level, icon or aliases, or remove its level with "
+        "clear_level. Only the fields given are changed. The floor_id stays the same when "
+        "the floor is renamed"
     ),
     input_schema={
         "type": "object",
@@ -446,7 +447,7 @@ async def update_floor(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         if (name := _name(arguments, "A floor")) is not None:
             changes["name"] = name
         if not changes:
-            raise ValueError("Nothing to update: give a name, level, icon or aliases")
+            raise ValueError("Nothing to update: give a name, level, clear_level, icon or aliases")
         floor = registry.async_update(floor_id, **changes)
     except Exception as e:
         return _error("updating floor", e)

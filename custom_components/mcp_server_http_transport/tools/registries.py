@@ -207,6 +207,32 @@ def _floor_changes(arguments: dict[str, Any]) -> dict[str, Any]:
     return changes
 
 
+def _device(registry: dr.DeviceRegistry, device_id: str) -> tuple[Any, Any]:
+    """Return a device and the registry method that updates it.
+
+    Registries that know child devices update them through a method of their own.
+    They also resolve the ID of a device that has since been split into several,
+    and an update to that one would reach every device it was split into, so it
+    is refused.
+    """
+    update_child = getattr(registry, "async_update_child_device", None)
+    if update_child is None:
+        device = registry.async_get(device_id)
+        update = registry.async_update_device
+    else:
+        if registry.async_get(device_id, include_main_devices=False, include_child_devices=False):
+            raise ValueError(
+                f"'{device_id}' is the old ID of a device that was split into several. "
+                "Use the ID of one of them (see list_devices)"
+            )
+        device = registry.async_get(device_id, include_composite_devices=False)
+        child = isinstance(device, dr.ChildDeviceEntry)
+        update = update_child if child else registry.async_update_device
+    if device is None:
+        raise ValueError(f"No device with device_id '{device_id}' (see list_devices)")
+    return device, update
+
+
 def _count(count: int, singular: str, plural: str) -> str:
     return f"{count} {singular if count == 1 else plural}"
 
@@ -318,7 +344,7 @@ async def delete_area(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         if area is None:
             raise ValueError(f"No area with area_id '{area_id}' (see list_areas)")
 
-        devices = sum(d.area_id == area_id for d in dr.async_get(hass).devices.values())
+        devices = len(dr.async_entries_for_area(dr.async_get(hass), area_id))
         entities = sum(e.area_id == area_id for e in er.async_get(hass).entities.values())
         registry.async_delete(area_id)
     except Exception as e:
@@ -489,9 +515,7 @@ async def update_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     try:
         registry = dr.async_get(hass)
         device_id = arguments["device_id"]
-        device = registry.async_get(device_id)
-        if device is None:
-            raise ValueError(f"No device with device_id '{device_id}' (see list_devices)")
+        device, update = _device(registry, device_id)
 
         changes: dict[str, Any] = {}
         if (name := string_argument(arguments, "name")) is not None:
@@ -512,7 +536,7 @@ async def update_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
 
         if not changes:
             raise ValueError("Nothing to update: give a name, area_id, labels or disabled")
-        device = registry.async_update_device(device_id, **changes) or device
+        device = update(device_id, **changes) or device
     except Exception as e:
         return _error("updating device", e)
     return _text(f"Updated device {dumps(device_json(device))}")

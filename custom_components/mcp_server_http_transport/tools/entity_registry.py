@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
 from homeassistant.core import HomeAssistant, valid_domain, valid_entity_id
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -59,6 +60,21 @@ def _entry(entry: er.RegistryEntry) -> dict[str, Any]:
 def _device_is_disabled(hass: HomeAssistant, entry: er.RegistryEntry) -> bool:
     device = dr.async_get(hass).async_get(entry.device_id) if entry.device_id else None
     return device is not None and device.disabled
+
+
+def _enabling_takes_effect(hass: HomeAssistant, entry: er.RegistryEntry) -> str:
+    """Say when an entity that was just enabled comes back, as core tells the frontend."""
+    config_entry = (
+        hass.config_entries.async_get_entry(entry.config_entry_id)
+        if entry.config_entry_id
+        else None
+    )
+    if config_entry is None or not config_entry.supports_unload:
+        return "The entity is enabled once Home Assistant restarts."
+    return (
+        "The entity is enabled once Home Assistant reloads its integration, about "
+        f"{RELOAD_AFTER_UPDATE_DELAY} seconds from now."
+    )
 
 
 def _valid_id(value: Any) -> bool:
@@ -178,15 +194,16 @@ async def get_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) ->
                 "type": "boolean",
                 "description": (
                     "True disables the entity, removing it from live states; false enables "
-                    "it, which takes effect when Home Assistant reloads its integration "
-                    "about 30 seconds later."
+                    "it, which takes effect once its integration is reloaded or Home "
+                    "Assistant restarts. The result says which."
                 ),
             },
             "hidden": {
                 "type": "boolean",
                 "description": (
-                    "True hides the entity from dashboards and voice assistants while it "
-                    "keeps updating; false shows it again."
+                    "True hides the entity from generated dashboards and leaves it out of "
+                    "service calls that target its area, device or label, while it keeps "
+                    "updating; false shows it again."
                 ),
             },
             "apply": {
@@ -258,11 +275,15 @@ async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any])
     if "labels" in changes:
         after["labels"] = sorted(changes["labels"])
 
+    takes_effect = {}
     if apply and after != before:
         try:
-            after = _entry(registry.async_update_entity(entity_id, **changes))
+            updated = registry.async_update_entity(entity_id, **changes)
         except ValueError as err:
             return _error(f"Registry update rejected: {err}")
+        after = _entry(updated)
+        if "disabled_by" in changes and not disabled:
+            takes_effect = {"takes_effect": _enabling_takes_effect(hass, updated)}
 
     return _result(
         {
@@ -271,6 +292,7 @@ async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any])
             "mode": "applied" if apply else "preview",
             "before": before,
             "after": after,
+            **takes_effect,
             "warning": _WARNING,
         }
     )

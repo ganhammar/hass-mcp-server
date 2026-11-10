@@ -398,6 +398,38 @@ class TestRegistryWriteContracts:
         assert options <= set(parameters)
         assert {parameters[name].kind for name in options} == {inspect.Parameter.KEYWORD_ONLY}
 
+    def test_a_registry_with_child_devices_can_tell_the_kinds_of_device_apart(self):
+        """update_device takes the split-aware path whenever the child update exists.
+
+        It then needs the lookup to leave kinds out by keyword, to refuse the old ID
+        of a split device and to send a child device to its own update method.
+        """
+        update_child = getattr(dr.DeviceRegistry, "async_update_child_device", None)
+        if update_child is None:
+            assert _params(dr.DeviceRegistry.async_get) == ["self", "device_id"]
+            return
+
+        lookup = inspect.signature(dr.DeviceRegistry.async_get).parameters
+        kinds = {"include_child_devices", "include_main_devices", "include_composite_devices"}
+        assert kinds <= set(lookup)
+        assert {lookup[name].default for name in kinds} == {True}
+        assert {"area_id", "disabled_by", "labels", "name_by_user"} <= set(
+            inspect.signature(update_child).parameters
+        )
+        assert issubclass(dr.ChildDeviceEntry, dr.BaseDeviceEntry)
+        assert {"id", "name", "name_by_user", "area_id", "labels", "disabled_by"} <= {
+            f.name for f in dataclasses.fields(dr.BaseDeviceEntry)
+        }
+
+    def test_devices_in_an_area_are_counted_through_the_helper(self):
+        assert _params(dr.async_entries_for_area) == ["registry", "area_id"]
+
+    def test_enabling_an_entity_reloads_its_entry_after_a_delay(self):
+        from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
+
+        assert isinstance(RELOAD_AFTER_UPDATE_DELAY, int)
+        assert MockConfigEntry(domain="demo").supports_unload in (None, False)
+
     def test_lookups_and_deletes_take_an_id(self):
         assert _params(ar.AreaRegistry.async_get_area) == ["self", "area_id"]
         assert _params(ar.AreaRegistry.async_delete) == ["self", "area_id"]

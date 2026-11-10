@@ -5,6 +5,8 @@ is Home Assistant's own rather than one the test assumes.
 """
 
 import json
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -20,6 +22,7 @@ from custom_components.mcp_server_http_transport.resources import _read_areas, _
 from custom_components.mcp_server_http_transport.tools import (
     TOOLS,
     call_tool,
+    registries,
     tool_is_read_only,
 )
 from custom_components.mcp_server_http_transport.tools.entities import list_areas
@@ -80,9 +83,20 @@ def device(hass: HomeAssistant) -> dr.DeviceEntry:
 def entity(hass: HomeAssistant, device: dr.DeviceEntry) -> str:
     return (
         er.async_get(hass)
-        .async_get_or_create("light", "demo", "lamp-1", device_id=device.id)
+        .async_get_or_create(
+            "light",
+            "demo",
+            "lamp-1",
+            device_id=device.id,
+            config_entry=hass.config_entries.async_get_entry(device.primary_config_entry),
+        )
         .entity_id
     )
+
+
+def _set_supports_unload(hass: HomeAssistant, entity: str, value: bool) -> None:
+    entry_id = er.async_get(hass).async_get(entity).config_entry_id
+    hass.config_entries.async_get_entry(entry_id).supports_unload = value
 
 
 class TestRegistration:
@@ -436,6 +450,100 @@ class TestUpdateDevice:
         assert dr.async_get(hass).async_get(device.id) == device
 
 
+class _SplitAwareRegistry:
+    """Stand-in for a device registry that knows child devices and split devices.
+
+    Home Assistant 2026.9 has it; the lookups and both update methods are pinned
+    against the real one in test_ha_api_contracts.py.
+    """
+
+    def __init__(self, *, main=None, child=None, composite=None):
+        self._kinds = {"main": main, "child": child, "composite": composite}
+        self.updated: list[tuple[str, str, dict]] = []
+
+    def async_get(
+        self,
+        device_id,
+        *,
+        include_child_devices=True,
+        include_main_devices=True,
+        include_composite_devices=True,
+    ):
+        wanted = {
+            "main": include_main_devices,
+            "child": include_child_devices,
+            "composite": include_composite_devices,
+        }
+        for kind, device in self._kinds.items():
+            if wanted[kind] and device is not None and device.id == device_id:
+                return device
+        return None
+
+    def async_update_device(self, device_id, **changes):
+        self.updated.append(("main", device_id, changes))
+
+    def async_update_child_device(self, device_id, **changes):
+        self.updated.append(("child", device_id, changes))
+
+
+class _Child(SimpleNamespace):
+    pass
+
+
+def _stand_in_device(cls=SimpleNamespace, **fields):
+    return cls(
+        **{
+            "id": "dev",
+            "name": "Lamp",
+            "name_by_user": None,
+            "area_id": None,
+            "labels": set(),
+            "disabled_by": None,
+            "disabled": False,
+            **fields,
+        }
+    )
+
+
+class TestUpdateDeviceOnASplitAwareRegistry:
+    async def _update(self, hass, registry, arguments):
+        with (
+            patch.object(registries.dr, "async_get", return_value=registry),
+            patch.object(registries.dr, "ChildDeviceEntry", _Child, create=True),
+        ):
+            return _text(await update_device(hass, arguments))
+
+    async def test_a_main_device_is_updated_as_one(self, hass):
+        registry = _SplitAwareRegistry(main=_stand_in_device())
+
+        text = await self._update(hass, registry, {"device_id": "dev", "name": "Reading lamp"})
+
+        assert text.startswith("Updated device ")
+        assert registry.updated == [("main", "dev", {"name_by_user": "Reading lamp"})]
+
+    async def test_a_child_device_goes_through_its_own_update(self, hass):
+        registry = _SplitAwareRegistry(child=_stand_in_device(_Child))
+
+        text = await self._update(hass, registry, {"device_id": "dev", "disabled": True})
+
+        assert text.startswith("Updated device ")
+        assert registry.updated == [("child", "dev", {"disabled_by": dr.DeviceEntryDisabler.USER})]
+
+    async def test_the_old_id_of_a_split_device_is_refused(self, hass):
+        """An update to it would land on every device it was split into."""
+        registry = _SplitAwareRegistry(composite=_stand_in_device())
+
+        text = await self._update(hass, registry, {"device_id": "dev", "disabled": True})
+
+        assert text.startswith("Error updating device: 'dev' is the old ID of a device")
+        assert registry.updated == []
+
+    async def test_unknown_device_is_reported(self, hass):
+        text = await self._update(hass, _SplitAwareRegistry(), {"device_id": "dev", "name": "X"})
+
+        assert text == "Error updating device: No device with device_id 'dev' (see list_devices)"
+
+
 class TestEntityRegistryFields:
     """update_entity_registry's area, labels, disabled and hidden, on the real registry."""
 
@@ -522,6 +630,48 @@ class TestEntityRegistryFields:
             None,
             None,
         )
+
+    async def _enable(self, hass, entity) -> dict:
+        er.async_get(hass).async_update_entity(entity, disabled_by=er.RegistryEntryDisabler.USER)
+        return _json(
+            await update_entity_registry(
+                hass, {"entity_id": entity, "disabled": False, "apply": True}
+            )
+        )
+
+    async def test_enabling_says_a_reload_brings_the_entity_back(self, hass, entity):
+        _set_supports_unload(hass, entity, True)
+
+        result = await self._enable(hass, entity)
+
+        assert result["takes_effect"] == (
+            "The entity is enabled once Home Assistant reloads its integration, about "
+            "30 seconds from now."
+        )
+
+    async def test_enabling_says_when_only_a_restart_brings_the_entity_back(self, hass, entity):
+        """An integration that cannot be unloaded is not reloaded for it."""
+        _set_supports_unload(hass, entity, False)
+
+        result = await self._enable(hass, entity)
+
+        assert result["takes_effect"] == "The entity is enabled once Home Assistant restarts."
+
+    async def test_enabling_an_entity_without_a_config_entry_needs_a_restart(self, hass):
+        entity = er.async_get(hass).async_get_or_create("light", "yaml", "lamp-2").entity_id
+
+        result = await self._enable(hass, entity)
+
+        assert result["takes_effect"] == "The entity is enabled once Home Assistant restarts."
+
+    async def test_only_enabling_says_when_it_takes_effect(self, hass, entity):
+        result = _json(
+            await update_entity_registry(
+                hass, {"entity_id": entity, "disabled": True, "apply": True}
+            )
+        )
+
+        assert "takes_effect" not in result
 
     async def test_what_something_else_disabled_keeps_that_reason(self, hass, entity):
         registry = er.async_get(hass)

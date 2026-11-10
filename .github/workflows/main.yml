@@ -53,10 +53,10 @@ jobs:
     - name: Lint with Ruff
       run: poetry run ruff check custom_components/ tests/
 
-    - name: Run unit tests
-      run: poetry run pytest tests/ -v --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py
-
-    - name: Run tests with coverage
+    # The integration-test leg for the locked Home Assistant runs these same
+    # tests; this run is the one on the locked dependency set and the one
+    # coverage is measured from.
+    - name: Run unit tests with coverage
       run: poetry run pytest tests/ --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
@@ -135,6 +135,11 @@ jobs:
         if [ -n "$EXTRA_DEPS" ]; then .venv/bin/pip install $EXTRA_DEPS; fi
       env:
         EXTRA_DEPS: ${{ matrix.extra-deps }}
+
+    # Runs before the OIDC provider is vendored: these tests drive the stand-in
+    # for it that tests/conftest.py installs when the real one is absent.
+    - name: Run unit and contract tests
+      run: .venv/bin/pytest tests/ -v --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py
 
     # Vendor the paired OIDC provider so the audience-contract tests in
     # test_e2e_oidc.py run against the real validate_access_token. Pinned to a

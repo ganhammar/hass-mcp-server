@@ -656,6 +656,7 @@ class TestHelperToolsViaHTTP:
     async def test_helper_tools_appear_in_tools_list(self, view, mock_hass):
         """Helper tools are included in the tools/list response."""
         request = self._make_request("tools/list", {})
+        mock_hass.config.components = set()
 
         with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)

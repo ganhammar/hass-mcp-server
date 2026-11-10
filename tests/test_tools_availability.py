@@ -17,10 +17,21 @@ from custom_components.mcp_server_http_transport.tools import (
     tool_is_read_only,
 )
 
+EVERY_TOOL_OPTION = {
+    "appdaemon_file_access": True,
+    "camera_image_access": True,
+    "config_file_access": True,
+    "image_file_access": True,
+    "integration_management": True,
+    "template_rendering": True,
+}
+
 
 def _hass(**options) -> Mock:
+    """A set-up server with every group of tools switched on, limited by the options."""
     hass = Mock()
-    hass.data = {DOMAIN: {"read_only": False, **options}}
+    hass.data = {DOMAIN: {"read_only": False, **EVERY_TOOL_OPTION, **options}}
+    hass.config.components = {"knx"}
     hass.states.get.return_value = None
     hass.services.async_call = AsyncMock()
     return hass
@@ -30,9 +41,53 @@ def _listed(hass: Mock) -> set[str]:
     return {schema["name"] for schema in get_tool_schemas(hass)}
 
 
+_BY_OPTION = {
+    "appdaemon_file_access": "list_appdaemon_files",
+    "camera_image_access": "get_camera_image",
+    "config_file_access": "get_config_file",
+    "image_file_access": "get_image_file",
+    "integration_management": "start_config_flow",
+    "template_rendering": "render_template",
+}
+
+
 class TestListing:
-    def test_every_tool_is_listed_by_default(self):
+    def test_every_tool_is_listed_with_every_group_switched_on(self):
         assert _listed(_hass()) == set(TOOLS)
+
+    def test_a_default_setup_lists_no_tool_that_is_switched_off(self):
+        """Such a tool could only answer that it is off, at the cost of its schema."""
+        hass = _hass(**dict.fromkeys(EVERY_TOOL_OPTION, False))
+        hass.config.components = set()
+
+        hidden = set(TOOLS) - _listed(hass)
+
+        assert set(_BY_OPTION.values()) <= hidden
+        assert {"delete_device", "delete_integration", "knx_recent_telegrams"} <= hidden
+        assert not hidden & {"get_state", "call_service", "update_device", "list_backups"}
+        assert len(hidden) == 35
+
+    @pytest.mark.parametrize(("option", "tool"), sorted(_BY_OPTION.items()))
+    def test_a_group_is_listed_once_its_option_is_on(self, option, tool):
+        off = _hass(**{option: False})
+        on = _hass(**{option: True})
+
+        assert tool not in _listed(off)
+        assert tool in _listed(on)
+
+    def test_knx_tools_are_listed_only_with_knx_loaded(self):
+        hass = _hass()
+        assert "knx_get_entities" in _listed(hass)
+
+        hass.config.components = set()
+        assert "knx_get_entities" not in _listed(hass)
+
+    async def test_a_tool_left_out_for_being_off_still_says_how_to_switch_it_on(self):
+        hass = _hass(config_file_access=False)
+
+        result = await call_tool(hass, "list_config_files", {})
+
+        assert "disabled" in result["content"][0]["text"]
 
     @pytest.mark.parametrize(
         "data",

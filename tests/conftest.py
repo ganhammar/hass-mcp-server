@@ -39,6 +39,32 @@ except ImportError:
 
 
 @pytest.fixture
+def list_every_tool():
+    """Return a function that sets a stand-in hass up to list the whole catalogue.
+
+    A tool is left out of the listing while the option that switches its group on
+    is off, and the KNX tools while KNX is not loaded.
+    """
+
+    from custom_components.mcp_server_http_transport.const import DOMAIN
+
+    def apply(hass) -> None:
+        hass.data.setdefault(DOMAIN, {}).update(
+            {
+                "appdaemon_file_access": True,
+                "camera_image_access": True,
+                "config_file_access": True,
+                "image_file_access": True,
+                "integration_management": True,
+                "template_rendering": True,
+            }
+        )
+        hass.config.components = {"knx"}
+
+    return apply
+
+
+@pytest.fixture
 def mock_hass():
     """Create a mock Home Assistant instance."""
     hass = Mock()

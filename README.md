@@ -69,11 +69,13 @@ Two options decide which tools a client is offered at all (Settings > Devices & 
 
 Both apply on top of the feature options below, which still decide whether tools such as `render_template` or `get_camera_image` do anything.
 
+A tool whose own feature option is off is left out of the tool list as well, and so are the KNX tools while the KNX integration is not loaded. On a default setup that is 35 of the 116 tools, which a client would otherwise carry in its context without being able to use them. A client usually reads the tool list once when it connects, so reconnect it after switching an option on.
+
 The limits cover tools only. Resources such as `hass://entities` are still served, so disabling a listing tool does not hide the data it lists. A call to a withheld tool is logged at `info` and fires the audit event, whether or not the tool only reads.
 
 ### Integration management
 
-The tools that set up and manage integrations are off by default: `start_config_flow`, `start_options_flow`, `start_reconfigure_flow`, `continue_config_flow`, `abort_config_flow`, `reload_integration`, `set_integration_enabled` and `delete_integration`. They run the same flows as the "Add integration" dialog and an integration's Configure button, and act on existing config entries, so a client can add an integration, change its settings, or remove one along with its devices and entities. The MCP Server's own integration and its OIDC provider are off limits to all of them, because their options decide who may connect and what a client may do. Turn on **Enable integration management** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that.
+The tools that set up and manage integrations are off by default: `start_config_flow`, `start_options_flow`, `start_reconfigure_flow`, `continue_config_flow`, `abort_config_flow`, `reload_integration`, `set_integration_enabled` and `delete_integration`. They run the same flows as the "Add integration" dialog and an integration's Configure button, and act on existing config entries, so a client can add an integration, change its settings, or remove one along with its devices and entities. `delete_device` is behind the same option, since some integrations remove a device from their network when asked. The MCP Server's own integration and its OIDC provider are off limits to all of them, because their options decide who may connect and what a client may do, and template helpers are refused while template rendering is off, because a template helper renders whatever template it is given. Turn on **Enable integration management** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that.
 
 Two limits are worth knowing. Whatever a flow asks for is typed by the model, so a password or API key entered this way passes through the conversation and the client's transcript; the audit log records only the field names. An options or reconfigure form comes filled in with the entry's current values, and those are shown to the model, except for password fields, fields with a secret-like name and URLs that carry credentials, which are masked as `***` and kept when sent back that way. And a flow that needs a browser, such as an OAuth sign-in, cannot be finished over MCP: the tool reports the step and its URL so you can complete it yourself or abort the flow.
 
@@ -332,19 +334,19 @@ been copied and source identity/metadata checked for changes during copying.
 | `get_system_health` | System health report: what each integration says about itself (versions, reachability, database size) |
 | `list_backups` | List backups, newest first, with where each is stored, and when automatic backups last ran and run next |
 | `list_areas` | List all areas |
-| `list_devices` | List devices, optionally filtered by area |
+| `list_devices` | List devices with their area, labels and whether they are disabled, optionally filtered by area |
 | `update_device` | Rename a device, move it to an area, set its labels, or disable or enable it |
-| `delete_device` | Delete a device and its entities, if its integration supports and allows it (requires explicit confirmation) |
+| `delete_device` | Delete a device and its entities, if its integration supports and allows it (requires explicit confirmation and "Enable integration management") |
 | `create_area` | Create an area with an optional floor, icon, labels and aliases |
 | `update_area` | Rename an area or change its floor, icon, labels or aliases; an empty value clears a field |
 | `delete_area` | Delete an area, leaving its devices and entities without one |
 | `list_floors` | List all floors |
 | `create_floor` | Create a floor with an optional level, icon and aliases |
-| `update_floor` | Rename a floor or change its level, icon or aliases |
+| `update_floor` | Rename a floor or change its level, icon or aliases; `clear_level` removes the level |
 | `delete_floor` | Delete a floor, leaving its areas without one |
 | `list_services` | List available services, optionally filtered by domain |
 | `describe_service` | Get a service's full parameter schema: fields, selectors, examples, and targets |
-| `list_integrations` | List installed integrations and their status |
+| `list_integrations` | List installed integrations with their status, whether each is disabled, and whether it has an options or reconfigure flow |
 | `start_config_flow` | Start an integration's config flow and get its first step: form schema, menu, abort reason or created entry (requires "Enable integration management") |
 | `continue_config_flow` | Submit a config flow step and get the next one, validation errors, or the created entry (requires "Enable integration management") |
 | `abort_config_flow` | Abort a config flow in progress (requires "Enable integration management") |

@@ -131,7 +131,8 @@ def _async_report_endpoint_conflict(hass: HomeAssistant) -> None:
         translation_key=ISSUE_ENDPOINT_CONFLICT,
         translation_placeholders={"path": MCP_PATH, "dedicated_path": MCP_HTTP_PATH},
         learn_more_url=(
-            "https://github.com/ganhammar/hass-mcp-server" "#another-integration-also-serves-apimcp"
+            "https://github.com/ganhammar/hass-mcp-server/blob/main/docs/troubleshooting.md"
+            "#another-integration-also-serves-apimcp"
         ),
     )
 

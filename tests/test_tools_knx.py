@@ -469,3 +469,49 @@ class TestKnxEntityTools:
         result = await knx_mod.knx_delete_entity(self._hass(Mock()), {})
         assert "content" in result
         assert result["isError"] is True
+
+    async def test_get_entities_reports_a_core_without_the_mapping(self):
+        module = Mock(spec=[])
+
+        result = await knx_mod.knx_get_entities(self._hass(module), {})
+
+        assert result["isError"] is True
+        assert "mapping unavailable" in result["content"][0]["text"]
+
+    async def test_get_entities_reports_an_invalid_filter(self):
+        module = Mock()
+        module.group_address_entities = {}
+
+        result = await knx_mod.knx_get_entities(self._hass(module), {"filter_ga": "("})
+
+        assert result["isError"] is True
+        assert result["content"][0]["text"].startswith("Invalid regex: ")
+
+    @pytest.mark.parametrize(
+        ("tool", "method", "arguments"),
+        [
+            ("knx_create_entity", "create_entity", {"platform": "light", "data": {}}),
+            (
+                "knx_update_entity",
+                "update_entity",
+                {"entity_id": "light.x", "platform": "light", "data": {}},
+            ),
+            ("knx_delete_entity", "delete_entity", {"entity_id": "light.x"}),
+        ],
+    )
+    async def test_a_store_that_refuses_is_reported_as_an_error(self, tool, method, arguments):
+        module = Mock()
+        setattr(module.config_store, method, AsyncMock(side_effect=ValueError("store is busy")))
+        validate = Mock(side_effect=lambda payload: payload)
+
+        with patch.object(knx_mod, "validate_entity_data", validate):
+            result = await getattr(knx_mod, tool)(self._hass(module), arguments)
+
+        assert result["isError"] is True
+        assert result["content"][0]["text"] == f"{method} failed: store is busy"
+
+    async def test_update_entity_requires_its_arguments(self):
+        result = await knx_mod.knx_update_entity(self._hass(Mock()), {"entity_id": "light.x"})
+
+        assert result["isError"] is True
+        assert "'entity_id', 'platform' and 'data' are required." in result["content"][0]["text"]

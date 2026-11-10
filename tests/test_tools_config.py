@@ -765,3 +765,29 @@ class TestToolsConfig:
         body = json.loads(response.body)
         assert body["result"]["isError"] is True
         assert "Error deleting script" in body["result"]["content"][0]["text"]
+
+
+_CONFIG_MANAGER = "custom_components.mcp_server_http_transport.config_manager"
+
+
+@pytest.mark.parametrize(
+    ("tool", "reader", "arguments", "message"),
+    [
+        ("list_automations", "read_list_entries", {}, "Error listing automations: "),
+        ("list_scenes", "read_list_entries", {}, "Error listing scenes: "),
+        ("get_scene_config", "read_list_entry", {"scene_id": "x"}, "Error getting scene config: "),
+        ("list_scripts", "read_dict_entries", {}, "Error listing scripts: "),
+        ("get_script_config", "read_dict_entry", {"key": "x"}, "Error getting script config: "),
+    ],
+)
+async def test_a_config_file_that_cannot_be_read_is_reported_as_an_error(
+    tool, reader, arguments, message
+):
+    """A read tool that cannot read its file says so, and marks the result as failed."""
+    from custom_components.mcp_server_http_transport.tools import config as config_tools
+
+    with patch(f"{_CONFIG_MANAGER}.{reader}", AsyncMock(side_effect=OSError("disk gone"))):
+        result = await getattr(config_tools, tool)(Mock(), arguments)
+
+    assert result["isError"] is True
+    assert result["content"][0]["text"] == f"{message}disk gone"

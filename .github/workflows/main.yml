@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Validate
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: HACS Validation
         uses: hacs/action@main
@@ -27,10 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     name: test
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
 
     - name: Set up Python 3.13
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v7
       with:
         python-version: "3.13"
 
@@ -57,10 +57,10 @@ jobs:
       run: poetry run pytest tests/ --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py --cov=custom_components.mcp_server_http_transport --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        file: ./coverage.xml
+        files: ./coverage.xml
         fail_ci_if_error: false
 
   knx-telegram-store-test:
@@ -72,11 +72,11 @@ jobs:
     # versions HA 2026.8.3 declares, so the store the tool queries is the real
     # one. Bump deliberately to test newer releases.
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
 
     # 0.13.357 pins HA 2026.8.3 and requires Python 3.14.
     - name: Set up Python 3.14
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v7
       with:
         python-version: "3.14"
 
@@ -101,8 +101,8 @@ jobs:
       matrix:
         include:
           - python-version: "3.14"
-            ha-version: "2026.9.3"
-            ha-test-helper: "0.13.366"
+            ha-version: "2026.10.4"
+            ha-test-helper: "0.13.375"
           - python-version: "3.14"
             ha-version: "2026.4.2"
             ha-test-helper: "0.13.323"
@@ -118,10 +118,10 @@ jobs:
             extra-deps: "pycares<5"
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
 

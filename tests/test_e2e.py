@@ -912,6 +912,9 @@ async def test_areas_devices_and_entities_are_managed_over_http(
         == leftover
     )
 
+    gated = await call("delete_device", {"device_id": device.id, "confirm": True})
+    assert gated.startswith("Deleting a device is part of integration management")
+    hass.data[DOMAIN]["integration_management"] = True
     deleted = await call("delete_device", {"device_id": device.id, "confirm": True})
     assert deleted == f"Deleted device 'Plug' ({device.id}), with 1 entity"
     await hass.async_block_till_done()
@@ -924,6 +927,16 @@ async def test_areas_devices_and_entities_are_managed_over_http(
     assert await call("delete_floor", {"floor_id": floor["floor_id"]}) == (
         f"Deleted floor 'Upstairs' ({floor['floor_id']})"
     )
+
+
+async def test_a_second_entry_of_the_integration_cannot_be_set_up(
+    loaded_entry: MockConfigEntry, hass: HomeAssistant
+) -> None:
+    """Setting one up would replace the tool limits of the first."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+
+    assert (result["type"], result["reason"]) == ("abort", "single_instance_allowed")
+    assert hass.config_entries.async_entries(DOMAIN) == [loaded_entry]
 
 
 async def test_diagnostics_are_read_over_http(

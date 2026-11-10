@@ -75,6 +75,7 @@ class TestToolsStatistics:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 2
         assert data[0]["mean"] == 100.5
@@ -113,6 +114,7 @@ class TestToolsStatistics:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Invalid period" in text
 
@@ -146,12 +148,13 @@ class TestToolsStatistics:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Error getting statistics" in text
 
 
-async def _run_tool(view, name, arguments, recorder=None, extra_patches=()):
-    """Drive a tools/call through the HTTP view and return the response text."""
+async def _run_tool_result(view, name, arguments, recorder=None, extra_patches=()):
+    """Drive a tools/call through the HTTP view and return the JSON-RPC result."""
     request = Mock()
     request.headers = {"Authorization": "Bearer valid_token"}
     request.json = AsyncMock(
@@ -177,8 +180,19 @@ async def _run_tool(view, name, arguments, recorder=None, extra_patches=()):
         response = await view.post(request)
 
     assert response.status == 200
-    body = json.loads(response.body)
-    return body["result"]["content"][0]["text"]
+    return json.loads(response.body)["result"]
+
+
+async def _run_tool(view, name, arguments, recorder=None, extra_patches=()):
+    result = await _run_tool_result(view, name, arguments, recorder, extra_patches)
+    assert "isError" not in result
+    return result["content"][0]["text"]
+
+
+async def _run_tool_error(view, name, arguments, recorder=None, extra_patches=()):
+    result = await _run_tool_result(view, name, arguments, recorder, extra_patches)
+    assert result["isError"] is True
+    return result["content"][0]["text"]
 
 
 class TestListStatisticIds:
@@ -230,7 +244,7 @@ class TestListStatisticIds:
         assert args[3] == "sum"
 
     async def test_rejects_invalid_type(self, view):
-        text = await _run_tool(
+        text = await _run_tool_error(
             view, "list_statistic_ids", {"statistic_type": "median"}, recorder=Mock()
         )
         assert "Invalid statistic_type" in text
@@ -238,7 +252,7 @@ class TestListStatisticIds:
     async def test_error_surfaces(self, view):
         recorder = Mock()
         recorder.async_add_executor_job = AsyncMock(side_effect=Exception("boom"))
-        text = await _run_tool(view, "list_statistic_ids", {}, recorder)
+        text = await _run_tool_error(view, "list_statistic_ids", {}, recorder)
         assert "Error listing statistic IDs" in text
 
 
@@ -275,7 +289,7 @@ class TestValidateStatistics:
     async def test_error_surfaces(self, view):
         recorder = Mock()
         recorder.async_add_executor_job = AsyncMock(side_effect=Exception("boom"))
-        text = await _run_tool(view, "validate_statistics", {}, recorder)
+        text = await _run_tool_error(view, "validate_statistics", {}, recorder)
         assert "Error validating statistics" in text
 
 
@@ -315,7 +329,7 @@ class TestAdjustStatistics:
         assert call.args[3] == "kWh"
 
     async def test_invalid_start_time(self, view):
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "adjust_statistics",
             {"statistic_id": "sensor.energy", "start_time": "not-a-date", "adjustment": 1},
@@ -324,7 +338,7 @@ class TestAdjustStatistics:
         assert "Invalid start_time" in text
 
     async def test_unknown_statistic_id(self, view):
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "adjust_statistics",
             {
@@ -337,7 +351,7 @@ class TestAdjustStatistics:
         assert "Unknown statistic ID" in text
 
     async def test_refuses_without_sum(self, view):
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "adjust_statistics",
             {
@@ -350,7 +364,7 @@ class TestAdjustStatistics:
         assert "no sum to adjust" in text
 
     async def test_refuses_unit_mismatch(self, view):
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "adjust_statistics",
             {
@@ -366,7 +380,7 @@ class TestAdjustStatistics:
     async def test_error_listing_metadata(self, view):
         recorder = Mock()
         recorder.async_add_executor_job = AsyncMock(side_effect=Exception("boom"))
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "adjust_statistics",
             {
@@ -381,7 +395,7 @@ class TestAdjustStatistics:
     async def test_error_from_adjust_call(self, view):
         recorder = self._recorder([{"has_sum": True, "statistics_unit_of_measurement": "kWh"}])
         recorder.async_adjust_statistics = Mock(side_effect=Exception("boom"))
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "adjust_statistics",
             {
@@ -395,7 +409,7 @@ class TestAdjustStatistics:
 
     async def test_recorder_disabled(self, view):
         """get_instance raising (recorder off) degrades to an error, not a 500."""
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "adjust_statistics",
             {
@@ -443,7 +457,7 @@ class TestClearStatistics:
         assert "Cleared statistics for: sensor.energy" in text
 
     async def test_requires_confirm(self, view):
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "clear_statistics",
             {"statistic_ids": ["sensor.energy"], "confirm": False},
@@ -453,7 +467,7 @@ class TestClearStatistics:
 
     async def test_rejects_non_list(self, view):
         """A bare string must not be iterated character by character."""
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "clear_statistics",
             {"statistic_ids": "sensor.energy", "confirm": True},
@@ -462,7 +476,7 @@ class TestClearStatistics:
         assert "must be an array" in text
 
     async def test_rejects_empty_ids(self, view):
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "clear_statistics",
             {"statistic_ids": [], "confirm": True},
@@ -472,7 +486,7 @@ class TestClearStatistics:
 
     async def test_rejects_unknown_id(self, view):
         """A nonexistent ID must not report a successful clear."""
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "clear_statistics",
             {"statistic_ids": ["sensor.nope"], "confirm": True},
@@ -484,7 +498,7 @@ class TestClearStatistics:
     async def test_error_listing_metadata(self, view):
         recorder = Mock()
         recorder.async_add_executor_job = AsyncMock(side_effect=Exception("boom"))
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "clear_statistics",
             {"statistic_ids": ["sensor.energy"], "confirm": True},
@@ -497,7 +511,7 @@ class TestClearStatistics:
         # Never invoke on_done, so the wait times out.
         recorder = self._recorder(clear=Mock())
 
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "clear_statistics",
             {"statistic_ids": ["sensor.energy"], "confirm": True},
@@ -515,7 +529,7 @@ class TestClearStatistics:
     async def test_error_surfaces(self, view):
         view.hass.loop = asyncio.get_running_loop()
         recorder = self._recorder(clear=Mock(side_effect=Exception("boom")))
-        text = await _run_tool(
+        text = await _run_tool_error(
             view,
             "clear_statistics",
             {"statistic_ids": ["sensor.energy"], "confirm": True},

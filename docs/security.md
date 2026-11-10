@@ -12,7 +12,7 @@ To let non-admin users in, turn off **Require administrator account** (Settings 
 
 ## Audit log
 
-Every tool call is logged with the calling user's ID, how they authenticated (`oidc` or `native`), the tool, the outcome (`ok`, `error`, or `invalid` for a call rejected before it ran) and its arguments. Values under keys that look like secrets (`password`, `token`, `api_key`, `secret` and similar) are masked, and the arguments are shortened to about 500 characters. Calls to tools that can change something are logged at `info`, and read-only tools at `debug`. Home Assistant's default log level is `warning`, so raise this logger to see them:
+Every tool call is logged with the calling user's ID, how they authenticated (`oidc` or `native`), the tool, the outcome and its arguments. The outcome is `ok`, `error` when the tool reports it could not do what was asked (an unknown ID, a refused operation, a missing `confirm`) or failed unexpectedly, or `invalid` for a call rejected before it ran. Values under keys that look like secrets (`password`, `token`, `api_key`, `secret` and similar) are masked, and the arguments are shortened to about 500 characters. Calls to tools that can change something are logged at `info`, and read-only tools at `debug`. Home Assistant's default log level is `warning`, so raise this logger to see them:
 
 ```yaml
 logger:

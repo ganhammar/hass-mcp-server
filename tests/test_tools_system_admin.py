@@ -186,6 +186,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         text = body["result"]["content"][0]["text"]
         assert "ERROR" in text
         assert "WARNING" in text
@@ -219,6 +220,7 @@ class TestToolsSystemAdmin:
         with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
+        assert "isError" not in json.loads(response.body)["result"]
         text = json.loads(response.body)["result"]["content"][0]["text"]
         assert "api_key=<redacted>" in text
         assert "SUPERSECRET" not in text
@@ -257,6 +259,7 @@ class TestToolsSystemAdmin:
         with patch.object(view, "_authenticate", return_value=CALLER):
             response = await view.post(request)
 
+        assert "isError" not in json.loads(response.body)["result"]
         text = json.loads(response.body)["result"]["content"][0]["text"]
         assert "in-memory system log buffer" in text
         assert "token=<redacted>" in text
@@ -293,6 +296,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         text = body["result"]["content"][0]["text"]
         assert "Last line only" in text
 
@@ -319,6 +323,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Log file not found" in text
 
@@ -345,6 +350,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         text = body["result"]["content"][0]["text"]
         assert "restart has been initiated" in text
 
@@ -369,6 +375,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "confirm=true" in text
 
@@ -428,6 +435,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         from homeassistant.const import __version__ as HA_VERSION
 
@@ -475,6 +483,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data["domain"] == "light"
         assert data["total"] == 2
@@ -509,6 +518,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data["total"] == 0
 
@@ -540,6 +550,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data["valid"] is True
         assert data["errors"] == []
@@ -572,6 +583,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data["valid"] is False
         assert len(data["errors"]) == 2
@@ -614,6 +626,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 2
         assert data[0]["domain"] == "hue"
@@ -641,6 +654,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Error reading error log" in text
 
@@ -673,6 +687,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         text = body["result"]["content"][0]["text"]
         assert "line2" in text
         assert "line3" in text
@@ -704,6 +719,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Log file not found" in text
         # The checked path is included so users can confirm where we looked (#48).
@@ -747,6 +763,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         text = body["result"]["content"][0]["text"]
         assert "in-memory system log buffer" in text
         assert "Something broke" in text
@@ -755,8 +772,8 @@ class TestToolsSystemAdmin:
         assert "(3x)" in text
         assert "ValueError: boom" in text
 
-    async def test_get_error_log_empty_buffer_returns_not_found(self, view, mock_hass):
-        """An empty system_log buffer falls through to the not-found message."""
+    async def test_get_error_log_empty_buffer_says_nothing_was_logged(self, view, mock_hass):
+        """A buffer that is there and empty is an answer, not a failure."""
         mock_hass.config.path.return_value = "/nonexistent/home-assistant.log"
         handler = Mock()
         handler.records.to_list.return_value = []
@@ -779,9 +796,8 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
-        text = body["result"]["content"][0]["text"]
-        assert "Log file not found" in text
-        assert "logger:" in text
+        assert "isError" not in body["result"]
+        assert body["result"]["content"][0]["text"].startswith("No warnings or errors have been")
 
     async def test_get_error_log_buffer_read_failure_degrades_to_not_found(self, view, mock_hass):
         """If the system_log buffer raises, degrade to the not-found message, not a 500."""
@@ -807,6 +823,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Log file not found" in text
         assert "logger:" in text
@@ -831,6 +848,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Error restarting Home Assistant" in text
 
@@ -859,6 +877,7 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Error checking config" in text
 

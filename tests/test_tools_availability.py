@@ -125,6 +125,7 @@ class TestListing:
 
         result = await call_tool(hass, "list_config_files", {})
 
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"]
 
     @pytest.mark.parametrize(
@@ -173,7 +174,8 @@ class TestDispatch:
     async def test_a_read_tool_still_runs_in_read_only_mode(self):
         result = await call_tool(_hass(read_only=True), "get_state", {"entity_id": "sun.sun"})
 
-        assert "isError" not in result
+        # The test double holds no state, so the handler's own answer shows it ran.
+        assert result["content"][0]["text"] == "Entity sun.sun not found"
 
     async def test_a_disabled_tool_is_refused_even_when_it_only_reads(self):
         hass = _hass(disabled_tools=frozenset({"get_state"}))

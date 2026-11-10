@@ -14,6 +14,7 @@ from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 from .labels import label_json
@@ -61,7 +62,7 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
     state = hass.states.get(entity_id)
 
     if state is None:
-        return {"content": [{"type": "text", "text": f"Entity {entity_id} not found"}]}
+        return error_result(f"Entity {entity_id} not found")
 
     registry = er.async_get(hass)
     entry = registry.async_get(entity_id)
@@ -172,7 +173,7 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         }
     except Exception as e:
         _LOGGER.error("Error calling service: %s", e)
-        return {"content": [{"type": "text", "text": f"Error calling service: {str(e)}"}]}
+        return error_result(f"Error calling service: {str(e)}")
 
 
 @register_tool(
@@ -357,7 +358,7 @@ async def get_device_details(hass: HomeAssistant, arguments: dict[str, Any]) -> 
     device_registry = dr.async_get(hass)
     device = device_registry.async_get(device_id)
     if device is None:
-        return {"content": [{"type": "text", "text": f"Device {device_id} not found"}]}
+        return error_result(f"Device {device_id} not found")
 
     child = is_child_device(device)
     result: dict[str, Any] = {
@@ -467,12 +468,12 @@ async def describe_service(hass: HomeAssistant, arguments: dict[str, Any]) -> di
     descriptions = await async_get_all_descriptions(hass)
     domain_services = descriptions.get(domain)
     if not domain_services:
-        return {"content": [{"type": "text", "text": f"No services found for domain {domain}"}]}
+        return error_result(f"No services found for domain {domain}")
 
     if service is not None:
         description = domain_services.get(service)
         if description is None:
-            return {"content": [{"type": "text", "text": f"Service {domain}.{service} not found"}]}
+            return error_result(f"Service {domain}.{service} not found")
         result = {service: description}
     else:
         result = dict(domain_services)
@@ -524,17 +525,10 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
     limit = arguments.get("limit", 100)
 
     if not any([query, device_class_filter, domain_filter, area_filter]):
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "Error: at least one search parameter "
-                        "(query, device_class, domain, area_id) must be provided"
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            "Error: at least one search parameter "
+            "(query, device_class, domain, area_id) must be provided"
+        )
 
     entity_registry = er.async_get(hass)
     device_registry = dr.async_get(hass)
@@ -640,7 +634,7 @@ async def batch_get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
     fields = arguments.get("fields")
 
     if len(entity_ids) > 50:
-        return {"content": [{"type": "text", "text": "Error: maximum 50 entity IDs per request"}]}
+        return error_result("Error: maximum 50 entity IDs per request")
 
     registry = er.async_get(hass)
     results = []

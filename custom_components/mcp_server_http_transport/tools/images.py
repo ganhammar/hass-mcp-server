@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from ..const import DOMAIN
 from . import (
     ANNOTATION_READ_ONLY,
+    error_result,
     register_tool,
 )
 
@@ -29,31 +30,17 @@ _IMAGE_MIME_TYPES = {
 # clients limit response size, so oversized frames are rejected with guidance.
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
-_CAMERA_DISABLED_RESPONSE = {
-    "content": [
-        {
-            "type": "text",
-            "text": (
-                "Camera image access is disabled. Enable it in the MCP Server integration "
-                "settings: Settings → Devices & Services → MCP Server → Configure → "
-                "Enable camera image access."
-            ),
-        }
-    ]
-}
+_CAMERA_DISABLED_MESSAGE = (
+    "Camera image access is disabled. Enable it in the MCP Server integration "
+    "settings: Settings → Devices & Services → MCP Server → Configure → "
+    "Enable camera image access."
+)
 
-_IMAGE_FILE_DISABLED_RESPONSE = {
-    "content": [
-        {
-            "type": "text",
-            "text": (
-                "Image file access is disabled. Enable it in the MCP Server integration "
-                "settings: Settings → Devices & Services → MCP Server → Configure → "
-                "Enable image file access."
-            ),
-        }
-    ]
-}
+_IMAGE_FILE_DISABLED_MESSAGE = (
+    "Image file access is disabled. Enable it in the MCP Server integration "
+    "settings: Settings → Devices & Services → MCP Server → Configure → "
+    "Enable image file access."
+)
 
 
 def _camera_enabled(hass: HomeAssistant) -> bool:
@@ -75,10 +62,6 @@ def _image_content(data: bytes, mime_type: str) -> dict[str, Any]:
             }
         ]
     }
-
-
-def _text(message: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": message}]}
 
 
 @register_tool(
@@ -113,11 +96,13 @@ def _text(message: str) -> dict[str, Any]:
 async def get_camera_image(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Capture a camera entity's current frame and return it as image content."""
     if not _camera_enabled(hass):
-        return _CAMERA_DISABLED_RESPONSE
+        return error_result(_CAMERA_DISABLED_MESSAGE)
 
     entity_id = arguments["entity_id"]
     if not entity_id.startswith("camera."):
-        return _text(f"'{entity_id}' is not a camera entity (expected a 'camera.' entity ID)")
+        return error_result(
+            f"'{entity_id}' is not a camera entity (expected a 'camera.' entity ID)"
+        )
 
     try:
         # Imported lazily: the camera component pulls in turbojpeg (a C extension)
@@ -132,10 +117,10 @@ async def get_camera_image(hass: HomeAssistant, arguments: dict[str, Any]) -> di
             height=arguments.get("height"),
         )
     except Exception as e:
-        return _text(f"Error capturing image from '{entity_id}': {e}")
+        return error_result(f"Error capturing image from '{entity_id}': {e}")
 
     if len(image.content) > _MAX_IMAGE_BYTES:
-        return _text(
+        return error_result(
             f"Image from '{entity_id}' is too large ({len(image.content)} bytes, "
             f"max {_MAX_IMAGE_BYTES}). Retry with a smaller width/height."
         )
@@ -169,22 +154,22 @@ async def get_camera_image(hass: HomeAssistant, arguments: dict[str, Any]) -> di
 async def get_image_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read an allowed image file from disk and return it as image content."""
     if not _image_file_enabled(hass):
-        return _IMAGE_FILE_DISABLED_RESPONSE
+        return error_result(_IMAGE_FILE_DISABLED_MESSAGE)
 
     raw_path = arguments["path"]
     suffix = Path(raw_path).suffix.lower()
     mime_type = _IMAGE_MIME_TYPES.get(suffix)
     if mime_type is None:
         allowed = ", ".join(sorted(_IMAGE_MIME_TYPES))
-        return _text(f"Unsupported image type '{suffix or raw_path}'. Allowed: {allowed}")
+        return error_result(f"Unsupported image type '{suffix or raw_path}'. Allowed: {allowed}")
 
     try:
         result = await hass.async_add_executor_job(_read_image_file_sync, hass, raw_path)
     except Exception as e:
-        return _text(f"Error reading image file '{raw_path}': {e}")
+        return error_result(f"Error reading image file '{raw_path}': {e}")
 
     if isinstance(result, str):
-        return _text(result)
+        return error_result(result)
     return _image_content(result, mime_type)
 
 

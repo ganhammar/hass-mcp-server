@@ -23,6 +23,7 @@ from . import (
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -39,17 +40,9 @@ _APPDAEMON_LOCK = threading.RLock()
 
 
 def _disabled() -> dict[str, Any]:
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": (
-                    "AppDaemon file access is disabled. "
-                    "Enable it in the MCP Server integration settings."
-                ),
-            }
-        ]
-    }
+    return error_result(
+        "AppDaemon file access is disabled. Enable it in the MCP Server integration settings."
+    )
 
 
 def _enabled(hass: HomeAssistant) -> bool:
@@ -65,7 +58,14 @@ def _root(hass: HomeAssistant) -> Path:
 
 
 def _error(prefix: str, exc: Exception) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": f"Error {prefix}: {exc}"}]}
+    return error_result(f"Error {prefix}: {exc}")
+
+
+def _mutation_result(payload: dict[str, Any]) -> dict[str, Any]:
+    """Report a save or restore, as an error when its write did not go through."""
+    if payload.get("success") is False:
+        return error_result(dumps(payload))
+    return {"content": [{"type": "text", "text": dumps(payload)}]}
 
 
 def _unreachable_root(root: Path) -> str:
@@ -933,9 +933,7 @@ async def save_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) ->
                     "sha256_after": _sha(content),
                 }
 
-        return {
-            "content": [{"type": "text", "text": dumps(await hass.async_add_executor_job(work))}]
-        }
+        return _mutation_result(await hass.async_add_executor_job(work))
     except Exception as exc:
         return _error("saving AppDaemon file", exc)
 
@@ -972,21 +970,16 @@ async def delete_appdaemon_file(hass: HomeAssistant, arguments: dict[str, Any]) 
         }
     except Exception as exc:
         if isinstance(exc, _UnlinkFailure) and exc.possibly_committed:
-            return {
-                "content": [
+            return error_result(
+                dumps(
                     {
-                        "type": "text",
-                        "text": dumps(
-                            {
-                                "success": False,
-                                "mutation_result": "delete may have committed before an error",
-                                "possibly_committed": True,
-                                "error": str(exc),
-                            }
-                        ),
+                        "success": False,
+                        "mutation_result": "delete may have committed before an error",
+                        "possibly_committed": True,
+                        "error": str(exc),
                     }
-                ]
-            }
+                )
+            )
         return _error("deleting AppDaemon file", exc)
 
 
@@ -1130,8 +1123,6 @@ async def restore_appdaemon_backup(
             with _APPDAEMON_LOCK, _RootFS(root) as fs:
                 return _restore(fs, timestamp)
 
-        return {
-            "content": [{"type": "text", "text": dumps(await hass.async_add_executor_job(work))}]
-        }
+        return _mutation_result(await hass.async_add_executor_job(work))
     except Exception as exc:
         return _error("restoring AppDaemon backup", exc)

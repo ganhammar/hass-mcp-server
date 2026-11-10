@@ -36,6 +36,7 @@ from homeassistant.util import dt as dt_util
 from . import (
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -213,48 +214,33 @@ async def list_traces(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
     limit = arguments.get("limit", 20)
 
     if not isinstance(limit, int) or limit < 1:
-        return {"content": [{"type": "text", "text": "Error: limit must be an integer >= 1"}]}
+        return error_result("Error: limit must be an integer >= 1")
 
     try:
         if entity_id:
             resolved_domain, key = _resolve_trace_key(hass, entity_id)
             if domain and domain != resolved_domain:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"Error: domain '{domain}' does not match entity_id "
-                                f"'{entity_id}' (domain '{resolved_domain}')"
-                            ),
-                        }
-                    ]
-                }
+                return error_result(
+                    f"Error: domain '{domain}' does not match entity_id "
+                    f"'{entity_id}' (domain '{resolved_domain}')"
+                )
             domain = resolved_domain
         elif domain:
             if domain not in _TRACE_DOMAINS:
-                return {
-                    "content": [
-                        {"type": "text", "text": f"Error: domain must be one of {_TRACE_DOMAINS}"}
-                    ]
-                }
+                return error_result(f"Error: domain must be one of {_TRACE_DOMAINS}")
             key = None
         else:
-            return {
-                "content": [
-                    {"type": "text", "text": "Error: provide either 'entity_id' or 'domain'"}
-                ]
-            }
+            return error_result("Error: provide either 'entity_id' or 'domain'")
 
         traces = await async_list_traces(hass, domain, key)
         traces = sorted(traces, key=_sort_key, reverse=True)[:limit]
         traces = _attach_entity_ids(hass, traces, entity_id)
         return {"content": [{"type": "text", "text": dumps(traces, cls=_TRACE_ENCODER)}]}
     except ValueError as e:
-        return {"content": [{"type": "text", "text": f"Error: {e}"}]}
+        return error_result(f"Error: {e}")
     except Exception as e:
         _LOGGER.error("Error listing traces: %s", e)
-        return {"content": [{"type": "text", "text": f"Error listing traces: {e}"}]}
+        return error_result(f"Error listing traces: {e}")
 
 
 @register_tool(
@@ -321,21 +307,21 @@ async def get_trace(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
         # surface as an error rather than being mistaken for "no traces".
         summaries = await async_list_traces(hass, domain, key)
         if not summaries:
+            # Nothing traced yet is an answer. Nothing by that name is a failed lookup.
+            known = hass.states.get(entity_id) or er.async_get(hass).async_get(entity_id)
+            if known is None:
+                return error_result(
+                    f"No automation or script with entity_id '{entity_id}'. "
+                    "Use list_automations or list_scripts to find it."
+                )
             return {"content": [{"type": "text", "text": _no_traces}]}
 
         if run_id:
             if run_id not in {s.get("run_id") for s in summaries}:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"No trace found for '{entity_id}' with run_id '{run_id}'. "
-                                "Use list_traces to see available run_ids."
-                            ),
-                        }
-                    ]
-                }
+                return error_result(
+                    f"No trace found for '{entity_id}' with run_id '{run_id}'. "
+                    "Use list_traces to see available run_ids."
+                )
         else:
             run_id = max(summaries, key=_sort_key)["run_id"]
 
@@ -344,7 +330,7 @@ async def get_trace(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
             trace = _summarize_trace(trace)
         return {"content": [{"type": "text", "text": dumps(trace, cls=_TRACE_ENCODER)}]}
     except ValueError as e:
-        return {"content": [{"type": "text", "text": f"Error: {e}"}]}
+        return error_result(f"Error: {e}")
     except Exception as e:
         _LOGGER.error("Error getting trace: %s", e)
-        return {"content": [{"type": "text", "text": f"Error getting trace: {e}"}]}
+        return error_result(f"Error getting trace: {e}")

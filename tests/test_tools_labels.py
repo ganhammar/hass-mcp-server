@@ -31,6 +31,12 @@ from custom_components.mcp_server_http_transport.tools.labels import (
 
 
 def _text(result: dict) -> str:
+    assert "isError" not in result
+    return result["content"][0]["text"]
+
+
+def _error_text(result: dict) -> str:
+    assert result["isError"] is True
     return result["content"][0]["text"]
 
 
@@ -83,7 +89,7 @@ class TestCreateLabel:
     async def test_blank_name_is_refused(self, hass: HomeAssistant, name: str):
         result = await create_label(hass, {"name": name})
 
-        assert _text(result) == "Error creating label: A label needs a name"
+        assert _error_text(result) == "Error creating label: A label needs a name"
         assert not list(lr.async_get(hass).async_list_labels())
 
     async def test_duplicate_name_is_refused_case_insensitively(self, hass: HomeAssistant):
@@ -91,14 +97,14 @@ class TestCreateLabel:
 
         result = await create_label(hass, {"name": "outdoor"})
 
-        assert _text(result).startswith("Error creating label:")
-        assert "already in use" in _text(result)
+        assert _error_text(result).startswith("Error creating label:")
+        assert "already in use" in _error_text(result)
         assert len(list(lr.async_get(hass).async_list_labels())) == 1
 
     async def test_invalid_icon_is_refused_and_nothing_is_created(self, hass: HomeAssistant):
         result = await create_label(hass, {"name": "Bad", "icon": "tree"})
 
-        assert _text(result).startswith("Error creating label:")
+        assert _error_text(result).startswith("Error creating label:")
         assert not list(lr.async_get(hass).async_list_labels())
 
     @pytest.mark.parametrize("color", ["red", "light-green", "blue-grey", "#ff9800", "#FF9800"])
@@ -117,9 +123,11 @@ class TestCreateLabel:
     ):
         result = await create_label(hass, {"name": "L", "color": color})
 
-        assert _text(result).startswith(f"Error creating label: '{color}' is not a valid color")
-        assert "#RRGGBB" in _text(result)
-        assert "light-green" in _text(result)
+        assert _error_text(result).startswith(
+            f"Error creating label: '{color}' is not a valid color"
+        )
+        assert "#RRGGBB" in _error_text(result)
+        assert "light-green" in _error_text(result)
         assert not list(lr.async_get(hass).async_list_labels())
 
     @pytest.mark.parametrize(
@@ -132,7 +140,10 @@ class TestCreateLabel:
         result = await create_label(hass, arguments)
 
         type_name = type(value).__name__
-        assert _text(result) == f"Error creating label: '{field}' must be a string, not {type_name}"
+        assert (
+            _error_text(result)
+            == f"Error creating label: '{field}' must be a string, not {type_name}"
+        )
         assert not list(lr.async_get(hass).async_list_labels())
 
     async def test_created_label_is_listed(self, hass: HomeAssistant):
@@ -177,8 +188,8 @@ class TestUpdateLabel:
 
         result = await update_label(hass, {"label_id": label.label_id, "name": "indoor"})
 
-        assert "already used by label" in _text(result)
-        assert other.label_id in _text(result)
+        assert "already used by label" in _error_text(result)
+        assert other.label_id in _error_text(result)
         assert lr.async_get(hass).async_get_label(label.label_id).name == "Outdoor"
 
     async def test_empty_string_clears_an_optional_field(self, hass: HomeAssistant, label):
@@ -199,7 +210,7 @@ class TestUpdateLabel:
     async def test_blank_name_is_refused(self, hass: HomeAssistant, label):
         result = await update_label(hass, {"label_id": label.label_id, "name": " "})
 
-        assert "needs a name" in _text(result)
+        assert "needs a name" in _error_text(result)
         assert lr.async_get(hass).async_get_label(label.label_id).name == "Outdoor"
 
     async def test_invalid_icon_is_refused_and_nothing_changes(self, hass: HomeAssistant, label):
@@ -207,7 +218,7 @@ class TestUpdateLabel:
             hass, {"label_id": label.label_id, "name": "Renamed", "icon": "leaf"}
         )
 
-        assert _text(result).startswith("Error updating label:")
+        assert _error_text(result).startswith("Error updating label:")
         unchanged = lr.async_get(hass).async_get_label(label.label_id)
         assert (unchanged.name, unchanged.icon) == ("Outdoor", "mdi:tree")
 
@@ -216,7 +227,7 @@ class TestUpdateLabel:
             hass, {"label_id": label.label_id, "name": "Renamed", "color": "Red"}
         )
 
-        assert _text(result).startswith("Error updating label: 'Red' is not a valid color")
+        assert _error_text(result).startswith("Error updating label: 'Red' is not a valid color")
         unchanged = lr.async_get(hass).async_get_label(label.label_id)
         assert (unchanged.name, unchanged.color) == ("Outdoor", "green")
 
@@ -234,7 +245,10 @@ class TestUpdateLabel:
         result = await update_label(hass, {"label_id": label.label_id, field: value})
 
         type_name = type(value).__name__
-        assert _text(result) == f"Error updating label: '{field}' must be a string, not {type_name}"
+        assert (
+            _error_text(result)
+            == f"Error updating label: '{field}' must be a string, not {type_name}"
+        )
         unchanged = lr.async_get(hass).async_get_label(label.label_id)
         assert (unchanged.name, unchanged.color, unchanged.icon, unchanged.description) == (
             "Outdoor",
@@ -246,13 +260,14 @@ class TestUpdateLabel:
     async def test_no_fields_is_reported(self, hass: HomeAssistant, label):
         result = await update_label(hass, {"label_id": label.label_id})
 
-        assert "Nothing to update" in _text(result)
+        assert "Nothing to update" in _error_text(result)
 
     async def test_unknown_label_is_reported(self, hass: HomeAssistant):
         result = await update_label(hass, {"label_id": "nope", "name": "X"})
 
         assert (
-            _text(result) == "Error updating label: No label with label_id 'nope' (see list_labels)"
+            _error_text(result)
+            == "Error updating label: No label with label_id 'nope' (see list_labels)"
         )
 
 
@@ -314,7 +329,8 @@ class TestDeleteLabel:
         result = await delete_label(hass, {"label_id": "nope"})
 
         assert (
-            _text(result) == "Error deleting label: No label with label_id 'nope' (see list_labels)"
+            _error_text(result)
+            == "Error deleting label: No label with label_id 'nope' (see list_labels)"
         )
         assert len(list(lr.async_get(hass).async_list_labels())) == 1
 

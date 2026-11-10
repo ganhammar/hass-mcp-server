@@ -17,6 +17,7 @@ from . import (
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -62,18 +63,15 @@ _BLOCKED_AT_ROOT = {
 _BACKUP_DIR_NAME = "mcp_backups"
 _BACKUP_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d+$")
 
-_DISABLED_RESPONSE = {
-    "content": [
-        {
-            "type": "text",
-            "text": (
-                "Config file access is disabled. Enable it in the MCP Server integration "
-                "settings: Settings → Devices & Services → MCP Server → Configure → "
-                "Enable config file access."
-            ),
-        }
-    ]
-}
+_DISABLED_MESSAGE = (
+    "Config file access is disabled. Enable it in the MCP Server integration "
+    "settings: Settings → Devices & Services → MCP Server → Configure → "
+    "Enable config file access."
+)
+
+
+class _Unreadable(Exception):
+    """A config file the read cannot return, with the reason as its message."""
 
 
 def _is_enabled(hass: HomeAssistant) -> bool:
@@ -243,14 +241,14 @@ def _atomic_write(path: Path, content: str) -> None:
 async def list_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List YAML files in the config directory, optionally recursing into subdirectories."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
     config_dir = _config_dir(hass)
     recursive = bool(arguments.get("recursive", False))
     try:
         files = await hass.async_add_executor_job(_list_yaml_filenames_sync, config_dir, recursive)
         return {"content": [{"type": "text", "text": dumps(files)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error listing config files: {e}"}]}
+        return error_result(f"Error listing config files: {e}")
 
 
 def _list_yaml_filenames_sync(config_dir: Path, recursive: bool = False) -> list[str]:
@@ -331,24 +329,28 @@ def _list_yaml_filenames_sync(config_dir: Path, recursive: bool = False) -> list
 async def get_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read a YAML config file."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
     try:
         path = _resolve_safe(hass, arguments["filename"])
         result = await hass.async_add_executor_job(
             _read_config_file_sync, path, arguments["filename"]
         )
         return {"content": [{"type": "text", "text": result}]}
+    except _Unreadable as e:
+        return error_result(str(e))
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error reading config file: {e}"}]}
+        return error_result(f"Error reading config file: {e}")
 
 
 def _read_config_file_sync(path: Path, filename: str) -> str:
-    """Return file contents, or a user-facing error string for missing / oversized files."""
+    """Return file contents, raising _Unreadable for a missing or oversized file."""
     if not path.exists():
-        return f"File '{filename}' does not exist"
+        raise _Unreadable(f"File '{filename}' does not exist")
     size = path.stat().st_size
     if size > 1_048_576:
-        return f"File '{filename}' is too large ({size} bytes). Maximum allowed size is 1 MB"
+        raise _Unreadable(
+            f"File '{filename}' is too large ({size} bytes). Maximum allowed size is 1 MB"
+        )
     return path.read_text(encoding="utf-8")
 
 
@@ -396,7 +398,7 @@ def _read_config_file_sync(path: Path, filename: str) -> str:
 async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Back up all YAML files, write the new content, then optionally validate."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
     try:
         path = _resolve_safe(hass, arguments["filename"])
         backup_path = await hass.async_add_executor_job(
@@ -420,7 +422,7 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
 
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error saving config file: {e}"}]}
+        return error_result(f"Error saving config file: {e}")
 
 
 @register_tool(
@@ -453,22 +455,18 @@ async def save_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> di
 async def delete_config_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Back up all YAML files, then delete the target file."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
     try:
         path = _resolve_safe(hass, arguments["filename"])
         result = await hass.async_add_executor_job(_backup_and_delete_sync, _config_dir(hass), path)
         if not result["existed"]:
-            return {
-                "content": [
-                    {"type": "text", "text": f"File '{arguments['filename']}' does not exist"}
-                ]
-            }
+            return error_result(f"File '{arguments['filename']}' does not exist")
         lines = [f"Successfully deleted '{arguments['filename']}'"]
         if result["backup"]:
             lines.append(f"Backup: {result['backup']}")
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error deleting config file: {e}"}]}
+        return error_result(f"Error deleting config file: {e}")
 
 
 def _backup_and_write_sync(config_dir: Path, path: Path, content: str) -> str | None:
@@ -571,20 +569,13 @@ def _apply_batch_edit_sync(
 async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """One backup → apply all saves → apply all deletes → one config check."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
 
     saves: list[dict] = arguments.get("saves") or []
     deletes: list[str] = arguments.get("deletes") or []
 
     if not saves and not deletes:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "Error: provide at least one entry in 'saves' or 'deletes'",
-                }
-            ]
-        }
+        return error_result("Error: provide at least one entry in 'saves' or 'deletes'")
 
     # Phase 1: validate all filenames before touching anything
     try:
@@ -593,12 +584,12 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
             for entry in saves
         ]
     except (ValueError, KeyError) as e:
-        return {"content": [{"type": "text", "text": f"Error in saves: {e}"}]}
+        return error_result(f"Error in saves: {e}")
 
     try:
         delete_paths = [(fn, _resolve_safe(hass, fn)) for fn in deletes]
     except ValueError as e:
-        return {"content": [{"type": "text", "text": f"Error in deletes: {e}"}]}
+        return error_result(f"Error in deletes: {e}")
 
     # Phases 2-4 (check missing-deletes → backup → write → delete) all touch the
     # filesystem and must run off the event loop in one executor hop.
@@ -607,17 +598,9 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
     )
 
     if batch_result.get("missing"):
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "Error: file(s) to delete do not exist: "
-                        + ", ".join(batch_result["missing"])
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            "Error: file(s) to delete do not exist: " + ", ".join(batch_result["missing"])
+        )
 
     backup_path = batch_result["backup"]
     saved: list[str] = batch_result["saved"]
@@ -648,6 +631,10 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
         except Exception as check_err:
             lines.append(f"Config check failed to run: {check_err}")
 
+    # A file that could not be written or deleted is a failed call, even when the
+    # rest of the batch went through.
+    if errors:
+        return error_result("\n".join(lines))
     return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
 
@@ -665,7 +652,7 @@ async def batch_edit_config_files(hass: HomeAssistant, arguments: dict[str, Any]
 async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Copy all first-level YAML files (except secrets) into a timestamped backup folder."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
     try:
         result = await hass.async_add_executor_job(_backup_and_list_sync, _config_dir(hass))
         if result["backup"] is None:
@@ -683,7 +670,7 @@ async def backup_config_files(hass: HomeAssistant, arguments: dict[str, Any]) ->
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error creating backup: {e}"}]}
+        return error_result(f"Error creating backup: {e}")
 
 
 def _backup_and_list_sync(config_dir: Path) -> dict[str, Any]:
@@ -708,14 +695,14 @@ def _backup_and_list_sync(config_dir: Path) -> dict[str, Any]:
 async def list_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """List available backup snapshots, newest first."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
     try:
         result = await hass.async_add_executor_job(_list_backups_sync, _config_dir(hass))
         if not result:
             return {"content": [{"type": "text", "text": "No backups found"}]}
         return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error listing backups: {e}"}]}
+        return error_result(f"Error listing backups: {e}")
 
 
 def _list_backups_sync(config_dir: Path) -> list[dict[str, Any]]:
@@ -756,13 +743,11 @@ def _list_backups_sync(config_dir: Path) -> list[dict[str, Any]]:
 async def cleanup_config_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete backup snapshots older than older_than_days days."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
 
     older_than_days = arguments.get("older_than_days", 30)
     if not isinstance(older_than_days, int) or older_than_days < 1:
-        return {
-            "content": [{"type": "text", "text": "Error: older_than_days must be an integer >= 1"}]
-        }
+        return error_result("Error: older_than_days must be an integer >= 1")
 
     try:
         result = await hass.async_add_executor_job(
@@ -778,7 +763,7 @@ async def cleanup_config_backups(hass: HomeAssistant, arguments: dict[str, Any])
         lines.append(f"{len(kept)} backup(s) remaining.")
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error cleaning up backups: {e}"}]}
+        return error_result(f"Error cleaning up backups: {e}")
 
 
 def _cleanup_backups_sync(config_dir: Path, older_than_days: int) -> dict[str, list[str]] | None:
@@ -833,13 +818,13 @@ def _cleanup_backups_sync(config_dir: Path, older_than_days: int) -> dict[str, l
 async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Restore files from a backup snapshot into the config directory."""
     if not _is_enabled(hass):
-        return _DISABLED_RESPONSE
+        return error_result(_DISABLED_MESSAGE)
     try:
         result = await hass.async_add_executor_job(
             _restore_backup_sync, _config_dir(hass), arguments.get("timestamp")
         )
         if "error" in result:
-            return {"content": [{"type": "text", "text": result["error"]}]}
+            return error_result(result["error"])
 
         lines = [
             f"Restored {len(result['restored'])} files from backup '{result['backup_name']}':",
@@ -861,7 +846,7 @@ async def restore_config_backup(hass: HomeAssistant, arguments: dict[str, Any]) 
 
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error restoring backup: {e}"}]}
+        return error_result(f"Error restoring backup: {e}")
 
 
 def _restore_backup_sync(config_dir: Path, timestamp: str | None) -> dict[str, Any]:

@@ -59,6 +59,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         result = json.loads(body["result"]["content"][0]["text"])
         assert len(result) == 2
 
@@ -87,6 +88,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error listing dashboards" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_get_dashboard_config(self, view, mock_hass):
@@ -119,6 +121,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         result = json.loads(body["result"]["content"][0]["text"])
         assert "views" in result
 
@@ -150,6 +153,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error getting dashboard config" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_save_dashboard_config(self, view, mock_hass):
@@ -182,6 +186,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully saved config" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_save_dashboard_config_error(self, view, mock_hass):
@@ -215,6 +220,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error saving dashboard config" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_dashboard_config(self, view, mock_hass):
@@ -244,6 +250,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully deleted config" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_dashboard_config_error(self, view, mock_hass):
@@ -274,6 +281,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error deleting dashboard config" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_create_dashboard(self, view, mock_hass):
@@ -310,6 +318,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully created dashboard" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_create_dashboard_error(self, view, mock_hass):
@@ -343,6 +352,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error creating dashboard" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_update_dashboard(self, view, mock_hass):
@@ -378,6 +388,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully updated dashboard" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_update_dashboard_error(self, view, mock_hass):
@@ -411,6 +422,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error updating dashboard" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_dashboard(self, view, mock_hass):
@@ -440,6 +452,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully deleted dashboard" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_dashboard_error(self, view, mock_hass):
@@ -470,6 +483,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error deleting dashboard" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_get_dashboard_config_with_path(self, view, mock_hass):
@@ -512,6 +526,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         result = json.loads(body["result"]["content"][0]["text"])
         assert result == {"type": "tile", "entity": "fan.air_purifier"}
 
@@ -543,6 +558,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Error getting dashboard config" in text
         assert "out of range" in text
@@ -586,6 +602,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         result = json.loads(body["result"]["content"][0]["text"])
         assert result["view_count"] == 1
         card = result["views"][0]["cards"][0]
@@ -627,6 +644,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         result = json.loads(body["result"]["content"][0]["text"])
         assert result["pointer"] == "/views/1"
         assert result["title"] == "Bedroom"
@@ -666,6 +684,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "summary=true supports" in text
         assert "/views/0/cards/1" in text
@@ -724,6 +743,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         text = body["result"]["content"][0]["text"]
         assert "Applied 2 operation(s)" in text
         assert "[0] Living Room: 0 card(s)" in text
@@ -772,6 +792,7 @@ class TestToolsDashboards:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "Error patching dashboard config" in text
         assert "test failed" in text

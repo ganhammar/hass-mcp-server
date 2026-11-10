@@ -9,7 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from ..json_utils import dumps
-from . import ANNOTATION_DESTRUCTIVE, ANNOTATION_READ_ONLY, register_tool
+from . import ANNOTATION_DESTRUCTIVE, ANNOTATION_READ_ONLY, error_result, register_tool
 from .registries import (
     AREA_ID_PROPERTY,
     LABELS_PROPERTY,
@@ -33,8 +33,7 @@ def _result(value: Any) -> dict[str, Any]:
 
 
 def _error(message: str) -> dict[str, Any]:
-    """Return a normal tool text response, consistent with other handlers."""
-    return {"content": [{"type": "text", "text": f"Error: {message}"}]}
+    return error_result(f"Error: {message}")
 
 
 def _entry(entry: er.RegistryEntry) -> dict[str, Any]:

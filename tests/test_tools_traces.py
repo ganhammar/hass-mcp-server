@@ -66,6 +66,7 @@ class TestListTraces:
             result = await list_traces(hass, {"entity_id": "automation.morning"})
 
         assert captured == {"domain": "automation", "key": "automation.1718"}
+        assert "isError" not in result
         assert "a" in result["content"][0]["text"]
 
     async def test_newest_first_and_limit(self):
@@ -81,6 +82,7 @@ class TestListTraces:
         ):
             result = await list_traces(hass, {"entity_id": "automation.morning", "limit": 2})
 
+        assert "isError" not in result
         run_ids = [t["run_id"] for t in json.loads(result["content"][0]["text"])]
         assert run_ids == ["new", "mid"]
 
@@ -112,6 +114,7 @@ class TestListTraces:
         ):
             result = await list_traces(_make_hass(), {"entity_id": "automation.morning"})
 
+        assert "isError" not in result
         run_ids = [t["run_id"] for t in json.loads(result["content"][0]["text"])]
         assert run_ids == ["live", "restored", "nostart"]
 
@@ -131,6 +134,7 @@ class TestListTraces:
             result = await list_traces(hass, {"domain": "script"})
 
         assert captured == {"domain": "script", "key": None}
+        assert "isError" not in result
         assert json.loads(result["content"][0]["text"]) == []
 
     async def test_domain_wide_summary_carries_resolved_entity_id(self):
@@ -143,6 +147,7 @@ class TestListTraces:
         ):
             result = await list_traces(_make_hass(), {"domain": "automation"})
 
+        assert "isError" not in result
         row = json.loads(result["content"][0]["text"])[0]
         assert row["entity_id"] == "automation.morning"
         reg.async_get_entity_id.assert_called_with("automation", "automation", "1718")
@@ -155,6 +160,7 @@ class TestListTraces:
         ):
             result = await list_traces(_make_hass(), {"domain": "automation"})
 
+        assert "isError" not in result
         assert json.loads(result["content"][0]["text"])[0]["entity_id"] is None
 
     async def test_domain_wide_summary_without_item_id_gets_null_entity_id(self):
@@ -172,6 +178,7 @@ class TestListTraces:
         ):
             result = await list_traces(_make_hass(), {"domain": "automation"})
 
+        assert "isError" not in result
         assert json.loads(result["content"][0]["text"])[0]["entity_id"] is None
         reg.async_get_entity_id.assert_not_called()
 
@@ -184,11 +191,13 @@ class TestListTraces:
         ):
             result = await list_traces(_make_hass(), {"entity_id": "automation.morning"})
 
+        assert "isError" not in result
         assert json.loads(result["content"][0]["text"])[0]["entity_id"] == "automation.morning"
         reg.async_get_entity_id.assert_not_called()
 
     async def test_requires_entity_or_domain(self):
         result = await list_traces(_make_hass(), {})
+        assert result["isError"] is True
         assert "provide either" in result["content"][0]["text"]
 
     async def test_domain_mismatch_is_rejected(self):
@@ -196,6 +205,7 @@ class TestListTraces:
             result = await list_traces(
                 _make_hass(), {"entity_id": "automation.morning", "domain": "script"}
             )
+        assert result["isError"] is True
         assert "does not match" in result["content"][0]["text"]
 
     async def test_invalid_limit_rejected(self):
@@ -203,19 +213,23 @@ class TestListTraces:
             result = await list_traces(
                 _make_hass(), {"entity_id": "automation.morning", "limit": 0}
             )
+        assert result["isError"] is True
         assert "limit must be an integer >= 1" in result["content"][0]["text"]
 
     async def test_bad_entity_id_rejected(self):
         result = await list_traces(_make_hass(), {"entity_id": "notanentity"})
+        assert result["isError"] is True
         assert "not a valid entity_id" in result["content"][0]["text"]
 
     async def test_non_trace_domain_rejected(self):
         result = await list_traces(_make_hass(), {"entity_id": "light.kitchen"})
+        assert result["isError"] is True
         assert "only for automations and scripts" in result["content"][0]["text"]
 
     async def test_invalid_domain_only_rejected(self):
         """domain given without entity_id must still be a real trace domain."""
         result = await list_traces(_make_hass(), {"domain": "light"})
+        assert result["isError"] is True
         assert "domain must be one of" in result["content"][0]["text"]
 
     async def test_unexpected_error_is_reported(self):
@@ -228,6 +242,7 @@ class TestListTraces:
             ),
         ):
             result = await list_traces(_make_hass(), {"entity_id": "automation.morning"})
+        assert result["isError"] is True
         assert "Error listing traces" in result["content"][0]["text"]
 
 
@@ -254,6 +269,7 @@ class TestGetTrace:
             result = await get_trace(hass, {"entity_id": "automation.morning"})
 
         assert captured == {"key": "automation.1718", "run_id": "new"}
+        assert "isError" not in result
         assert json.loads(result["content"][0]["text"])["run_id"] == "new"
 
     async def test_serializes_real_extended_trace_with_context(self):
@@ -279,6 +295,7 @@ class TestGetTrace:
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning", "run_id": "r1"})
 
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Error" not in text
         payload = json.loads(text)
@@ -317,6 +334,7 @@ class TestGetTrace:
                 hass, {"entity_id": "automation.morning", "run_id": "r1", "summary": True}
             )
 
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         # Bulk dropped.
         assert "config" not in payload
@@ -350,6 +368,7 @@ class TestGetTrace:
                 hass, {"entity_id": "automation.morning", "run_id": "r1", "summary": True}
             )
 
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["trace"]["weird/0"] == ["not-a-dict"]
 
@@ -371,6 +390,7 @@ class TestGetTrace:
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning", "run_id": "r1"})
 
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["config"] == {"alias": "Morning"}
         assert payload["trace"]["condition/0"][0]["changed_variables"] == {"a": 1}
@@ -392,6 +412,7 @@ class TestGetTrace:
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning", "run_id": "abc123"})
 
+        assert "isError" not in result
         assert json.loads(result["content"][0]["text"])["run_id"] == "abc123"
 
     async def test_no_traces_gives_friendly_message(self):
@@ -402,6 +423,7 @@ class TestGetTrace:
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning"})
 
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "No traces found" in text
         assert "hasn't run recently" in text
@@ -420,6 +442,7 @@ class TestGetTrace:
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning", "run_id": "ghost"})
 
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "run_id 'ghost'" in text
         assert "list_traces" in text
@@ -438,6 +461,7 @@ class TestGetTrace:
         ):
             result = await get_trace(hass, {"entity_id": "automation.morning"})
 
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "Error getting trace" in text
         assert "No traces found" not in text
@@ -462,10 +486,12 @@ class TestGetTrace:
             result = await get_trace(hass, {"entity_id": "script.bedtime", "run_id": "r1"})
 
         assert captured["key"] == "script.bedtime"
+        assert "isError" not in result
         assert json.loads(result["content"][0]["text"])["run_id"] == "r1"
 
     async def test_bad_entity_id_rejected(self):
         result = await get_trace(_make_hass(), {"entity_id": "light.kitchen"})
+        assert result["isError"] is True
         assert "only for automations and scripts" in result["content"][0]["text"]
 
     async def test_unexpected_error_is_reported(self):
@@ -482,4 +508,5 @@ class TestGetTrace:
             result = await get_trace(
                 _make_hass(), {"entity_id": "automation.morning", "run_id": "r1"}
             )
+        assert result["isError"] is True
         assert "Error getting trace" in result["content"][0]["text"]

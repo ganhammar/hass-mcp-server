@@ -30,6 +30,16 @@ class ToolNotAvailable(InvalidToolRequest):
     """The tool exists but the server's options keep it from being used."""
 
 
+def error_result(text: str) -> dict[str, Any]:
+    """Build the result of a call that did not do what was asked.
+
+    isError tells the client and the model that the call failed without either
+    having to read the text. A result that reports the tool worked, including an
+    empty listing, a preview or a no-op, carries no isError.
+    """
+    return {"content": [{"type": "text", "text": text}], "isError": True}
+
+
 # Reusable MCP ToolAnnotations (see spec §ToolAnnotations).
 ANNOTATION_READ_ONLY: dict[str, Any] = {
     "readOnlyHint": True,
@@ -227,15 +237,7 @@ async def call_tool(hass: HomeAssistant, name: str, arguments: dict[str, Any]) -
         return await tool["handler"](hass, arguments)
     except Exception as err:  # noqa: BLE001 - surfaced to the client as isError
         _LOGGER.exception("Tool %s raised an unhandled exception", name)
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"Tool '{name}' failed: {type(err).__name__}: {err}",
-                }
-            ],
-            "isError": True,
-        }
+        return error_result(f"Tool '{name}' failed: {type(err).__name__}: {err}")
 
 
 # Import submodules so tools auto-register via @register_tool

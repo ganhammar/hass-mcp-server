@@ -23,6 +23,7 @@ from . import (
     ANNOTATION_IDEMPOTENT,
     ANNOTATION_NON_IDEMPOTENT,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -82,7 +83,7 @@ def _enabled(hass: HomeAssistant) -> bool:
 
 def _disabled() -> dict[str, Any]:
     """Build the response telling the caller how to enable integration management."""
-    return _text(
+    return error_result(
         "Integration management is disabled. Enable it in the MCP Server integration "
         "settings: Settings → Devices & Services → MCP Server → Configure → "
         "Enable integration management."
@@ -90,7 +91,7 @@ def _disabled() -> dict[str, Any]:
 
 
 def _unknown_flow(flow_id: str) -> dict[str, Any]:
-    return _text(
+    return error_result(
         f"No flow in progress with ID '{flow_id}'. It may have finished, been aborted, or "
         "been dropped by a Home Assistant restart. Start it again."
     )
@@ -103,7 +104,7 @@ def _own_flow() -> dict[str, Any]:
     could run these flows could lift its own limits. The OIDC provider decides who
     may connect at all.
     """
-    return _text(
+    return error_result(
         "Refusing to configure the MCP Server itself or its OIDC provider: their options "
         "decide what this connection may do. Do it from Settings → Devices & Services "
         "instead."
@@ -122,7 +123,7 @@ def _blocked(hass: HomeAssistant, domain: str) -> dict[str, Any] | None:
     if domain in _PROTECTED_DOMAINS:
         return _own_flow()
     if domain == "template" and not hass.data.get(DOMAIN, {}).get("template_rendering", False):
-        return _text(
+        return error_result(
             "Template helpers render templates, and template rendering is disabled. Enable "
             "it in the MCP Server integration settings: Settings → Devices & Services → "
             "MCP Server → Configure → Enable template rendering."
@@ -227,7 +228,9 @@ def _find_flow(hass: HomeAssistant, flow_id: str) -> tuple[Any, str] | None:
 
 
 def _unknown_entry(entry_id: str) -> dict[str, Any]:
-    return _text(f"No config entry with ID '{entry_id}'. Use list_integrations to find entry IDs.")
+    return error_result(
+        f"No config entry with ID '{entry_id}'. Use list_integrations to find entry IDs."
+    )
 
 
 def _entry_json(entry: config_entries.ConfigEntry) -> dict[str, Any]:
@@ -320,12 +323,12 @@ async def _start(
     try:
         result = await manager.async_init(handler, context=context)
     except data_entry_flow.UnknownHandler:
-        return _text(
+        return error_result(
             f"No integration with a config flow found for domain '{domain}'. It may be "
             "misspelled, not installed, or set up through YAML only."
         )
     except DependencyError as err:
-        return _text(
+        return error_result(
             f"Could not start a flow for '{domain}': its dependencies failed to set up "
             f"({', '.join(err.failed_dependencies)})."
         )
@@ -416,7 +419,7 @@ async def continue_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -
     flow_id = arguments["flow_id"]
     user_input = arguments.get("user_input")
     if user_input is not None and not isinstance(user_input, dict):
-        return _text("user_input must be an object keyed by field name.")
+        return error_result("user_input must be an object keyed by field name.")
 
     found = _find_flow(hass, flow_id)
     if found is None:
@@ -438,7 +441,7 @@ async def continue_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -
     try:
         result = await manager.async_configure(flow_id, user_input)
     except data_entry_flow.UnknownStep as err:
-        return _text(
+        return error_result(
             f"The flow tried to move to a step it does not have ({err}) and Home Assistant "
             "dropped it. Start it again."
         )
@@ -487,7 +490,7 @@ async def abort_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
 
 def _own_entry(action: str) -> dict[str, Any]:
     """Refuse an operation on an entry this very request depends on."""
-    return _text(
+    return error_result(
         f"Refusing to {action} the config entry of the MCP Server or its OIDC provider: "
         "they are serving this request. Do it from Settings → Devices & Services instead."
     )
@@ -524,11 +527,15 @@ async def reload_integration(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         return _own_entry("reload")
 
     try:
-        await hass.config_entries.async_reload(entry_id)
+        loaded = await hass.config_entries.async_reload(entry_id)
     except config_entries.OperationNotAllowed as err:
-        return _text(f"Config entry '{entry_id}' cannot be reloaded: {err}")
+        return error_result(f"Config entry '{entry_id}' cannot be reloaded: {err}")
 
-    return _text(dumps({**_entry_json(entry), "require_restart": not entry.state.recoverable}))
+    result = dumps({**_entry_json(entry), "require_restart": not entry.state.recoverable})
+    # A disabled entry is unloaded and left that way, which is what a reload of it does.
+    if not loaded and not entry.disabled_by:
+        return error_result(f"The config entry was reloaded but did not set up again: {result}")
+    return _text(result)
 
 
 @register_tool(
@@ -561,7 +568,7 @@ async def delete_integration(hass: HomeAssistant, arguments: dict[str, Any]) -> 
 
     entry_id = arguments["entry_id"]
     if arguments["confirm"] is not True:
-        return _text(
+        return error_result(
             "Removing a config entry requires confirm=true. It removes the entry together "
             "with its devices and entities."
         )
@@ -629,7 +636,7 @@ async def start_options_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> 
     if entry is None:
         return refusal
     if not entry.supports_options:
-        return _text(
+        return error_result(
             f"The '{entry.domain}' entry '{entry.title}' has no options to configure. Try "
             "start_reconfigure_flow for its connection settings."
         )
@@ -667,7 +674,7 @@ async def start_reconfigure_flow(hass: HomeAssistant, arguments: dict[str, Any])
     if entry is None:
         return refusal
     if not entry.supports_reconfigure:
-        return _text(
+        return error_result(
             f"The '{entry.domain}' integration cannot be reconfigured. Try start_options_flow "
             "for its settings, or remove the entry and set it up again."
         )
@@ -709,7 +716,7 @@ async def set_integration_enabled(hass: HomeAssistant, arguments: dict[str, Any]
     entry_id = arguments["entry_id"]
     enabled = arguments["enabled"]
     if not isinstance(enabled, bool):
-        return _text("enabled must be true or false.")
+        return error_result("enabled must be true or false.")
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return _unknown_entry(entry_id)

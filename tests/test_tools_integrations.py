@@ -130,6 +130,12 @@ async def _call(hass: HomeAssistant, name: str, **arguments) -> str:
     return result["content"][0]["text"]
 
 
+async def _error_call(hass: HomeAssistant, name: str, **arguments) -> str:
+    result = await call_tool(hass, name, arguments)
+    assert result["isError"] is True, result
+    return result["content"][0]["text"]
+
+
 async def _manual_form(hass: HomeAssistant) -> str:
     """Start a flow and return the form the menu leads to, as the tool reports it."""
     flow_id = json.loads(await _call(hass, "start_config_flow", domain=DEMO))["flow_id"]
@@ -169,7 +175,7 @@ class TestDisabled:
     ):
         hass.data.update(data)
 
-        text = await _call(hass, name, **arguments)
+        text = await _error_call(hass, name, **arguments)
 
         assert text.startswith("Integration management is disabled")
         assert hass.config_entries.flow.async_progress() == []
@@ -188,7 +194,7 @@ class TestStartConfigFlow:
         assert "next_step_id" in result["next"]
 
     async def test_unknown_domain_is_reported(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "start_config_flow", domain="no_such_integration")
+        text = await _error_call(hass, "start_config_flow", domain="no_such_integration")
 
         assert "No integration with a config flow found for domain 'no_such_integration'" in text
 
@@ -196,7 +202,7 @@ class TestStartConfigFlow:
         with patch.object(
             hass.config_entries.flow, "async_init", side_effect=DependencyError(["http", "usb"])
         ):
-            text = await _call(hass, "start_config_flow", domain=DEMO)
+            text = await _error_call(hass, "start_config_flow", domain=DEMO)
 
         assert "its dependencies failed to set up (http, usb)" in text
 
@@ -355,20 +361,20 @@ class TestContinueConfigFlow:
         with patch.object(
             hass.config_entries.flow, "async_configure", side_effect=UnknownStep("no step 'x'")
         ):
-            text = await _call(hass, "continue_config_flow", flow_id=flow_id, user_input={})
+            text = await _error_call(hass, "continue_config_flow", flow_id=flow_id, user_input={})
 
         assert "Home Assistant dropped it" in text
         assert "no step 'x'" in text
 
     async def test_unknown_flow_is_reported(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "continue_config_flow", flow_id="gone", user_input={})
+        text = await _error_call(hass, "continue_config_flow", flow_id="gone", user_input={})
 
         assert "No flow in progress with ID 'gone'" in text
 
     async def test_non_object_user_input_is_refused(self, hass: HomeAssistant, demo: None):
         flow_id = await _manual_step(hass)
 
-        text = await _call(hass, "continue_config_flow", flow_id=flow_id, user_input="host")
+        text = await _error_call(hass, "continue_config_flow", flow_id=flow_id, user_input="host")
 
         assert text == "user_input must be an object keyed by field name."
 
@@ -383,7 +389,7 @@ class TestAbortConfigFlow:
         assert hass.config_entries.flow.async_progress() == []
 
     async def test_unknown_flow_is_reported(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "abort_config_flow", flow_id="gone")
+        text = await _error_call(hass, "abort_config_flow", flow_id="gone")
 
         assert "No flow in progress with ID 'gone'" in text
 
@@ -435,9 +441,20 @@ class TestReloadIntegration:
         }
 
     async def test_unknown_entry_is_reported(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "reload_integration", entry_id="gone")
+        text = await _error_call(hass, "reload_integration", entry_id="gone")
 
         assert "No config entry with ID 'gone'" in text
+
+    async def test_an_entry_that_fails_to_set_up_again_is_an_error(
+        self, hass: HomeAssistant, demo_entry: MockConfigEntry
+    ):
+        with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=False)):
+            result = await call_tool(hass, "reload_integration", {"entry_id": demo_entry.entry_id})
+
+        assert result["isError"] is True
+        assert result["content"][0]["text"].startswith(
+            "The config entry was reloaded but did not set up again: "
+        )
 
     async def test_an_entry_that_may_not_be_reloaded_is_reported(
         self, hass: HomeAssistant, demo_entry: MockConfigEntry
@@ -447,12 +464,12 @@ class TestReloadIntegration:
             "async_reload",
             side_effect=OperationNotAllowed("setup in progress"),
         ):
-            text = await _call(hass, "reload_integration", entry_id=demo_entry.entry_id)
+            text = await _error_call(hass, "reload_integration", entry_id=demo_entry.entry_id)
 
         assert text == f"Config entry '{demo_entry.entry_id}' cannot be reloaded: setup in progress"
 
     async def test_own_entry_is_refused(self, hass: HomeAssistant, own_entry: MockConfigEntry):
-        text = await _call(hass, "reload_integration", entry_id=own_entry.entry_id)
+        text = await _error_call(hass, "reload_integration", entry_id=own_entry.entry_id)
 
         assert text.startswith("Refusing to reload the config entry of the MCP Server")
 
@@ -470,18 +487,22 @@ class TestDeleteIntegration:
         }
 
     async def test_requires_confirmation(self, hass: HomeAssistant, demo_entry: MockConfigEntry):
-        text = await _call(hass, "delete_integration", entry_id=demo_entry.entry_id, confirm=False)
+        text = await _error_call(
+            hass, "delete_integration", entry_id=demo_entry.entry_id, confirm=False
+        )
 
         assert "requires confirm=true" in text
         assert hass.config_entries.async_entries(DEMO) == [demo_entry]
 
     async def test_unknown_entry_is_reported(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "delete_integration", entry_id="gone", confirm=True)
+        text = await _error_call(hass, "delete_integration", entry_id="gone", confirm=True)
 
         assert "No config entry with ID 'gone'" in text
 
     async def test_own_entry_is_refused(self, hass: HomeAssistant, own_entry: MockConfigEntry):
-        text = await _call(hass, "delete_integration", entry_id=own_entry.entry_id, confirm=True)
+        text = await _error_call(
+            hass, "delete_integration", entry_id=own_entry.entry_id, confirm=True
+        )
 
         assert text.startswith("Refusing to remove the config entry of the MCP Server")
         assert hass.config_entries.async_entries(DOMAIN) == [own_entry]
@@ -499,7 +520,7 @@ class TestOwnIntegrationIsOffLimits:
 
     @pytest.mark.parametrize("domain", [DOMAIN, "oidc_provider"])
     async def test_a_new_entry_cannot_be_started(self, hass: HomeAssistant, demo: None, domain):
-        text = await _call(hass, "start_config_flow", domain=domain)
+        text = await _error_call(hass, "start_config_flow", domain=domain)
 
         assert text.startswith("Refusing to configure the MCP Server itself or its OIDC provider")
         assert hass.config_entries.flow.async_progress() == []
@@ -509,7 +530,7 @@ class TestOwnIntegrationIsOffLimits:
     async def test_its_entry_cannot_be_reconfigured(
         self, hass: HomeAssistant, protected_entry: MockConfigEntry, tool
     ):
-        text = await _call(hass, tool, entry_id=protected_entry.entry_id)
+        text = await _error_call(hass, tool, entry_id=protected_entry.entry_id)
 
         assert text.startswith("Refusing to configure the MCP Server itself")
         assert hass.config_entries.options.async_progress() == []
@@ -528,7 +549,7 @@ class TestOwnIntegrationIsOffLimits:
     async def test_its_entry_cannot_be_reloaded_removed_or_disabled(
         self, hass: HomeAssistant, protected_entry: MockConfigEntry, tool, arguments
     ):
-        text = await _call(hass, tool, entry_id=protected_entry.entry_id, **arguments)
+        text = await _error_call(hass, tool, entry_id=protected_entry.entry_id, **arguments)
 
         assert text.startswith("Refusing to")
         assert protected_entry.disabled_by is None
@@ -548,7 +569,7 @@ class TestOwnIntegrationIsOffLimits:
                 ("continue_config_flow", {"user_input": {"read_only_enabled": False}}),
                 ("abort_config_flow", {}),
             ):
-                text = await _call(hass, tool, flow_id=flow["flow_id"], **arguments)
+                text = await _error_call(hass, tool, flow_id=flow["flow_id"], **arguments)
                 assert text.startswith("Refusing to configure the MCP Server itself"), tool
 
         assert len(hass.config_entries.flow.async_progress()) == 1
@@ -562,7 +583,7 @@ class TestTemplateHelpers:
     async def test_are_refused_while_template_rendering_is_off(
         self, hass: HomeAssistant, demo: None
     ):
-        text = await _call(hass, "start_config_flow", domain="template")
+        text = await _error_call(hass, "start_config_flow", domain="template")
 
         assert text.startswith("Template helpers render templates, and template rendering is")
         assert hass.config_entries.flow.async_progress() == []
@@ -572,7 +593,7 @@ class TestTemplateHelpers:
         entry.add_to_hass(hass)
 
         for tool in ("start_options_flow", "start_reconfigure_flow"):
-            text = await _call(hass, tool, entry_id=entry.entry_id)
+            text = await _error_call(hass, tool, entry_id=entry.entry_id)
             assert text.startswith("Template helpers render templates"), tool
 
     async def test_are_set_up_once_template_rendering_is_on(self, hass: HomeAssistant, demo: None):
@@ -654,12 +675,12 @@ class TestOptionsFlow:
     async def test_an_entry_without_options_is_reported(
         self, hass: HomeAssistant, plain_entry: MockConfigEntry
     ):
-        text = await _call(hass, "start_options_flow", entry_id=plain_entry.entry_id)
+        text = await _error_call(hass, "start_options_flow", entry_id=plain_entry.entry_id)
 
         assert text.startswith("The 'mcp_plain' entry 'Plain' has no options to configure")
 
     async def test_unknown_entry_is_reported(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "start_options_flow", entry_id="gone")
+        text = await _error_call(hass, "start_options_flow", entry_id="gone")
 
         assert "No config entry with ID 'gone'" in text
 
@@ -778,20 +799,20 @@ class TestReconfigureFlow:
         self, hass: HomeAssistant, demo_entry: MockConfigEntry
     ):
         with patch.object(hass.config_entries.flow, "async_init", side_effect=UnknownHandler):
-            text = await _call(hass, "start_reconfigure_flow", entry_id=demo_entry.entry_id)
+            text = await _error_call(hass, "start_reconfigure_flow", entry_id=demo_entry.entry_id)
 
         assert text.startswith(f"No integration with a config flow found for domain '{DEMO}'")
 
     async def test_an_integration_without_the_step_is_reported(
         self, hass: HomeAssistant, plain_entry: MockConfigEntry
     ):
-        text = await _call(hass, "start_reconfigure_flow", entry_id=plain_entry.entry_id)
+        text = await _error_call(hass, "start_reconfigure_flow", entry_id=plain_entry.entry_id)
 
         assert text.startswith("The 'mcp_plain' integration cannot be reconfigured")
         assert hass.config_entries.flow.async_progress() == []
 
     async def test_unknown_entry_is_reported(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "start_reconfigure_flow", entry_id="gone")
+        text = await _error_call(hass, "start_reconfigure_flow", entry_id="gone")
 
         assert "No config entry with ID 'gone'" in text
 
@@ -833,7 +854,7 @@ class TestSetIntegrationEnabled:
     async def test_enabled_must_be_a_boolean(
         self, hass: HomeAssistant, demo_entry: MockConfigEntry
     ):
-        text = await _call(
+        text = await _error_call(
             hass, "set_integration_enabled", entry_id=demo_entry.entry_id, enabled="no"
         )
 
@@ -841,6 +862,6 @@ class TestSetIntegrationEnabled:
         assert demo_entry.disabled_by is None
 
     async def test_unknown_entry_is_reported(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "set_integration_enabled", entry_id="gone", enabled=False)
+        text = await _error_call(hass, "set_integration_enabled", entry_id="gone", enabled=False)
 
         assert "No config entry with ID 'gone'" in text

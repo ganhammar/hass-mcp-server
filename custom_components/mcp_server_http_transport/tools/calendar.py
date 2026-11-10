@@ -27,6 +27,7 @@ from . import (
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -59,7 +60,7 @@ def _text_result(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _error_text(message: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": message}]}
+    return error_result(message)
 
 
 def _minutes_until(start: datetime) -> float:

@@ -106,6 +106,7 @@ class TestToolsEntities:
         body = json.loads(response.body)
         assert body["jsonrpc"] == "2.0"
         assert "result" in body
+        assert "isError" not in body["result"]
         assert "content" in body["result"]
         text = body["result"]["content"][0]["text"]
         data = json.loads(text)
@@ -136,6 +137,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         content_text = body["result"]["content"][0]["text"]
         assert "not found" in content_text
 
@@ -167,6 +169,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully called" in body["result"]["content"][0]["text"]
         mock_hass.services.async_call.assert_called_once_with(
             "light",
@@ -211,6 +214,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Dentist" in body["result"]["content"][0]["text"]
         mock_hass.services.async_call.assert_called_once_with(
             "calendar",
@@ -244,6 +248,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully called" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_service_empty_response_reports_success(self, view, mock_hass):
@@ -275,6 +280,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert body["result"]["content"][0]["text"] == "Successfully called script.bedtime"
 
     async def test_post_tools_call_service_unknown_service(self, view, mock_hass):
@@ -317,7 +323,9 @@ class TestToolsEntities:
             response = await view.post(request)
 
         assert response.status == 200
-        text = json.loads(response.body)["result"]["content"][0]["text"]
+        result = json.loads(response.body)["result"]
+        assert result["isError"] is True
+        text = result["content"][0]["text"]
         assert "light.no_such_service" in text
         mock_hass.services.async_call.assert_called_once_with(
             "light",
@@ -351,6 +359,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data["handle"].startswith("<object object at ")
 
@@ -377,6 +386,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error calling service" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_list_entities(self, view, mock_hass):
@@ -418,6 +428,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         entities = json.loads(body["result"]["content"][0]["text"])
         assert len(entities) == 2
         assert entities[0]["entity_id"] == "light.living_room"
@@ -463,6 +474,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         entities = json.loads(body["result"]["content"][0]["text"])
         assert len(entities) == 1
         assert entities[0]["entity_id"] == "light.living_room"
@@ -510,6 +522,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         areas = json.loads(body["result"]["content"][0]["text"])
         assert len(areas) == 2
         assert areas[0]["id"] == "living_room"
@@ -563,6 +576,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         devices = json.loads(body["result"]["content"][0]["text"])
         assert len(devices) == 2
         assert devices[0]["name"] == "Living Room Lamp"
@@ -618,6 +632,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         devices = json.loads(body["result"]["content"][0]["text"])
         assert len(devices) == 1
         assert devices[0]["name"] == "Living Room Lamp"
@@ -692,6 +707,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data["device"]["name"] == "Xiaomi Robot Vacuum X10"
         assert data["device"]["manufacturer"] == "Xiaomi"
@@ -731,6 +747,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "not found" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_get_device_details_no_states(self, view, mock_hass):
@@ -787,6 +804,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data["entities"][0]["entity_id"] == "switch.pet_feeder_dispense"
         assert "state" not in data["entities"][0]
@@ -846,6 +864,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data["entities"][0]["entity_id"] == "switch.pet_feeder_dispense"
         assert data["entities"][0]["state"] is None
@@ -875,6 +894,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         services = json.loads(body["result"]["content"][0]["text"])
         assert "light" in services
         assert "turn_on" in services["light"]
@@ -904,6 +924,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         services = json.loads(body["result"]["content"][0]["text"])
         assert "light" in services
         assert "switch" not in services
@@ -952,6 +973,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert list(data.keys()) == ["clean_area"]
         assert "cleaning_area_id" in data["clean_area"]["fields"]
@@ -989,6 +1011,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert sorted(data.keys()) == ["clean_area", "start"]
 
@@ -1017,6 +1040,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "No services found" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_describe_service_unknown_service(self, view, mock_hass):
@@ -1047,6 +1071,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "not found" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_search_entities_by_query(self, view, mock_hass):
@@ -1099,6 +1124,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "light.living_room"
@@ -1121,6 +1147,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_search_entities_by_device_class(self, view, mock_hass):
@@ -1179,6 +1206,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "sensor.temp"
@@ -1240,6 +1268,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "light.living"
@@ -1294,6 +1323,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "sensor.temp"
@@ -1346,6 +1376,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 3
 
@@ -1399,6 +1430,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "sensor.temp"
@@ -1444,6 +1476,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 2
         assert data[0]["label_id"] == "important"
@@ -1477,6 +1510,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data == []
 
@@ -1536,6 +1570,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 2
         assert data[0]["entity_id"] == "light.living_room"
@@ -1591,6 +1626,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 2
         assert data[0]["entity_id"] == "light.living_room"
@@ -1648,6 +1684,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "light.hue_group"
@@ -1719,6 +1756,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 2
         assert data[0]["attributes"] == {"brightness": 255}
@@ -1747,6 +1785,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         text = body["result"]["content"][0]["text"]
         assert "maximum 50" in text
 
@@ -1797,6 +1836,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert "brightness" in data["attributes"]
         assert "color_temp" not in data["attributes"]
@@ -1843,6 +1883,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert "attributes" in data[0]
@@ -1890,6 +1931,7 @@ class TestToolsEntities:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert "entity_id" in data[0]

@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
-from . import ANNOTATION_IDEMPOTENT, register_tool
+from . import ANNOTATION_IDEMPOTENT, error_result, register_tool
 from .categories import registered_entity_id
 
 ICON_PROPERTY = {
@@ -94,4 +94,4 @@ async def set_icon(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, 
         outcome = async_set_icon(hass, entity_id, arguments["icon"])
         return {"content": [{"type": "text", "text": f"{entity_id} now has {outcome}"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error setting icon: {str(e)}"}]}
+        return error_result(f"Error setting icon: {str(e)}")

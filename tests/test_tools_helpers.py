@@ -87,6 +87,7 @@ class TestListHelpers:
         ):
             result = await list_helpers(mock_hass, {})
 
+        assert "isError" not in result
         body = json.loads(result["content"][0]["text"])
         entity_ids = [h["entity_id"] for h in body]
         assert "input_boolean.my_flag" in entity_ids
@@ -112,6 +113,7 @@ class TestListHelpers:
         ):
             result = await list_helpers(mock_hass, {"domain": "input_boolean"})
 
+        assert "isError" not in result
         body = json.loads(result["content"][0]["text"])
         assert len(body) == 2
         assert all(h["domain"] == "input_boolean" for h in body)
@@ -122,6 +124,7 @@ class TestListHelpers:
 
         result = await list_helpers(mock_hass, {"domain": "light"})
 
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "Unknown helper domain" in text
         assert "light" in text
@@ -142,6 +145,7 @@ class TestListHelpers:
         ):
             result = await list_helpers(mock_hass, {"domain": "timer"})
 
+        assert "isError" not in result
         body = json.loads(result["content"][0]["text"])
         assert body[0]["unique_id"] == "uid-999"
 
@@ -168,6 +172,7 @@ class TestGetHelperConfig:
         ):
             result = await get_helper_config(mock_hass, {"entity_id": "input_boolean.my_flag"})
 
+        assert "isError" not in result
         body = json.loads(result["content"][0]["text"])
         assert body["id"] == "uid-123"
         assert body["name"] == "My Flag"
@@ -181,6 +186,7 @@ class TestGetHelperConfig:
 
         result = await get_helper_config(mock_hass, {"entity_id": "light.living_room"})
 
+        assert result["isError"] is True
         assert "Error getting helper config" in result["content"][0]["text"]
         assert "not a helper entity" in result["content"][0]["text"]
 
@@ -200,6 +206,7 @@ class TestGetHelperConfig:
         ):
             result = await get_helper_config(mock_hass, {"entity_id": "input_boolean.missing"})
 
+        assert result["isError"] is True
         assert "Error getting helper config" in result["content"][0]["text"]
         assert "not found in entity registry" in result["content"][0]["text"]
 
@@ -221,6 +228,7 @@ class TestGetHelperConfig:
         ):
             result = await get_helper_config(mock_hass, {"entity_id": "input_boolean.yaml_helper"})
 
+        assert result["isError"] is True
         assert "Error getting helper config" in result["content"][0]["text"]
         assert "not found in storage" in result["content"][0]["text"]
 
@@ -240,6 +248,7 @@ class TestGetHelperConfig:
         ):
             result = await get_helper_config(mock_hass, {"entity_id": "input_boolean.flag"})
 
+        assert result["isError"] is True
         assert "Error getting helper config" in result["content"][0]["text"]
         assert "WebSocket API is not loaded" in result["content"][0]["text"]
 
@@ -261,6 +270,7 @@ class TestGetHelperConfig:
         ):
             result = await get_helper_config(mock_hass, {"entity_id": "input_boolean.flag"})
 
+        assert result["isError"] is True
         assert "Error getting helper config" in result["content"][0]["text"]
         assert "unexpected handler structure" in result["content"][0]["text"]
 
@@ -282,6 +292,7 @@ class TestGetHelperConfig:
         ):
             result = await get_helper_config(mock_hass, {"entity_id": "schedule.my_schedule"})
 
+        assert result["isError"] is True
         assert "Error getting helper config" in result["content"][0]["text"]
         assert "not available" in result["content"][0]["text"]
 
@@ -302,6 +313,7 @@ class TestCreateHelper:
         )
 
         collection.async_create_item.assert_called_once_with({"name": "My Counter"})
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Successfully created counter helper" in text
         assert "new-id-456" in text
@@ -315,6 +327,7 @@ class TestCreateHelper:
 
         result = await create_helper(mock_hass, {"domain": "light", "config": {"name": "x"}})
 
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "Unknown helper domain" in text
         assert "light" in text
@@ -328,6 +341,7 @@ class TestCreateHelper:
 
         result = await create_helper(mock_hass, {"domain": "timer", "config": {"name": "My Timer"}})
 
+        assert result["isError"] is True
         assert "Error creating helper" in result["content"][0]["text"]
         assert "not available" in result["content"][0]["text"]
 
@@ -344,6 +358,7 @@ class TestCreateHelper:
             {"domain": "input_select", "config": {"name": "Bad Select"}},
         )
 
+        assert result["isError"] is True
         assert "Error creating helper" in result["content"][0]["text"]
         assert "Invalid config" in result["content"][0]["text"]
 
@@ -371,6 +386,7 @@ class TestCreateHelper:
 
         result = await create_helper(mock_hass, {"domain": domain, "config": {"name": "Test"}})
 
+        assert "isError" not in result
         assert "Successfully created" in result["content"][0]["text"]
         assert domain in result["content"][0]["text"]
 
@@ -398,6 +414,7 @@ class TestUpdateHelper:
             )
 
         collection.async_update_item.assert_called_once_with("txt-uid", {"name": "Renamed"})
+        assert "isError" not in result
         assert "Successfully updated helper" in result["content"][0]["text"]
 
     async def test_update_helper_non_helper_entity(self):
@@ -411,6 +428,7 @@ class TestUpdateHelper:
             mock_hass, {"entity_id": "switch.my_switch", "config": {"name": "x"}}
         )
 
+        assert result["isError"] is True
         assert "Error updating helper" in result["content"][0]["text"]
         assert "not a helper entity" in result["content"][0]["text"]
 
@@ -433,6 +451,7 @@ class TestUpdateHelper:
                 {"entity_id": "input_boolean.gone", "config": {"name": "x"}},
             )
 
+        assert result["isError"] is True
         assert "Error updating helper" in result["content"][0]["text"]
         assert "not found in entity registry" in result["content"][0]["text"]
 
@@ -456,6 +475,7 @@ class TestUpdateHelper:
                 {"entity_id": "counter.my_counter", "config": {"name": "x"}},
             )
 
+        assert result["isError"] is True
         assert "Error updating helper" in result["content"][0]["text"]
         assert "Item not found" in result["content"][0]["text"]
 
@@ -482,6 +502,7 @@ class TestDeleteHelper:
             result = await delete_helper(mock_hass, {"entity_id": "input_number.my_num"})
 
         collection.async_delete_item.assert_called_once_with("num-uid")
+        assert "isError" not in result
         assert "Successfully deleted helper" in result["content"][0]["text"]
 
     async def test_delete_helper_non_helper_entity(self):
@@ -493,6 +514,7 @@ class TestDeleteHelper:
 
         result = await delete_helper(mock_hass, {"entity_id": "sensor.temperature"})
 
+        assert result["isError"] is True
         assert "Error deleting helper" in result["content"][0]["text"]
         assert "not a helper entity" in result["content"][0]["text"]
 
@@ -512,6 +534,7 @@ class TestDeleteHelper:
         ):
             result = await delete_helper(mock_hass, {"entity_id": "timer.gone"})
 
+        assert result["isError"] is True
         assert "Error deleting helper" in result["content"][0]["text"]
         assert "not found in entity registry" in result["content"][0]["text"]
 
@@ -534,6 +557,7 @@ class TestDeleteHelper:
         ):
             result = await delete_helper(mock_hass, {"entity_id": "input_datetime.my_dt"})
 
+        assert result["isError"] is True
         assert "Error deleting helper" in result["content"][0]["text"]
         assert "Not found" in result["content"][0]["text"]
 

@@ -20,6 +20,7 @@ from . import (
     ANNOTATION_IDEMPOTENT,
     ANNOTATION_NON_IDEMPOTENT,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -138,7 +139,7 @@ def _optional_value(field: str, value: str | None) -> str | None:
 
 
 def _error(action: str, exc: Exception) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": f"Error {action}: {str(exc)}"}]}
+    return error_result(f"Error {action}: {str(exc)}")
 
 
 @register_tool(

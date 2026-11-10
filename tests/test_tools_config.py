@@ -70,6 +70,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully created automation" in body["result"]["content"][0]["text"]
         assert "test-uuid-1234" in body["result"]["content"][0]["text"]
 
@@ -107,6 +108,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error creating automation" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_update_automation(self, view, mock_hass):
@@ -150,6 +152,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully updated automation" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_update_automation_not_found(self, view, mock_hass):
@@ -189,6 +192,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error updating automation" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_automation(self, view, mock_hass):
@@ -229,6 +233,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully deleted automation" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_automation_not_found(self, view, mock_hass):
@@ -265,6 +270,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error deleting automation" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_create_scene(self, view, mock_hass):
@@ -311,6 +317,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully created scene" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_update_scene(self, view, mock_hass):
@@ -354,6 +361,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully updated scene" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_scene(self, view, mock_hass):
@@ -394,6 +402,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully deleted scene" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_create_scene_error(self, view, mock_hass):
@@ -430,6 +439,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error creating scene" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_update_scene_not_found(self, view, mock_hass):
@@ -469,6 +479,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error updating scene" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_scene_not_found(self, view, mock_hass):
@@ -505,6 +516,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error deleting scene" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_create_script(self, view, mock_hass):
@@ -548,6 +560,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully created script" in body["result"]["content"][0]["text"]
         assert "morning_routine" in body["result"]["content"][0]["text"]
 
@@ -588,6 +601,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error creating script" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_update_script(self, view, mock_hass):
@@ -631,6 +645,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully updated script" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_update_script_not_found(self, view, mock_hass):
@@ -670,6 +685,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error updating script" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_script(self, view, mock_hass):
@@ -710,6 +726,7 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully deleted script" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_delete_script_not_found(self, view, mock_hass):
@@ -746,4 +763,31 @@ class TestToolsConfig:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error deleting script" in body["result"]["content"][0]["text"]
+
+
+_CONFIG_MANAGER = "custom_components.mcp_server_http_transport.config_manager"
+
+
+@pytest.mark.parametrize(
+    ("tool", "reader", "arguments", "message"),
+    [
+        ("list_automations", "read_list_entries", {}, "Error listing automations: "),
+        ("list_scenes", "read_list_entries", {}, "Error listing scenes: "),
+        ("get_scene_config", "read_list_entry", {"scene_id": "x"}, "Error getting scene config: "),
+        ("list_scripts", "read_dict_entries", {}, "Error listing scripts: "),
+        ("get_script_config", "read_dict_entry", {"key": "x"}, "Error getting script config: "),
+    ],
+)
+async def test_a_config_file_that_cannot_be_read_is_reported_as_an_error(
+    tool, reader, arguments, message
+):
+    """A read tool that cannot read its file says so, and marks the result as failed."""
+    from custom_components.mcp_server_http_transport.tools import config as config_tools
+
+    with patch(f"{_CONFIG_MANAGER}.{reader}", AsyncMock(side_effect=OSError("disk gone"))):
+        result = await getattr(config_tools, tool)(Mock(), arguments)
+
+    assert result["isError"] is True
+    assert result["content"][0]["text"] == f"{message}disk gone"

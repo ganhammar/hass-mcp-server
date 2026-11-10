@@ -61,6 +61,7 @@ class TestCreateRecurringCalendarEvent:
         assert kwargs["description"] == "Do the thing"
         assert kwargs["rrule"] == "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
         assert isinstance(kwargs["dtstart"], datetime)
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["method"] == "calendar_entity_async_create_event"
         assert payload["rrule"] == "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
@@ -96,6 +97,7 @@ class TestCreateRecurringCalendarEvent:
                 "rrule": "FREQ=DAILY;COUNT=1",
             },
         )
+        assert result["isError"] is True
         assert "not found" in result["content"][0]["text"]
 
     @pytest.mark.asyncio
@@ -112,6 +114,7 @@ class TestCreateRecurringCalendarEvent:
             },
         )
         entity.async_create_event.assert_not_called()
+        assert result["isError"] is True
         assert "Invalid or missing FREQ" in result["content"][0]["text"]
 
     @pytest.mark.asyncio
@@ -129,6 +132,7 @@ class TestCreateRecurringCalendarEvent:
             },
         )
         entity.async_create_event.assert_not_called()
+        assert result["isError"] is True
         assert "does not support event creation" in result["content"][0]["text"]
 
 
@@ -150,6 +154,7 @@ class TestCreateCalendarEvent:
         kwargs = entity.async_create_event.await_args.kwargs
         assert "rrule" not in kwargs
         assert kwargs["description"] == "Hello"
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["method"] == "calendar_entity_async_create_event"
         assert payload["reload_triggers"] == "false"
@@ -184,6 +189,7 @@ class TestReloadTriggers:
                     "duration_minutes": 5,
                 },
             )
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["reload_triggers"] == "false"
         assert payload["triggers_reloaded"] is False
@@ -203,6 +209,7 @@ class TestReloadTriggers:
                     "reload_triggers": "auto",
                 },
             )
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["reload_triggers"] == "auto"
         assert payload["triggers_reloaded"] is True
@@ -222,6 +229,7 @@ class TestReloadTriggers:
                     "reload_triggers": "auto",
                 },
             )
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["triggers_reloaded"] is False
         hass.services.async_call.assert_not_called()
@@ -240,6 +248,7 @@ class TestReloadTriggers:
                     "reload_triggers": "true",
                 },
             )
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["reload_triggers"] == "true"
         assert payload["triggers_reloaded"] is True
@@ -259,6 +268,7 @@ class TestReloadTriggers:
             },
         )
         entity.async_create_event.assert_not_called()
+        assert result["isError"] is True
         assert "reload_triggers must be false, true, or auto" in result["content"][0]["text"]
 
     def test_parse_accepts_bool(self):
@@ -285,6 +295,7 @@ class TestListCalendarEvents:
                 hass,
                 {"entity_id": "calendar.birthdays", "days": 7},
             )
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["count"] == 1
         assert payload["events"][0]["uid"] == "abc123"
@@ -312,6 +323,7 @@ class TestListCalendarEvents:
                     "include_description": True,
                 },
             )
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["events"][0]["description"] == "Full birthday party notes"
         assert "description_preview" not in payload["events"][0]
@@ -325,6 +337,7 @@ class TestDeleteCalendarEvents:
             hass,
             {"entity_id": "calendar.birthdays"},
         )
+        assert result["isError"] is True
         assert "exactly one" in result["content"][0]["text"]
 
     @pytest.mark.asyncio
@@ -335,6 +348,7 @@ class TestDeleteCalendarEvents:
             {"entity_id": "calendar.birthdays", "uid": "series-1"},
         )
         entity.async_delete_event.assert_awaited_once_with("series-1")
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["deleted_count"] == 1
 
@@ -359,6 +373,7 @@ class TestDeleteCalendarEvents:
                 },
             )
         entity.async_delete_event.assert_not_called()
+        assert "isError" not in result
         payload = json.loads(result["content"][0]["text"])
         assert payload["dry_run"] is True
         assert payload["matches"] == [{"uid": "uid-weekly", "summary": "Weekly earnings review"}]
@@ -373,4 +388,5 @@ class TestDeleteCalendarEvents:
                 "summary_contains": "ab",
             },
         )
+        assert result["isError"] is True
         assert "at least 3" in result["content"][0]["text"]

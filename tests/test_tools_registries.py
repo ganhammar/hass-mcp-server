@@ -57,6 +57,12 @@ from custom_components.mcp_server_http_transport.tools.registries import (
 
 
 def _text(result: dict) -> str:
+    assert "isError" not in result
+    return result["content"][0]["text"]
+
+
+def _error_text(result: dict) -> str:
+    assert result["isError"] is True
     return result["content"][0]["text"]
 
 
@@ -194,14 +200,14 @@ class TestCreateArea:
         ],
     )
     async def test_invalid_input_is_refused_and_nothing_is_created(self, hass, arguments, message):
-        text = _text(await create_area(hass, arguments))
+        text = _error_text(await create_area(hass, arguments))
 
         assert text.startswith("Error creating area: ")
         assert message in text
         assert list(ar.async_get(hass).async_list_areas()) == []
 
     async def test_duplicate_name_is_refused(self, hass, area):
-        text = _text(await create_area(hass, {"name": "kitchen"}))
+        text = _error_text(await create_area(hass, {"name": "kitchen"}))
 
         assert text.startswith("Error creating area: ")
         assert len(list(ar.async_get(hass).async_list_areas())) == 1
@@ -266,7 +272,7 @@ class TestUpdateArea:
     ):
         before = ar.async_get(hass).async_get_area(area)
 
-        text = _text(await update_area(hass, {"area_id": area, **arguments}))
+        text = _error_text(await update_area(hass, {"area_id": area, **arguments}))
 
         assert text.startswith("Error updating area: ")
         assert message in text
@@ -275,7 +281,7 @@ class TestUpdateArea:
     async def test_rename_to_another_areas_name_is_refused(self, hass, area):
         ar.async_get(hass).async_create("Hall")
 
-        text = _text(await update_area(hass, {"area_id": area, "name": "Hall"}))
+        text = _error_text(await update_area(hass, {"area_id": area, "name": "Hall"}))
 
         assert text.startswith("Error updating area: ")
         assert ar.async_get(hass).async_get_area(area).name == "Kitchen"
@@ -302,7 +308,7 @@ class TestDeleteArea:
         )
 
     async def test_unknown_area_is_reported(self, hass, area):
-        text = _text(await delete_area(hass, {"area_id": "nowhere"}))
+        text = _error_text(await delete_area(hass, {"area_id": "nowhere"}))
 
         assert text == "Error deleting area: No area with area_id 'nowhere' (see list_areas)"
         assert ar.async_get(hass).async_get_area(area) is not None
@@ -363,7 +369,7 @@ class TestFloors:
     async def test_invalid_input_is_refused_and_nothing_is_created(
         self, hass, floor, arguments, message
     ):
-        text = _text(await create_floor(hass, arguments))
+        text = _error_text(await create_floor(hass, arguments))
 
         assert text.startswith("Error creating floor: ")
         assert message in text
@@ -378,7 +384,7 @@ class TestFloors:
         ],
     )
     async def test_invalid_update_is_refused(self, hass, floor, arguments, message):
-        text = _text(await update_floor(hass, {"floor_id": floor, **arguments}))
+        text = _error_text(await update_floor(hass, {"floor_id": floor, **arguments}))
 
         assert text.startswith("Error updating floor: ")
         assert message in text
@@ -393,13 +399,15 @@ class TestFloors:
         assert fr.async_get(hass).async_get_floor(floor).level is None
 
     async def test_a_level_cannot_be_set_and_cleared_at_once(self, hass, floor):
-        text = _text(await update_floor(hass, {"floor_id": floor, "level": 2, "clear_level": True}))
+        text = _error_text(
+            await update_floor(hass, {"floor_id": floor, "level": 2, "clear_level": True})
+        )
 
         assert text == "Error updating floor: Give a level or clear_level, not both"
         assert fr.async_get(hass).async_get_floor(floor).level == 0
 
     async def test_unknown_floor_is_not_deleted(self, hass):
-        text = _text(await delete_floor(hass, {"floor_id": "attic"}))
+        text = _error_text(await delete_floor(hass, {"floor_id": "attic"}))
 
         assert text == "Error deleting floor: No floor with floor_id 'attic' (see list_floors)"
 
@@ -496,7 +504,7 @@ class TestUpdateDevice:
     async def test_invalid_input_is_refused_and_nothing_changes(
         self, hass, device, arguments, message
     ):
-        text = _text(await update_device(hass, {"device_id": device.id, **arguments}))
+        text = _error_text(await update_device(hass, {"device_id": device.id, **arguments}))
 
         assert text.startswith("Error updating device: ")
         assert message in text
@@ -564,12 +572,14 @@ class TestUpdateDeviceOnASplitAwareRegistry:
             patch.object(registries.dr, "async_get", return_value=registry),
             patch.object(registries.dr, "ChildDeviceEntry", _Child, create=True),
         ):
-            return _text(await update_device(hass, arguments))
+            return await update_device(hass, arguments)
 
     async def test_a_main_device_is_updated_as_one(self, hass):
         registry = _SplitAwareRegistry(main=_stand_in_device())
 
-        text = await self._update(hass, registry, {"device_id": "dev", "name": "Reading lamp"})
+        text = _text(
+            await self._update(hass, registry, {"device_id": "dev", "name": "Reading lamp"})
+        )
 
         assert text.startswith("Updated device ")
         assert registry.updated == [("main", "dev", {"name_by_user": "Reading lamp"})]
@@ -577,7 +587,7 @@ class TestUpdateDeviceOnASplitAwareRegistry:
     async def test_a_child_device_goes_through_its_own_update(self, hass):
         registry = _SplitAwareRegistry(child=_stand_in_device(_Child))
 
-        text = await self._update(hass, registry, {"device_id": "dev", "disabled": True})
+        text = _text(await self._update(hass, registry, {"device_id": "dev", "disabled": True}))
 
         assert text.startswith("Updated device ")
         assert registry.updated == [("child", "dev", {"disabled_by": dr.DeviceEntryDisabler.USER})]
@@ -586,13 +596,17 @@ class TestUpdateDeviceOnASplitAwareRegistry:
         """An update to it would land on every device it was split into."""
         registry = _SplitAwareRegistry(composite=_stand_in_device())
 
-        text = await self._update(hass, registry, {"device_id": "dev", "disabled": True})
+        text = _error_text(
+            await self._update(hass, registry, {"device_id": "dev", "disabled": True})
+        )
 
         assert text.startswith("Error updating device: 'dev' is the old ID of a device")
         assert registry.updated == []
 
     async def test_unknown_device_is_reported(self, hass):
-        text = await self._update(hass, _SplitAwareRegistry(), {"device_id": "dev", "name": "X"})
+        text = _error_text(
+            await self._update(hass, _SplitAwareRegistry(), {"device_id": "dev", "name": "X"})
+        )
 
         assert text == "Error updating device: No device with device_id 'dev' (see list_devices)"
 
@@ -642,7 +656,7 @@ class TestDeleteDevice:
         hook = AsyncMock(return_value=True)
         _, device = await _owned_device(hass, hook=hook)
 
-        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+        text = _error_text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
 
         assert text.startswith("Deleting a device is part of integration management")
         assert dr.async_get(hass).async_get(device.id) is not None
@@ -705,7 +719,7 @@ class TestDeleteDevice:
         hook = AsyncMock(return_value=True)
         _, device = await _owned_device(hass, hook=hook)
 
-        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": confirm}))
+        text = _error_text(await delete_device(hass, {"device_id": device.id, "confirm": confirm}))
 
         assert text.startswith("Deleting a device requires confirm=true")
         assert dr.async_get(hass).async_get(device.id) is not None
@@ -714,7 +728,7 @@ class TestDeleteDevice:
     async def test_an_integration_without_device_removal_is_refused(self, hass):
         _, device = await _owned_device(hass)
 
-        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+        text = _error_text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
 
         assert text.startswith(
             "Error deleting device: The integration 'gadget' does not support deleting a device"
@@ -724,7 +738,7 @@ class TestDeleteDevice:
     async def test_the_integrations_refusal_is_reported(self, hass):
         _, device = await _owned_device(hass, hook=AsyncMock(return_value=False))
 
-        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+        text = _error_text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
 
         assert text.startswith(
             "Error deleting device: The integration 'gadget' refused to remove the device"
@@ -738,13 +752,13 @@ class TestDeleteDevice:
         with patch.object(
             registries.loader, "async_get_integration", side_effect=IntegrationNotFound("gadget")
         ):
-            text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+            text = _error_text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
 
         assert text == "Error deleting device: The integration 'gadget' could not be loaded"
         assert dr.async_get(hass).async_get(device.id) is not None
 
     async def test_unknown_device_is_reported(self, hass):
-        text = _text(await delete_device(hass, {"device_id": "nope", "confirm": True}))
+        text = _error_text(await delete_device(hass, {"device_id": "nope", "confirm": True}))
 
         assert text == "Error deleting device: No device with device_id 'nope' (see list_devices)"
 
@@ -752,7 +766,7 @@ class TestDeleteDevice:
         _, device = await _owned_device(hass, hook=AsyncMock(return_value=True))
 
         with patch.object(hass.config_entries, "async_get_entry", return_value=None):
-            text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+            text = _error_text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
 
         assert "no longer exists" in text
         assert dr.async_get(hass).async_get(device.id) is not None
@@ -791,7 +805,7 @@ class TestDeleteDevice:
         first, second = sorted(entries, key=lambda domain: entries[domain].entry_id)
         hooks[second].configure_mock(**outcome)
 
-        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+        text = _error_text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
 
         assert text.startswith("Error deleting device: ")
         assert message in text
@@ -807,7 +821,7 @@ class TestDeleteDevice:
         await _owned_device(hass, "gadget", hook=hook)
         _, device = await _owned_device(hass, "gizmo")
 
-        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+        text = _error_text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
 
         assert "'gizmo' does not support deleting a device" in text
         assert len(dr.async_get(hass).async_get(device.id).config_entries) == 2
@@ -844,7 +858,7 @@ class TestDeleteEntity:
         """It has no state whether or not it is still provided."""
         er.async_get(hass).async_update_entity(entity, disabled_by=er.RegistryEntryDisabler.USER)
 
-        text = _text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
+        text = _error_text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
 
         assert text.startswith(f"Error: {entity} is disabled")
         assert er.async_get(hass).async_get(entity) is not None
@@ -853,7 +867,7 @@ class TestDeleteEntity:
         entry_id = er.async_get(hass).async_get(entity).config_entry_id
         hass.config_entries.async_get_entry(entry_id).mock_state(hass, ConfigEntryState.LOADED)
 
-        text = _text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
+        text = _error_text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
 
         assert text.startswith(f"Error: {entity} has no state yet although 'demo' is loaded")
         assert er.async_get(hass).async_get(entity) is not None
@@ -869,14 +883,14 @@ class TestDeleteEntity:
     async def test_an_entity_still_provided_is_refused(self, hass, entity, state):
         hass.states.async_set(entity, state)
 
-        text = _text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
+        text = _error_text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
 
         assert text.startswith(f"Error: {entity} is still provided by 'demo'")
         assert er.async_get(hass).async_get(entity) is not None
 
     @pytest.mark.parametrize("confirm", [False, "true", 1])
     async def test_nothing_is_deleted_without_confirm(self, hass, entity, confirm):
-        text = _text(await delete_entity(hass, {"entity_id": entity, "confirm": confirm}))
+        text = _error_text(await delete_entity(hass, {"entity_id": entity, "confirm": confirm}))
 
         assert text == "Error: Deleting an entity's registry entry requires confirm=true."
         assert er.async_get(hass).async_get(entity) is not None
@@ -886,7 +900,7 @@ class TestDeleteEntity:
         [("nonsense", "Invalid entity_id"), ("light.missing", "Entity is not in the registry")],
     )
     async def test_an_unknown_entity_is_reported(self, hass, entity_id, message):
-        text = _text(await delete_entity(hass, {"entity_id": entity_id, "confirm": True}))
+        text = _error_text(await delete_entity(hass, {"entity_id": entity_id, "confirm": True}))
 
         assert text.startswith(f"Error: {message}")
 
@@ -1038,7 +1052,7 @@ class TestEntityRegistryFields:
         await hass.async_block_till_done()
         assert er.async_get(hass).async_get(entity).disabled_by is not None
 
-        text = _text(
+        text = _error_text(
             await update_entity_registry(
                 hass, {"entity_id": entity, "disabled": False, "apply": True}
             )
@@ -1057,7 +1071,7 @@ class TestEntityRegistryFields:
         ],
     )
     async def test_invalid_input_is_refused(self, hass, entity, arguments, message):
-        text = _text(
+        text = _error_text(
             await update_entity_registry(hass, {"entity_id": entity, **arguments, "apply": True})
         )
 

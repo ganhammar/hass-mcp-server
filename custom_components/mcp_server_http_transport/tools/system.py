@@ -13,6 +13,7 @@ from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -26,18 +27,11 @@ def _template_rendering_enabled(hass: HomeAssistant) -> bool:
 
 def _template_disabled() -> dict[str, Any]:
     """Build the response telling the caller how to enable template rendering."""
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": (
-                    "Template rendering is disabled. Enable it in the MCP Server integration "
-                    "settings: Settings → Devices & Services → MCP Server → Configure → "
-                    "Enable template rendering."
-                ),
-            }
-        ]
-    }
+    return error_result(
+        "Template rendering is disabled. Enable it in the MCP Server integration "
+        "settings: Settings → Devices & Services → MCP Server → Configure → "
+        "Enable template rendering."
+    )
 
 
 @register_tool(
@@ -106,7 +100,7 @@ async def render_template(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         result = tpl.async_render(variables=variables, parse_result=False)
         return {"content": [{"type": "text", "text": str(result)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error rendering template: {str(e)}"}]}
+        return error_result(f"Error rendering template: {str(e)}")
 
 
 @register_tool(
@@ -163,7 +157,7 @@ async def get_history(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         return {"content": [{"type": "text", "text": dumps(history)}]}
     except Exception as e:
         _LOGGER.error("Error getting history: %s", e)
-        return {"content": [{"type": "text", "text": f"Error getting history: {str(e)}"}]}
+        return error_result(f"Error getting history: {str(e)}")
 
 
 _BLOCKED_EVENT_TYPES = frozenset(
@@ -210,34 +204,20 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
     event_data = arguments.get("event_data", {})
 
     if event_type in _BLOCKED_EVENT_TYPES:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"Error: firing system event '{event_type}' is not allowed",
-                }
-            ]
-        }
+        return error_result(f"Error: firing system event '{event_type}' is not allowed")
 
     # The integration's own events are its audit trail, so this tool does not fire
     # them. This closes the direct route only: an automation with an event action
     # can still fire anything, so the audit event is evidence, not proof.
     if event_type.startswith(f"{DOMAIN}_"):
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"Error: firing this integration's event '{event_type}' is not allowed",
-                }
-            ]
-        }
+        return error_result(f"Error: firing this integration's event '{event_type}' is not allowed")
 
     try:
         hass.bus.async_fire(event_type, event_data)
         return {"content": [{"type": "text", "text": f"Successfully fired event: {event_type}"}]}
     except Exception as e:
         _LOGGER.error("Error firing event: %s", e)
-        return {"content": [{"type": "text", "text": f"Error firing event: {str(e)}"}]}
+        return error_result(f"Error firing event: {str(e)}")
 
 
 @register_tool(
@@ -297,4 +277,4 @@ async def get_logbook(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         return {"content": [{"type": "text", "text": dumps(events)}]}
     except Exception as e:
         _LOGGER.error("Error getting logbook: %s", e)
-        return {"content": [{"type": "text", "text": f"Error getting logbook: {str(e)}"}]}
+        return error_result(f"Error getting logbook: {str(e)}")

@@ -13,6 +13,7 @@ from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -100,24 +101,20 @@ async def get_error_log(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         return {"content": [{"type": "text", "text": log_text}]}
     except FileNotFoundError:
         fallback = _read_system_log_buffer(hass, lines)
-        if fallback is not None:
+        if fallback:
             return {"content": [{"type": "text", "text": fallback}]}
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"Log file not found at {log_path}, and Home Assistant's in-memory "
-                        "system log buffer is empty or unavailable. Home Assistant may not be "
-                        "configured to write logs to disk; enable file logging via the "
-                        "'logger:' integration in configuration.yaml."
-                    ),
-                }
-            ]
-        }
+        if fallback is not None:
+            nothing = "No warnings or errors have been logged since Home Assistant started."
+            return {"content": [{"type": "text", "text": nothing}]}
+        return error_result(
+            f"Log file not found at {log_path}, and Home Assistant's in-memory "
+            "system log buffer is unavailable. Home Assistant may not be "
+            "configured to write logs to disk; enable file logging via the "
+            "'logger:' integration in configuration.yaml."
+        )
     except Exception as e:
         _LOGGER.error("Error reading error log: %s", e)
-        return {"content": [{"type": "text", "text": f"Error reading error log: {str(e)}"}]}
+        return error_result(f"Error reading error log: {str(e)}")
 
 
 def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
@@ -126,7 +123,8 @@ def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
     The system_log component keeps a deduplicated buffer of recent warning and
     error records in memory regardless of whether on-disk file logging is
     enabled, so it gives useful output on installs where home-assistant.log is
-    absent. Returns None when the component is unavailable or the buffer is empty.
+    absent. Returns None when the component is unavailable, and an empty string
+    when it is there and has recorded nothing.
     """
     handler = hass.data.get("system_log")
     to_list = getattr(getattr(handler, "records", None), "to_list", None)
@@ -138,8 +136,10 @@ def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
     # rather than escaping as an internal error.
     try:
         entries = to_list()
-        if not isinstance(entries, list) or not entries:
+        if not isinstance(entries, list):
             return None
+        if not entries:
+            return ""
         shown = entries[: max(1, limit)]
         formatted = redact_log_text("\n".join(_format_system_log_entry(entry) for entry in shown))
     except Exception as e:
@@ -211,24 +211,17 @@ async def restart_ha(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
     confirm = arguments.get("confirm", False)
 
     if confirm is not True:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "Restart requires confirm=true. "
-                        "This will restart Home Assistant and temporarily interrupt all operations."
-                    ),
-                }
-            ]
-        }
+        return error_result(
+            "Restart requires confirm=true. "
+            "This will restart Home Assistant and temporarily interrupt all operations."
+        )
 
     try:
         await hass.services.async_call("homeassistant", "restart", blocking=False)
         return {"content": [{"type": "text", "text": "Home Assistant restart has been initiated"}]}
     except Exception as e:
         _LOGGER.error("Error restarting Home Assistant: %s", e)
-        return {"content": [{"type": "text", "text": f"Error restarting Home Assistant: {str(e)}"}]}
+        return error_result(f"Error restarting Home Assistant: {str(e)}")
 
 
 @register_tool(
@@ -346,7 +339,7 @@ async def check_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         return {"content": [{"type": "text", "text": dumps(result)}]}
     except Exception as e:
         _LOGGER.error("Error checking config: %s", e)
-        return {"content": [{"type": "text", "text": f"Error checking config: {str(e)}"}]}
+        return error_result(f"Error checking config: {str(e)}")
 
 
 @register_tool(

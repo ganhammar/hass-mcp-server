@@ -41,7 +41,23 @@ def _disabled_hass() -> Mock:
 
 
 def _payload(result: dict) -> dict:
+    assert "isError" not in result, result
     return json.loads(result["content"][0]["text"])
+
+
+def _error_payload(result: dict) -> dict:
+    assert result["isError"] is True, result
+    return json.loads(result["content"][0]["text"])
+
+
+def _text(result: dict) -> str:
+    assert "isError" not in result, result
+    return result["content"][0]["text"]
+
+
+def _error_text(result: dict) -> str:
+    assert result["isError"] is True, result
+    return result["content"][0]["text"]
 
 
 @pytest.fixture
@@ -103,7 +119,7 @@ async def test_writable_appdaemon_extensions_are_allowed(apps_root: Path, extens
 @pytest.mark.parametrize("extension", [".txt", ".sh", ".md", ""])
 async def test_non_appdaemon_extensions_are_rejected_for_writes(apps_root: Path, extension: str):
     result = await tools.save_appdaemon_file(_hass(), {"path": f"app{extension}", "content": "x"})
-    assert "Only .py, .yaml, .yml, and .json" in result["content"][0]["text"]
+    assert "Only .py, .yaml, .yml, and .json" in _error_text(result)
 
 
 @pytest.mark.asyncio
@@ -111,7 +127,7 @@ async def test_non_appdaemon_extensions_are_rejected_for_deletes(apps_root: Path
     target = apps_root / "notes.txt"
     target.write_text("keep")
     result = await tools.delete_appdaemon_file(_hass(), {"path": "notes.txt"})
-    assert "Only .py, .yaml, .yml, and .json" in result["content"][0]["text"]
+    assert "Only .py, .yaml, .yml, and .json" in _error_text(result)
     assert target.exists()
 
 
@@ -125,7 +141,7 @@ async def test_cleanup_appdaemon_backups_removes_only_old_snapshots(apps_root: P
     (old / "nested" / "app.py").write_text("old")
     new.mkdir()
     result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
-    assert "Deleted 1 backup(s)" in result["content"][0]["text"]
+    assert "Deleted 1 backup(s)" in _text(result)
     assert not old.exists() and new.exists()
 
 
@@ -162,7 +178,7 @@ async def test_snapshot_rejects_source_replacement_without_omitting_original(
 
     monkeypatch.setattr(tools._RootFS, "copy", replace_before_copy)
     result = await tools.backup_appdaemon_files(_hass(), {})
-    assert "Source changed before it was copied" in result["content"][0]["text"]
+    assert "Source changed before it was copied" in _error_text(result)
     assert not list((apps_root / tools._BACKUP_DIR_NAME).glob("20*"))
 
 
@@ -208,7 +224,7 @@ async def test_restore_rejects_reserved_backup_paths(
     injected.parent.mkdir(parents=True)
     injected.write_text("bad")
     result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp})
-    assert "reserved backup-directory path" in result["content"][0]["text"]
+    assert "reserved backup-directory path" in _error_text(result)
     assert target.read_text() == "safe"
 
 
@@ -222,7 +238,7 @@ async def test_restore_rejects_existing_destination_symlink(apps_root: Path, tmp
     outside.write_text("outside")
     source.symlink_to(outside)
     result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp})
-    assert "non-regular file" in result["content"][0]["text"]
+    assert "non-regular file" in _error_text(result)
     assert source.is_symlink() and outside.read_text() == "outside"
 
 
@@ -284,14 +300,14 @@ async def test_cleanup_ignores_malformed_and_symlink_entries(apps_root: Path, tm
     outside.mkdir()
     (backup_root / "2020-01-02_00-00-00-000000").symlink_to(outside, target_is_directory=True)
     result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
-    assert result["content"][0]["text"] == "No backups found"
+    assert _text(result) == "No backups found"
     assert malformed.exists() and (backup_root / "2020-01-02_00-00-00-000000").is_symlink()
 
 
 @pytest.mark.asyncio
 async def test_cleanup_missing_or_empty_backup_root_is_safe(apps_root: Path):
     result = await tools.cleanup_appdaemon_backups(_hass(), {})
-    assert result["content"][0]["text"] == "No backups found"
+    assert _text(result) == "No backups found"
 
 
 @pytest.mark.asyncio
@@ -302,7 +318,7 @@ async def test_cleanup_removes_stale_snapshot_staging_directory(apps_root: Path)
     staging.mkdir(parents=True)
     (staging / "app.py").write_text("partial")
     result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
-    assert "Deleted 1 backup(s)" in result["content"][0]["text"]
+    assert "Deleted 1 backup(s)" in _text(result)
     assert not staging.exists()
 
 
@@ -319,7 +335,7 @@ async def test_cleanup_ignores_snapshot_disappearing_during_removal(apps_root: P
 
     monkeypatch.setattr(tools, "_remove_tree", disappearing)
     result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 1})
-    assert result["content"][0]["text"] == "No backups found"
+    assert _text(result) == "No backups found"
 
 
 @pytest.mark.asyncio
@@ -369,7 +385,7 @@ async def test_restore_recreates_deleted_snapshot_subdirectory(apps_root: Path):
     ],
 )
 async def test_rejects_traversal_and_absolute_escapes(apps_root: Path, path: str):
-    text = (await tools.get_appdaemon_file(_hass(), {"path": path}))["content"][0]["text"]
+    text = _error_text(await tools.get_appdaemon_file(_hass(), {"path": path}))
     assert "Error reading AppDaemon file" in text
     assert not (apps_root.parent.parent / "config").exists()
 
@@ -381,11 +397,11 @@ async def test_rejects_symlink_escape_and_cannot_touch_config(apps_root: Path, t
     victim = outside / "configuration.yaml"
     victim.write_text("safe\n")
     (apps_root / "escape").symlink_to(outside, target_is_directory=True)
-    text = (
+    text = _error_text(
         await tools.save_appdaemon_file(
             _hass(), {"path": "escape/configuration.yaml", "content": "bad\n"}
         )
-    )["content"][0]["text"]
+    )
     assert "Error saving AppDaemon file" in text and victim.read_text() == "safe\n"
 
 
@@ -402,7 +418,7 @@ async def test_list_backups_and_regular_files_do_not_expose_snapshots(apps_root:
 @pytest.mark.asyncio
 async def test_disabled_gate_performs_no_filesystem_access(apps_root: Path):
     result = await tools.get_appdaemon_file(_disabled_hass(), {"path": "solar.py"})
-    assert "disabled" in result["content"][0]["text"]
+    assert "disabled" in _error_text(result)
 
 
 @pytest.mark.asyncio
@@ -422,21 +438,21 @@ async def test_all_mutating_and_listing_tools_honor_disabled_gate(
     apps_root: Path, handler, arguments
 ):
     result = await handler(_disabled_hass(), arguments)
-    assert "disabled" in result["content"][0]["text"]
+    assert "disabled" in _error_text(result)
 
 
 @pytest.mark.asyncio
 async def test_tool_errors_report_configured_root_and_argument_failures(apps_root: Path):
     result = await tools.list_appdaemon_files(_configured_hass("/tmp/apps"), {})
-    assert "Error listing AppDaemon files" in result["content"][0]["text"]
+    assert "Error listing AppDaemon files" in _error_text(result)
     result = await tools.save_appdaemon_file(
         _hass(), {"path": "app.py", "content": "x" * (tools._MAX_FILE_BYTES + 1)}
     )
-    assert "Content is too large" in result["content"][0]["text"]
+    assert "Content is too large" in _error_text(result)
     result = await tools.cleanup_appdaemon_backups(_hass(), {"older_than_days": 0})
-    assert "older_than_days must be an integer" in result["content"][0]["text"]
+    assert "older_than_days must be an integer" in _error_text(result)
     result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": "invalid"})
-    assert "Invalid backup timestamp" in result["content"][0]["text"]
+    assert "Invalid backup timestamp" in _error_text(result)
 
 
 @pytest.mark.asyncio
@@ -448,21 +464,23 @@ async def test_save_and_delete_report_post_mutation_uncertainty(apps_root: Path,
         raise tools._WriteFailure(OSError("close failed"), possibly_committed=True)
 
     monkeypatch.setattr(tools._RootFS, "write", fail_write)
-    saved = _payload(await tools.save_appdaemon_file(_hass(), {"path": "app.py", "content": "new"}))
+    saved = _error_payload(
+        await tools.save_appdaemon_file(_hass(), {"path": "app.py", "content": "new"})
+    )
     assert not saved["success"] and saved["possibly_committed"]
 
     def fail_unlink(self, parts, **kwargs):
         raise tools._UnlinkFailure(OSError("close failed"), possibly_committed=True)
 
     monkeypatch.setattr(tools._RootFS, "unlink", fail_unlink)
-    deleted = _payload(await tools.delete_appdaemon_file(_hass(), {"path": "app.py"}))
+    deleted = _error_payload(await tools.delete_appdaemon_file(_hass(), {"path": "app.py"}))
     assert not deleted["success"] and deleted["possibly_committed"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["", ".", "a/./b", "a//b", "a\\b", "a/../b", "a\x00b"])
 async def test_rejects_unusual_relative_forms(apps_root: Path, path: str):
-    text = (await tools.get_appdaemon_file(_hass(), {"path": path}))["content"][0]["text"]
+    text = _error_text(await tools.get_appdaemon_file(_hass(), {"path": path}))
     assert "Error reading AppDaemon file" in text
 
 
@@ -516,7 +534,7 @@ async def test_unreachable_root_explains_the_shared_folder_fix(
         (tools.get_appdaemon_file, {"path": "hello.py"}),
         (tools.save_appdaemon_file, {"path": "hello.py", "content": "x"}),
     ):
-        text = (await tool(_hass(), arguments))["content"][0]["text"]
+        text = _error_text(await tool(_hass(), arguments))
         assert "not reachable from Home Assistant Core" in text
         assert "/addon_configs" in text and "/app_configs" in text
         assert "app_dir" in text and "/share/appdaemon/apps" in text
@@ -766,12 +784,10 @@ async def test_rejects_symlinked_root_and_backup_directory(
     linked_root = tmp_path / "linked-root"
     linked_root.symlink_to(outside, target_is_directory=True)
     monkeypatch.setattr(tools, "_APPS_ROOT", linked_root)
-    assert "Error listing" in (await tools.list_appdaemon_files(_hass(), {}))["content"][0]["text"]
+    assert "Error listing" in _error_text(await tools.list_appdaemon_files(_hass(), {}))
     monkeypatch.setattr(tools, "_APPS_ROOT", apps_root)
     (apps_root / tools._BACKUP_DIR_NAME).symlink_to(outside, target_is_directory=True)
-    assert (
-        "Error backing" in (await tools.backup_appdaemon_files(_hass(), {}))["content"][0]["text"]
-    )
+    assert "Error backing" in _error_text(await tools.backup_appdaemon_files(_hass(), {}))
 
 
 @pytest.mark.asyncio
@@ -795,7 +811,7 @@ async def test_deterministic_symlink_swap_is_not_followed(
 
     monkeypatch.setattr(tools.os, "open", swap_open)
     result = await tools.get_appdaemon_file(_hass(), {"path": "victim.py"})
-    assert "Error reading" in result["content"][0]["text"]
+    assert "Error reading" in _error_text(result)
     assert outside.read_text() == "outside\n"
 
 
@@ -825,7 +841,7 @@ async def test_symlink_swap_during_mutating_operations_does_not_touch_victim(
         result = await tools.delete_appdaemon_file(_hass(), {"path": "victim.py"})
     else:
         result = await tools.backup_appdaemon_files(_hass(), {})
-    assert "Error" in result["content"][0]["text"]
+    assert "Error" in _error_text(result)
     assert outside.read_text() == "safe\n"
 
 
@@ -852,7 +868,7 @@ async def test_restore_symlink_swap_of_source_fails_before_mutation(
 
     monkeypatch.setattr(tools.os, "open", swap_open)
     result = await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp})
-    payload = _payload(result)
+    payload = _error_payload(result)
     assert not payload["success"]
     assert payload["possibly_committed_paths"] == []
     assert target.read_text() == "current\n" and outside.read_text() == "outside\n"
@@ -866,7 +882,7 @@ async def test_backup_failure_prevents_save_mutation(apps_root: Path, monkeypatc
         tools._RootFS, "snapshot", lambda _self: (_ for _ in ()).throw(OSError("full"))
     )
     result = await tools.save_appdaemon_file(_hass(), {"path": "solar.py", "content": "new\n"})
-    assert "Error saving" in result["content"][0]["text"]
+    assert "Error saving" in _error_text(result)
     assert target.read_text() == "old\n"
 
 
@@ -889,7 +905,7 @@ async def test_restore_failure_rolls_back_modified_targets(apps_root: Path, monk
         return original_copy(self, source, target, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "copy", fail_second)
-    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    result = _error_payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"] and result["rollback_attempted"]
     assert result["rollback_result"] == "succeeded"
     assert result["attempted_paths"] == ["one.py", "two.py"]
@@ -920,7 +936,7 @@ async def test_restore_failure_removes_file_that_was_previously_absent(
         return original_copy(self, source, target, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "copy", fail_second)
-    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    result = _error_payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"] and result["rollback_result"] == "succeeded"
     assert not one.exists() and two.read_text() == "current two\n"
 
@@ -939,7 +955,7 @@ async def test_restore_failure_removes_directories_created_for_partial_tree(
         raise OSError("injected mutation failure")
 
     monkeypatch.setattr(tools._RootFS, "copy", fail_restore)
-    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    result = _error_payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"]
     assert not (apps_root / "nested").exists()
 
@@ -968,7 +984,7 @@ async def test_restore_post_replace_failure_rolls_back_possibly_committed_target
             raise OSError("injected post-replace failure")
 
     monkeypatch.setattr(tools.os, "replace", replace_then_fail)
-    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    result = _error_payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"]
     assert result["attempted_paths"] == ["one.py", "two.py"]
     assert result["possibly_committed_paths"] == ["one.py", "two.py"]
@@ -1030,7 +1046,7 @@ async def test_restore_destination_component_swap_fails_without_external_write(
         return original_copy(self, source, target_path, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "copy", swap_before_destination_write)
-    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    result = _error_payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"]
     assert result["possibly_committed_paths"] == []
     assert result["rollback_result"] == "succeeded"
@@ -1057,6 +1073,6 @@ async def test_restore_reports_rollback_failure(apps_root: Path, monkeypatch):
         return original_copy(self, source, target, **kwargs)
 
     monkeypatch.setattr(tools._RootFS, "copy", fail_mutation_and_rollback)
-    result = _payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
+    result = _error_payload(await tools.restore_appdaemon_backup(_hass(), {"timestamp": stamp}))
     assert not result["success"] and result["rollback_result"] == "failed"
     assert result["rollback_errors"]

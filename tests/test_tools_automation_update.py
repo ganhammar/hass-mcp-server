@@ -79,6 +79,11 @@ def message(response):
     return response["content"][0]["text"]
 
 
+def error_message(response):
+    assert response["isError"] is True
+    return response["content"][0]["text"]
+
+
 def test_schema_keeps_original_and_optional_flags():
     schema = TOOLS["update_automation"]["schema"]["inputSchema"]
     assert schema["required"] == ["automation_id", "config"]
@@ -117,14 +122,14 @@ async def test_invalid_config_not_written(mock_hass, bad_config, expected, tmp_p
     response = await update_automation(
         mock_hass, {"automation_id": AUTOMATION_ID, "config": bad_config}
     )
-    assert expected in message(response)
+    assert expected in error_message(response)
     assert (tmp_path / "automations.yaml").read_text(encoding="utf-8") == OLD_YAML
 
 
 @pytest.mark.parametrize("field,value", [("dry_run", "true"), ("reload", 1), ("validate", 1)])
 async def test_flags_must_be_booleans(mock_hass, existing_config, field, value):
     response = await update_automation(mock_hass, arguments(existing_config, **{field: value}))
-    assert "must be booleans" in message(response)
+    assert "must be booleans" in error_message(response)
     mock_hass.async_add_executor_job.assert_not_awaited()
 
 
@@ -176,7 +181,7 @@ async def test_opt_in_validation_and_atomic_rollback(mock_hass, existing_config,
         assert "Successfully updated automation" in message(response)
         assert "Updated" in contents
     else:
-        assert "restored without reload" in message(response)
+        assert "restored without reload" in error_message(response)
         assert contents == OLD_YAML
     assert other_file.read_text(encoding="utf-8") == "unchanged\n"
     assert not list(tmp_path.glob(".automations.mcp_backup_*"))
@@ -212,7 +217,7 @@ async def test_stale_preview_hash_is_rejected(mock_hass, existing_config, tmp_pa
     response = await update_automation(
         mock_hass, arguments(existing_config, expected_hash=original_hash)
     )
-    assert "changed since preview" in message(response)
+    assert "changed since preview" in error_message(response)
     assert (tmp_path / "automations.yaml").read_text(encoding="utf-8") == changed_file
     mock_hass.services.async_call.assert_not_awaited()
 
@@ -234,7 +239,7 @@ async def test_write_refuses_concurrent_changes(mock_hass, existing_config, tmp_
         response = await update_automation(
             mock_hass, arguments(existing_config, reload=False, validate=True)
         )
-    assert "changed since it was read" in message(response)
+    assert "changed since it was read" in error_message(response)
     assert (tmp_path / "automations.yaml").read_text(encoding="utf-8") == OLD_YAML
     check.assert_not_awaited()
     assert not list(tmp_path.glob(".automations.mcp_backup_*"))
@@ -260,7 +265,7 @@ async def test_invalid_scalar_arguments_not_written(
     mock_hass, existing_config, overrides, expected
 ):
     response = await update_automation(mock_hass, {**arguments(existing_config), **overrides})
-    assert expected in message(response)
+    assert expected in error_message(response)
     mock_hass.async_add_executor_job.assert_not_awaited()
 
 
@@ -307,7 +312,7 @@ async def test_failed_rollback_reports_backup_path(mock_hass, existing_config, t
         side_effect=check_and_lose_backup,
     ):
         response = await update_automation(mock_hass, arguments(existing_config, validate=True))
-    text = message(response)
+    text = error_message(response)
     assert "validation failed" in text
     assert "CRITICAL: rollback failed" in text
     assert ".automations.yaml.backup_" in text

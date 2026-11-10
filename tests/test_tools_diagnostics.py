@@ -25,6 +25,12 @@ from custom_components.mcp_server_http_transport.tools.diagnostics import (
 
 
 def _text(result: dict) -> str:
+    assert "isError" not in result
+    return result["content"][0]["text"]
+
+
+def _error_text(result: dict) -> str:
+    assert result["isError"] is True
     return result["content"][0]["text"]
 
 
@@ -209,12 +215,12 @@ class TestSystemHealth:
             patch("homeassistant.components.system_health.get_info", never),
             patch.object(diagnostics, "SYSTEM_HEALTH_TIMEOUT", 0.01),
         ):
-            text = _text(await get_system_health(hass, {}))
+            text = _error_text(await get_system_health(hass, {}))
 
         assert text.startswith("System health did not answer within")
 
     async def test_says_so_when_the_component_is_not_loaded(self, hass: HomeAssistant):
-        text = _text(await get_system_health(hass, {}))
+        text = _error_text(await get_system_health(hass, {}))
 
         assert text.startswith("System health is not available")
 
@@ -315,11 +321,11 @@ class TestListBackups:
 
     @pytest.mark.parametrize("limit", [0, 201, "5", True])
     async def test_an_invalid_limit_is_refused(self, hass, manager, limit):
-        text = _text(await list_backups(hass, {"limit": limit}))
+        text = _error_text(await list_backups(hass, {"limit": limit}))
 
         assert text == "limit must be an integer between 1 and 200."
 
     async def test_says_so_when_the_component_is_not_loaded(self, hass: HomeAssistant):
-        text = _text(await list_backups(hass, {}))
+        text = _error_text(await list_backups(hass, {}))
 
         assert text.startswith("Backups are not available")

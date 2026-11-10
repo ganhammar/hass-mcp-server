@@ -13,7 +13,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from ..json_patch import format_pointer
-from . import ANNOTATION_READ_ONLY, dumps, register_tool, tool_unavailable_reason
+from . import ANNOTATION_READ_ONLY, dumps, error_result, register_tool, tool_unavailable_reason
 
 # The tools that return each kind's stored config, in the order results are listed.
 KIND_TOOLS: dict[str, tuple[str, ...]] = {
@@ -238,7 +238,7 @@ async def search_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             arguments, "matches_per_item", DEFAULT_MATCHES_PER_ITEM, MAX_MATCHES_PER_ITEM
         )
     except ValueError as e:
-        return _text(f"Error searching config: {e}")
+        return error_result(f"Error searching config: {e}")
 
     needle = query.lower()
     items: list[dict[str, Any]] = []

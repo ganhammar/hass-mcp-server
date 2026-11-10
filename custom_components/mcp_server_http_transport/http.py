@@ -28,6 +28,7 @@ from .const import (
 from .json_utils import dumps
 from .prompts import InvalidPromptRequest, get_prompt, get_prompts
 from .resources import get_resources, read_resource
+from .secret_keys import SECRET_MASK, is_secret_key
 from .tools import (
     TOOLS,
     InvalidToolRequest,
@@ -54,26 +55,6 @@ AUTH_METHOD_NATIVE = "native"
 OUTCOME_OK = "ok"
 OUTCOME_ERROR = "error"
 OUTCOME_INVALID = "invalid"
-
-# Argument keys whose value is masked in the audit log, matched against the
-# lowercased key at any depth: fragments as substrings, names exactly. The exact
-# names are the short keys locks and alarm panels take their codes under, which
-# are too common as substrings (zip_code, pin_count) to match that way.
-_SECRET_KEY_FRAGMENTS = (
-    "password",
-    "passwd",
-    "passcode",
-    "pincode",
-    "secret",
-    "token",
-    "api_key",
-    "apikey",
-    "authorization",
-    "credential",
-    "private_key",
-)
-_SECRET_KEY_NAMES = frozenset({"code", "pin"})
-SECRET_MASK = "***"
 
 # Tool arguments audited by key only. A config flow step names its fields freely,
 # and any of them may carry a credential (a calendar URL with a token in it), so
@@ -109,14 +90,6 @@ class Caller:
     user: User
 
 
-def _is_secret_key(key: Any) -> bool:
-    """Return True when an argument key names a value that must not be logged."""
-    lowered = str(key).lower()
-    if lowered in _SECRET_KEY_NAMES:
-        return True
-    return any(fragment in lowered for fragment in _SECRET_KEY_FRAGMENTS)
-
-
 def mask_secrets(value: Any) -> Any:
     """Return a copy of ``value`` with the value of every secret-named key masked.
 
@@ -125,7 +98,7 @@ def mask_secrets(value: Any) -> Any:
     """
     if isinstance(value, dict):
         return {
-            key: SECRET_MASK if _is_secret_key(key) else mask_secrets(item)
+            key: SECRET_MASK if is_secret_key(key) else mask_secrets(item)
             for key, item in value.items()
         }
     if isinstance(value, list):

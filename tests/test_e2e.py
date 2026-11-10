@@ -706,9 +706,10 @@ class _OneFormFlow(ConfigFlow):
 class _OneFormOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input=None):
         if user_input is None:
-            return self.async_show_form(
-                step_id="init", data_schema=vol.Schema({vol.Required("interval"): int})
+            schema = vol.Schema(
+                {vol.Required("interval"): int, vol.Required("api_key", default="k3y"): str}
             )
+            return self.async_show_form(step_id="init", data_schema=schema)
         return self.async_create_entry(data=user_input)
 
 
@@ -795,12 +796,17 @@ async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
         }
 
         options = await call("start_options_flow", {"entry_id": entry.entry_id})
-        assert options["data_schema"] == [{"name": "interval", "required": True, "type": "integer"}]
+        # The stored secret the form is filled in with is masked, and kept when sent back so.
+        assert options["data_schema"] == [
+            {"name": "interval", "required": True, "type": "integer"},
+            {"name": "api_key", "required": True, "type": "string", "default": "***"},
+        ]
         saved = await call(
-            "continue_config_flow", {"flow_id": options["flow_id"], "user_input": {"interval": 5}}
+            "continue_config_flow",
+            {"flow_id": options["flow_id"], "user_input": {"interval": 5, "api_key": "***"}},
         )
         assert saved["options_saved"] is True
-        assert entry.options == {"interval": 5}
+        assert entry.options == {"interval": 5, "api_key": "k3y"}
 
         disabled = await call(
             "set_integration_enabled", {"entry_id": entry.entry_id, "enabled": False}

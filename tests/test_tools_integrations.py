@@ -18,8 +18,9 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import UnknownStep
+from homeassistant.data_entry_flow import UnknownHandler, UnknownStep, section
 from homeassistant.exceptions import DependencyError
+from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     MockModule,
@@ -30,6 +31,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.tools import call_tool
+from custom_components.mcp_server_http_transport.tools import integrations as integration_tools
 
 DEMO = "mcp_demo"
 _TOOLS = "custom_components.mcp_server_http_transport.tools.integrations"
@@ -63,7 +65,20 @@ class _DemoFlow(ConfigFlow):
     async def async_step_reconfigure(self, user_input=None):
         entry = self._get_reconfigure_entry()
         if user_input is None:
-            schema = self.add_suggested_values_to_schema(_FORM, entry.data)
+            schema = vol.Schema(
+                {
+                    vol.Required("host"): str,
+                    vol.Required("password"): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
+                    vol.Required("feed", default=entry.data.get("feed")): str,
+                    vol.Optional("api_key", default=entry.data.get("api_key", "")): str,
+                    vol.Required("advanced"): section(
+                        vol.Schema({vol.Optional("client_secret"): str, vol.Optional("port"): int})
+                    ),
+                }
+            )
+            schema = self.add_suggested_values_to_schema(schema, entry.data)
             return self.async_show_form(step_id="reconfigure", data_schema=schema)
         return self.async_update_reload_and_abort(entry, data_updates=user_input)
 
@@ -113,6 +128,14 @@ async def _call(hass: HomeAssistant, name: str, **arguments) -> str:
     result = await call_tool(hass, name, arguments)
     assert "isError" not in result, result
     return result["content"][0]["text"]
+
+
+async def _manual_form(hass: HomeAssistant) -> str:
+    """Start a flow and return the form the menu leads to, as the tool reports it."""
+    flow_id = json.loads(await _call(hass, "start_config_flow", domain=DEMO))["flow_id"]
+    return await _call(
+        hass, "continue_config_flow", flow_id=flow_id, user_input={"next_step_id": "manual"}
+    )
 
 
 async def _manual_step(hass: HomeAssistant) -> str:
@@ -429,7 +452,7 @@ class TestReloadIntegration:
     async def test_own_entry_is_refused(self, hass: HomeAssistant, own_entry: MockConfigEntry):
         text = await _call(hass, "reload_integration", entry_id=own_entry.entry_id)
 
-        assert text.startswith("Refusing to reload the MCP Server's own config entry")
+        assert text.startswith("Refusing to reload the config entry of the MCP Server")
 
 
 class TestDeleteIntegration:
@@ -458,50 +481,77 @@ class TestDeleteIntegration:
     async def test_own_entry_is_refused(self, hass: HomeAssistant, own_entry: MockConfigEntry):
         text = await _call(hass, "delete_integration", entry_id=own_entry.entry_id, confirm=True)
 
-        assert text.startswith("Refusing to remove the MCP Server's own config entry")
+        assert text.startswith("Refusing to remove the config entry of the MCP Server")
         assert hass.config_entries.async_entries(DOMAIN) == [own_entry]
 
 
 class TestOwnIntegrationIsOffLimits:
-    """The MCP Server's options decide what a client may do, so no flow may change them."""
+    """The MCP Server's options decide what a client may do, and its OIDC provider who
+    may connect, so no flow or entry tool may change either."""
 
-    async def test_a_second_entry_cannot_be_started(self, hass: HomeAssistant, demo: None):
-        text = await _call(hass, "start_config_flow", domain=DOMAIN)
+    @pytest.fixture
+    def protected_entry(self, hass: HomeAssistant, demo: None, request) -> MockConfigEntry:
+        entry = MockConfigEntry(domain=request.param)
+        entry.add_to_hass(hass)
+        return entry
 
-        assert text.startswith("Refusing to configure the MCP Server itself")
+    @pytest.mark.parametrize("domain", [DOMAIN, "oidc_provider"])
+    async def test_a_new_entry_cannot_be_started(self, hass: HomeAssistant, demo: None, domain):
+        text = await _call(hass, "start_config_flow", domain=domain)
+
+        assert text.startswith("Refusing to configure the MCP Server itself or its OIDC provider")
         assert hass.config_entries.flow.async_progress() == []
 
+    @pytest.mark.parametrize("protected_entry", [DOMAIN, "oidc_provider"], indirect=True)
     @pytest.mark.parametrize("tool", ["start_options_flow", "start_reconfigure_flow"])
     async def test_its_entry_cannot_be_reconfigured(
-        self, hass: HomeAssistant, own_entry: MockConfigEntry, tool
+        self, hass: HomeAssistant, protected_entry: MockConfigEntry, tool
     ):
-        text = await _call(hass, tool, entry_id=own_entry.entry_id)
+        text = await _call(hass, tool, entry_id=protected_entry.entry_id)
 
         assert text.startswith("Refusing to configure the MCP Server itself")
         assert hass.config_entries.options.async_progress() == []
         assert hass.config_entries.flow.async_progress() == []
 
-    async def test_a_flow_started_elsewhere_cannot_be_continued(
-        self, hass: HomeAssistant, own_entry: MockConfigEntry
+    @pytest.mark.parametrize("protected_entry", [DOMAIN, "oidc_provider"], indirect=True)
+    @pytest.mark.parametrize(
+        ("tool", "arguments"),
+        [
+            ("reload_integration", {}),
+            ("delete_integration", {"confirm": True}),
+            ("set_integration_enabled", {"enabled": False}),
+            ("set_integration_enabled", {"enabled": True}),
+        ],
+    )
+    async def test_its_entry_cannot_be_reloaded_removed_or_disabled(
+        self, hass: HomeAssistant, protected_entry: MockConfigEntry, tool, arguments
     ):
-        """The options dialog may be open in the frontend while a client guesses its ID."""
-        with patch.object(
-            hass.config_entries.options, "async_get", return_value={"handler": own_entry.entry_id}
-        ):
-            text = await _call(hass, "continue_config_flow", flow_id="open", user_input={"x": 1})
-
-        assert text.startswith("Refusing to configure the MCP Server itself")
-
-    @pytest.mark.parametrize("enabled", [True, False])
-    async def test_its_entry_cannot_be_disabled_or_enabled(
-        self, hass: HomeAssistant, own_entry: MockConfigEntry, enabled
-    ):
-        text = await _call(
-            hass, "set_integration_enabled", entry_id=own_entry.entry_id, enabled=enabled
-        )
+        text = await _call(hass, tool, entry_id=protected_entry.entry_id, **arguments)
 
         assert text.startswith("Refusing to")
-        assert own_entry.disabled_by is None
+        assert protected_entry.disabled_by is None
+        assert hass.config_entries.async_get_entry(protected_entry.entry_id) is protected_entry
+
+    async def test_a_flow_the_user_has_open_cannot_be_continued_or_aborted(
+        self, hass: HomeAssistant, enable_custom_integrations: None, demo: None
+    ):
+        """The setup and options dialogs may be open in the frontend."""
+        setup = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        options = await hass.config_entries.options.async_init(entry.entry_id)
+
+        for flow in (setup, options):
+            for tool, arguments in (
+                ("continue_config_flow", {"user_input": {"read_only_enabled": False}}),
+                ("abort_config_flow", {}),
+            ):
+                text = await _call(hass, tool, flow_id=flow["flow_id"], **arguments)
+                assert text.startswith("Refusing to configure the MCP Server itself"), tool
+
+        assert len(hass.config_entries.flow.async_progress()) == 1
+        assert len(hass.config_entries.options.async_progress()) == 1
+        assert entry.data == {}
 
 
 class TestOptionsFlow:
@@ -584,26 +634,123 @@ class TestOptionsFlow:
         assert "No config entry with ID 'gone'" in text
 
 
+_STORED = {
+    "host": "old.example.com",
+    "password": "hunter2",
+    "feed": "https://user:pw@example.com/feed",
+    "api_key": "abc123",
+    "advanced": {"client_secret": "s3cret", "port": 8080},
+}
+
+
+@pytest.fixture
+async def stored_entry(hass: HomeAssistant, demo: None) -> MockConfigEntry:
+    """A loaded entry of the stand-in integration holding credentials."""
+    entry = MockConfigEntry(domain=DEMO, title="Demo", data=_STORED)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    return entry
+
+
+def _fields(form: dict) -> dict[str, dict]:
+    return {field["name"]: field for field in form["data_schema"]}
+
+
 class TestReconfigureFlow:
-    async def test_the_entry_is_reconfigured_in_place(
-        self, hass: HomeAssistant, demo_entry: MockConfigEntry
+    async def test_the_form_comes_filled_in_without_its_stored_secrets(
+        self, hass: HomeAssistant, stored_entry: MockConfigEntry
     ):
-        form = json.loads(await _call(hass, "start_reconfigure_flow", entry_id=demo_entry.entry_id))
+        text = await _call(hass, "start_reconfigure_flow", entry_id=stored_entry.entry_id)
+        form = json.loads(text)
+        fields = _fields(form)
+        nested = {field["name"]: field for field in fields["advanced"]["schema"]}
+
         assert (form["type"], form["step_id"], form["domain"]) == ("form", "reconfigure", DEMO)
+        assert fields["host"]["description"] == {"suggested_value": "old.example.com"}
+        assert nested["port"]["description"] == {"suggested_value": 8080}
+        # A password field, a credential in a URL, a secret-named default, and a
+        # secret inside a section.
+        assert fields["password"]["description"] == {"suggested_value": "***"}
+        assert fields["feed"]["default"] == "***"
+        assert fields["feed"]["description"] == {"suggested_value": "***"}
+        assert fields["api_key"]["default"] == "***"
+        assert nested["client_secret"]["description"] == {"suggested_value": "***"}
+        assert 'Send "***" for that field to keep it' in form["hidden_values"]
+        for secret in ("hunter2", "user:pw", "abc123", "s3cret"):
+            assert secret not in text
+
+    async def test_a_masked_value_sent_back_keeps_what_is_stored(
+        self, hass: HomeAssistant, stored_entry: MockConfigEntry
+    ):
+        flow_id = json.loads(
+            await _call(hass, "start_reconfigure_flow", entry_id=stored_entry.entry_id)
+        )["flow_id"]
 
         done = json.loads(
             await _call(
                 hass,
                 "continue_config_flow",
-                flow_id=form["flow_id"],
-                user_input={"host": "new.example.com", "port": 8080},
+                flow_id=flow_id,
+                user_input={
+                    "host": "new.example.com",
+                    "password": "***",
+                    "feed": "***",
+                    "api_key": "***",
+                    "advanced": {"client_secret": "***", "port": 9090},
+                },
             )
         )
         await hass.async_block_till_done()
 
         assert (done["type"], done["reason"]) == ("abort", "reconfigure_successful")
-        assert demo_entry.data["host"] == "new.example.com"
-        assert hass.config_entries.async_entries(DEMO) == [demo_entry]
+        assert dict(stored_entry.data) == {
+            **_STORED,
+            "host": "new.example.com",
+            "advanced": {"client_secret": "s3cret", "port": 9090},
+        }
+        assert hass.config_entries.async_entries(DEMO) == [stored_entry]
+
+    async def test_the_mask_is_refused_where_nothing_is_stored(
+        self, hass: HomeAssistant, demo_entry: MockConfigEntry
+    ):
+        flow_id = json.loads(
+            await _call(hass, "start_reconfigure_flow", entry_id=demo_entry.entry_id)
+        )["flow_id"]
+
+        text = await _call(
+            hass,
+            "continue_config_flow",
+            flow_id=flow_id,
+            user_input={"host": "h", "password": "***", "feed": "f", "advanced": {}},
+        )
+
+        assert text.startswith(
+            '"***" only stands for a stored value, and there is none for password'
+        )
+        assert len(hass.config_entries.flow.async_progress()) == 1
+        assert "password" not in demo_entry.data
+
+    def test_masking_skips_what_is_not_a_field(self):
+        fields = ["junk", {"name": "password", "default": "hunter2"}, {"name": "host"}]
+
+        assert integration_tools._hide_stored_secrets(fields) is True
+        assert fields == ["junk", {"name": "password", "default": "***"}, {"name": "host"}]
+        assert integration_tools._hide_stored_secrets(None) is False
+
+    async def test_a_form_without_stored_secrets_says_nothing_of_hidden_values(
+        self, hass: HomeAssistant, demo: None
+    ):
+        form = json.loads(await _manual_form(hass))
+
+        assert "hidden_values" not in form
+
+    async def test_an_integration_whose_flow_is_gone_is_reported(
+        self, hass: HomeAssistant, demo_entry: MockConfigEntry
+    ):
+        with patch.object(hass.config_entries.flow, "async_init", side_effect=UnknownHandler):
+            text = await _call(hass, "start_reconfigure_flow", entry_id=demo_entry.entry_id)
+
+        assert text.startswith(f"No integration with a config flow found for domain '{DEMO}'")
 
     async def test_an_integration_without_the_step_is_reported(
         self, hass: HomeAssistant, plain_entry: MockConfigEntry

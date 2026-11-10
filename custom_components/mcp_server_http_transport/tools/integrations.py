@@ -6,6 +6,7 @@ the flow in whichever of Home Assistant's two flow managers holds it.
 """
 
 import logging
+import re
 from contextlib import suppress
 from typing import Any
 
@@ -16,6 +17,7 @@ from homeassistant.exceptions import DependencyError
 from homeassistant.helpers.data_entry_flow import FlowManagerResourceView
 
 from ..const import DOMAIN
+from ..secret_keys import SECRET_MASK, is_secret_key
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_IDEMPOTENT,
@@ -56,6 +58,19 @@ _NEXT_STEP = {
 }
 
 
+# The integrations no flow or entry tool may touch: this one, whose options decide
+# which tools a client may use, and the OIDC provider that guards its endpoint.
+_PROTECTED_DOMAINS = frozenset({DOMAIN, "oidc_provider"})
+
+# A URL that carries credentials in its user part or its query string.
+_CREDENTIAL_URL = re.compile(r"://[^/\s]*@|://\S*\?\S*=")
+
+_HIDDEN_NOTE = (
+    f'A value shown as "{SECRET_MASK}" is stored and not revealed. Send "{SECRET_MASK}" '
+    "for that field to keep it as it is."
+)
+
+
 def _text(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
@@ -82,16 +97,95 @@ def _unknown_flow(flow_id: str) -> dict[str, Any]:
 
 
 def _own_flow() -> dict[str, Any]:
-    """Refuse a flow that would change the MCP Server's own configuration.
+    """Refuse a flow that would change what this connection is allowed to do.
 
-    Its options decide which tools a client may use, so a client that could run
-    these flows could lift its own limits. A second entry would do the same, since
-    setting one up replaces the limits of the first.
+    The MCP Server's options decide which tools a client may use, so a client that
+    could run these flows could lift its own limits. A second entry would do the
+    same, since setting one up replaces the limits of the first. The OIDC provider
+    decides who may connect at all.
     """
     return _text(
-        "Refusing to configure the MCP Server itself: its options decide what this "
-        "connection may do. Do it from Settings → Devices & Services instead."
+        "Refusing to configure the MCP Server itself or its OIDC provider: their options "
+        "decide what this connection may do. Do it from Settings → Devices & Services "
+        "instead."
     )
+
+
+def _is_stored_secret(field: dict[str, Any], value: Any) -> bool:
+    """Return True when a value a form is filled in with must not be shown."""
+    if value in (None, ""):
+        return False
+    selector = field.get("selector")
+    text = selector.get("text") if isinstance(selector, dict) else None
+    if isinstance(text, dict) and text.get("type") == "password":
+        return True
+    if is_secret_key(field.get("name")):
+        return True
+    return isinstance(value, str) and _CREDENTIAL_URL.search(value) is not None
+
+
+def _hide_stored_secrets(fields: Any) -> bool:
+    """Mask the stored secrets a serialized form is filled in with.
+
+    A reconfigure or options form comes filled in with the entry's current values,
+    as a field's suggested value or its default. The serialized field shares its
+    description with the schema the flow goes on using, so that one is replaced
+    rather than changed. Returns True when anything was masked.
+    """
+    hidden = False
+    for field in fields if isinstance(fields, list) else ():
+        if not isinstance(field, dict):
+            continue
+        hidden |= _hide_stored_secrets(field.get("schema"))
+        description = field.get("description")
+        if isinstance(description, dict) and _is_stored_secret(
+            field, description.get("suggested_value")
+        ):
+            field["description"] = {**description, "suggested_value": SECRET_MASK}
+            hidden = True
+        if _is_stored_secret(field, field.get("default")):
+            field["default"] = SECRET_MASK
+            hidden = True
+    return hidden
+
+
+def _stored_values(schema: Any) -> dict[str, Any]:
+    """Return what a step's form is filled in with, keyed by field name.
+
+    Read off the voluptuous schema the flow keeps: a field's suggested value, or
+    else its default. A section holds its own fields one level down.
+    """
+    stored: dict[str, Any] = {}
+    for marker, validator in getattr(schema, "schema", {}).items():
+        name = getattr(marker, "schema", None)
+        if not isinstance(name, str):
+            continue
+        if nested := _stored_values(getattr(validator, "schema", None)):
+            stored[name] = nested
+            continue
+        description = getattr(marker, "description", None)
+        if isinstance(description, dict) and description.get("suggested_value") is not None:
+            stored[name] = description["suggested_value"]
+        elif callable(default := getattr(marker, "default", None)):
+            stored[name] = default()
+    return stored
+
+
+def _restore_hidden(user_input: dict[str, Any], stored: dict[str, Any]) -> list[str]:
+    """Put the stored value back wherever the input holds the mask, in place.
+
+    Returns the fields that hold the mask with nothing stored to put there.
+    """
+    missing: list[str] = []
+    for key, value in user_input.items():
+        if isinstance(value, dict) and isinstance(stored.get(key), dict):
+            missing += _restore_hidden(value, stored[key])
+        elif value == SECRET_MASK:
+            if stored.get(key) in (None, ""):
+                missing.append(key)
+            else:
+                user_input[key] = stored[key]
+    return missing
 
 
 def _find_flow(hass: HomeAssistant, flow_id: str) -> tuple[Any, str] | None:
@@ -166,6 +260,8 @@ def _flow_result_json(
         # versions, so the view is the one stable way to get the same list.
         view = FlowManagerResourceView(manager)
         data["data_schema"] = view._prepare_result_json(result)["data_schema"]
+        if _hide_stored_secrets(data["data_schema"]):
+            data["hidden_values"] = _HIDDEN_NOTE
     for key in ("errors", "description_placeholders"):
         if result.get(key):
             data[key] = result[key]
@@ -198,10 +294,23 @@ def _menu_refusal(manager: Any, flow_id: str, user_input: dict[str, Any]) -> str
     )
 
 
-def _first_step(
-    hass: HomeAssistant, manager: Any, result: data_entry_flow.FlowResult
+async def _start(
+    hass: HomeAssistant, manager: Any, handler: str, domain: str, context: dict[str, Any]
 ) -> dict[str, Any]:
-    """Report the first step of a flow, aborting the flow if it cannot be reported."""
+    """Start a flow and report its first step, aborting it if that cannot be reported."""
+    try:
+        result = await manager.async_init(handler, context=context)
+    except data_entry_flow.UnknownHandler:
+        return _text(
+            f"No integration with a config flow found for domain '{domain}'. It may be "
+            "misspelled, not installed, or set up through YAML only."
+        )
+    except DependencyError as err:
+        return _text(
+            f"Could not start a flow for '{domain}': its dependencies failed to set up "
+            f"({', '.join(err.failed_dependencies)})."
+        )
+
     try:
         return _text(dumps(_flow_result_json(hass, manager, result)))
     except Exception:
@@ -239,24 +348,11 @@ async def start_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return _disabled()
 
     domain = arguments["domain"]
-    if domain == DOMAIN:
+    if domain in _PROTECTED_DOMAINS:
         return _own_flow()
-    try:
-        result = await hass.config_entries.flow.async_init(
-            domain, context={"source": config_entries.SOURCE_USER}
-        )
-    except data_entry_flow.UnknownHandler:
-        return _text(
-            f"No integration with a config flow found for domain '{domain}'. It may be "
-            "misspelled, not installed, or set up through YAML only."
-        )
-    except DependencyError as err:
-        return _text(
-            f"Could not start a config flow for '{domain}': its dependencies failed to set up "
-            f"({', '.join(err.failed_dependencies)})."
-        )
-
-    return _first_step(hass, hass.config_entries.flow, result)
+    return await _start(
+        hass, hass.config_entries.flow, domain, domain, {"source": config_entries.SOURCE_USER}
+    )
 
 
 @register_tool(
@@ -307,11 +403,18 @@ async def continue_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -
     if found is None:
         return _unknown_flow(flow_id)
     manager, domain = found
-    if domain == DOMAIN:
+    if domain in _PROTECTED_DOMAINS:
         return _own_flow()
 
     if user_input and (refusal := _menu_refusal(manager, flow_id, user_input)):
         return _text(refusal)
+    if user_input:
+        step = getattr(getattr(manager, "_progress", {}).get(flow_id), "cur_step", None) or {}
+        if missing := _restore_hidden(user_input, _stored_values(step.get("data_schema"))):
+            return _text(
+                f'"{SECRET_MASK}" only stands for a stored value, and there is none for '
+                f"{', '.join(missing)}. Send the real value. The flow is still on the same step."
+            )
 
     try:
         result = await manager.async_configure(flow_id, user_input)
@@ -356,16 +459,18 @@ async def abort_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     found = _find_flow(hass, flow_id)
     if found is None:
         return _unknown_flow(flow_id)
+    if found[1] in _PROTECTED_DOMAINS:
+        return _own_flow()
     found[0].async_abort(flow_id)
 
     return _text(f"Aborted flow '{flow_id}'")
 
 
 def _own_entry(action: str) -> dict[str, Any]:
-    """Refuse an operation on the entry that serves this very request."""
+    """Refuse an operation on an entry this very request depends on."""
     return _text(
-        f"Refusing to {action} the MCP Server's own config entry: it is serving this "
-        "request. Do it from Settings → Devices & Services instead."
+        f"Refusing to {action} the config entry of the MCP Server or its OIDC provider: "
+        "they are serving this request. Do it from Settings → Devices & Services instead."
     )
 
 
@@ -396,7 +501,7 @@ async def reload_integration(hass: HomeAssistant, arguments: dict[str, Any]) -> 
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return _unknown_entry(entry_id)
-    if entry.domain == DOMAIN:
+    if entry.domain in _PROTECTED_DOMAINS:
         return _own_entry("reload")
 
     try:
@@ -445,7 +550,7 @@ async def delete_integration(hass: HomeAssistant, arguments: dict[str, Any]) -> 
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return _unknown_entry(entry_id)
-    if entry.domain == DOMAIN:
+    if entry.domain in _PROTECTED_DOMAINS:
         return _own_entry("remove")
 
     result = await hass.config_entries.async_remove(entry_id)
@@ -476,7 +581,7 @@ def _editable_entry(
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return None, _unknown_entry(entry_id)
-    if entry.domain == DOMAIN:
+    if entry.domain in _PROTECTED_DOMAINS:
         return None, _own_flow()
     return entry, None
 
@@ -486,10 +591,11 @@ def _editable_entry(
     description=(
         "Start the options flow of a config entry, the flow behind its Configure button, "
         "to change settings of an integration that is already set up. Returns the flow_id "
-        "and the first step, whose form is filled in with the current values. Take the steps "
-        "with continue_config_flow and drop the flow with abort_config_flow. Helpers made "
-        "from a config entry, such as template, group and utility meter helpers, are edited "
-        f"this way. {_DISABLED_NOTE}"
+        "and the first step, whose form is filled in with the current values, stored secrets "
+        "masked. Take the steps with continue_config_flow and drop the flow with "
+        "abort_config_flow. Helpers made from a config entry, such as template, group and "
+        "utility meter helpers, are edited this way. Settings an integration marks as "
+        f"advanced are not offered. {_DISABLED_NOTE}"
     ),
     input_schema={
         "type": "object",
@@ -509,18 +615,24 @@ async def start_options_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> 
             "start_reconfigure_flow for its connection settings."
         )
 
-    manager = hass.config_entries.options
-    result = await manager.async_init(entry.entry_id, context={"show_advanced_options": False})
-    return _first_step(hass, manager, result)
+    return await _start(
+        hass,
+        hass.config_entries.options,
+        entry.entry_id,
+        entry.domain,
+        {"show_advanced_options": False},
+    )
 
 
 @register_tool(
     name="start_reconfigure_flow",
     description=(
         "Start the reconfigure flow of a config entry, to change what was entered when the "
-        "integration was set up, such as a host or an API key, without removing it. Returns "
-        "the flow_id and the first step. Take the steps with continue_config_flow and drop "
-        "the flow with abort_config_flow. A flow that succeeds ends with an abort whose "
+        "integration was set up, such as a host, without removing it. Returns the flow_id "
+        "and the first step, filled in with the current values, stored secrets masked. Take "
+        "the steps with continue_config_flow, which keeps a masked value when it is sent "
+        "back as shown, and drop the flow with abort_config_flow. Leave entering a new "
+        "password or API key to the user. A flow that succeeds ends with an abort whose "
         f"reason is reconfigure_successful. {_DISABLED_NOTE}"
     ),
     input_schema={
@@ -541,12 +653,13 @@ async def start_reconfigure_flow(hass: HomeAssistant, arguments: dict[str, Any])
             "for its settings, or remove the entry and set it up again."
         )
 
-    manager = hass.config_entries.flow
-    result = await manager.async_init(
+    return await _start(
+        hass,
+        hass.config_entries.flow,
         entry.domain,
-        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+        entry.domain,
+        {"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
     )
-    return _first_step(hass, manager, result)
 
 
 @register_tool(
@@ -581,7 +694,7 @@ async def set_integration_enabled(hass: HomeAssistant, arguments: dict[str, Any]
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return _unknown_entry(entry_id)
-    if entry.domain == DOMAIN:
+    if entry.domain in _PROTECTED_DOMAINS:
         return _own_entry("enable" if enabled else "disable")
 
     disabled_by = None if enabled else config_entries.ConfigEntryDisabler.USER

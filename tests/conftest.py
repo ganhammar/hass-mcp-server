@@ -99,7 +99,9 @@ async def backup_manager(hass):
     """Set up the backup integration and return its manager.
 
     Some Home Assistant versions create the backup data during startup, through
-    a helper the test environment never calls, and set up fails without it.
+    a helper the test environment never calls, and set up fails without it. Set
+    up also creates the backup config entry from a discovery flow run as a
+    background task, which has to finish before the test does.
     """
     from homeassistant.components.backup.const import DATA_MANAGER
     from homeassistant.setup import async_setup_component
@@ -112,5 +114,5 @@ async def backup_manager(hass):
         async_initialize_backup(hass)
 
     assert await async_setup_component(hass, "backup", {})
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     return hass.data[DATA_MANAGER]

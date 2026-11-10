@@ -10,6 +10,7 @@ Every contract below is either unavoidable or cheaper than its public
 alternative; the docstrings say which, and what to do when one breaks.
 """
 
+import ast
 import dataclasses
 import inspect
 from datetime import UTC, datetime
@@ -20,19 +21,19 @@ import attr
 import pytest
 import voluptuous as vol
 from aiohttp import web
+from homeassistant import components as ha_components
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.ban import process_success_login, process_wrong_login
 from homeassistant.components.recorder import Recorder
+from homeassistant.components.recorder import services as recorder_services
+from homeassistant.components.recorder.const import DOMAIN as RECORDER_DOMAIN
 from homeassistant.components.recorder.history import (
     get_significant_states,
     get_significant_states_with_session,
 )
-from homeassistant.components.recorder.services import (
-    SERVICE_GET_STATISTICS,
-    _async_handle_get_statistics_service,
-)
+from homeassistant.components.recorder.services import SERVICE_GET_STATISTICS
 from homeassistant.components.recorder.statistics import (
     list_statistic_ids,
     validate_statistics,
@@ -68,14 +69,29 @@ from custom_components.mcp_server_http_transport.const import MCP_PATH
 from custom_components.mcp_server_http_transport.tools.labels import THEME_COLORS
 from custom_components.mcp_server_http_transport.tools.registries import device_entries
 
-# Core's built-in MCP server is what claims /api/mcp (#81). Importing it needs
-# aiohttp_sse, which only its own manifest pulls in, and the streamable endpoint
-# it collides on only exists from Home Assistant 2025.11; both absences raise
-# ImportError here and skip the contract rather than failing it.
-try:
-    from homeassistant.components.mcp_server.http import STREAMABLE_API
-except ImportError:
-    STREAMABLE_API = None
+
+def _core_streamable_api() -> str | None:
+    """Return the path core's built-in MCP server serves its streamable endpoint on.
+
+    Core's MCP server is what claims /api/mcp (#81). Importing it takes its own
+    requirements and those of the conversation integration, which no test
+    environment installs, so the constant is read from its source instead. The
+    endpoint exists from Home Assistant 2025.11.
+    """
+    source = Path(ha_components.__file__).parent / "mcp_server" / "http.py"
+    if not source.exists():
+        return None
+    for node in ast.parse(source.read_text()).body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(getattr(target, "id", None) == "STREAMABLE_API" for target in node.targets)
+            and isinstance(node.value, ast.Constant)
+        ):
+            return node.value.value
+    return None
+
+
+STREAMABLE_API = _core_streamable_api()
 
 # The KNX contracts below need the integration and its telegram store importable,
 # which takes KNX's own requirements (xknx, knx-frontend, knx-telegram-store) on
@@ -194,47 +210,52 @@ class TestRecorderGetStatisticsService:
         """
         assert SERVICE_GET_STATISTICS == "get_statistics"
 
-    async def test_response_wraps_rows_under_a_statistics_key(self):
+    @staticmethod
+    async def _call(hass: HomeAssistant, rows: dict) -> dict:
+        """Call recorder.get_statistics through core's handler, answering with rows.
+
+        Newer cores register the handler module-wide through async_setup_services.
+        Older ones, 2025.6 among them, close it over the recorder instance in
+        async_register_services.
+        """
+        instance = Mock(async_add_executor_job=AsyncMock(return_value=rows))
+        hass.data[DATA_INSTANCE] = instance
+        if hasattr(recorder_services, "async_setup_services"):
+            recorder_services.async_setup_services(hass)
+        else:
+            recorder_services.async_register_services(hass, instance)
+        return await hass.services.async_call(
+            RECORDER_DOMAIN,
+            SERVICE_GET_STATISTICS,
+            {
+                "start_time": datetime(2024, 1, 1, tzinfo=UTC),
+                "statistic_ids": ["sensor.energy"],
+                "period": "hour",
+                "types": ["mean"],
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    async def test_response_wraps_rows_under_a_statistics_key(self, hass: HomeAssistant):
         """The response is {"statistics": {statistic_id: [rows]}}.
 
         get_statistics reads through that envelope. Without it the lookup
         misses silently and the tool reports no data rather than failing.
         """
         rows = {"sensor.energy": [{"start": 1704067200.0, "end": 1704070800.0, "mean": 1.5}]}
-        hass = Mock()
-        hass.data = {DATA_INSTANCE: Mock(async_add_executor_job=AsyncMock(return_value=rows))}
-        call = Mock(
-            hass=hass,
-            data={
-                "start_time": datetime(2024, 1, 1, tzinfo=UTC),
-                "statistic_ids": ["sensor.energy"],
-                "period": "hour",
-                "types": ["mean"],
-            },
-        )
 
-        response = await _async_handle_get_statistics_service(call)
+        response = await self._call(hass, rows)
 
         assert set(response) == {"statistics"}
         assert list(response["statistics"]) == ["sensor.energy"]
         assert response["statistics"]["sensor.energy"][0]["mean"] == 1.5
 
-    async def test_response_renders_start_and_end_as_iso_strings(self):
+    async def test_response_renders_start_and_end_as_iso_strings(self, hass: HomeAssistant):
         """get_statistics passes start and end through to the caller verbatim."""
         rows = {"sensor.energy": [{"start": 1704067200.0, "end": 1704070800.0, "mean": 1.5}]}
-        hass = Mock()
-        hass.data = {DATA_INSTANCE: Mock(async_add_executor_job=AsyncMock(return_value=rows))}
-        call = Mock(
-            hass=hass,
-            data={
-                "start_time": datetime(2024, 1, 1, tzinfo=UTC),
-                "statistic_ids": ["sensor.energy"],
-                "period": "hour",
-                "types": ["mean"],
-            },
-        )
 
-        row = (await _async_handle_get_statistics_service(call))["statistics"]["sensor.energy"][0]
+        row = (await self._call(hass, rows))["statistics"]["sensor.energy"][0]
 
         assert row["start"] == "2024-01-01T00:00:00+00:00"
         assert row["end"] == "2024-01-01T01:00:00+00:00"
@@ -928,7 +949,7 @@ class TestViewRegistrationContracts:
 
     @pytest.mark.skipif(
         STREAMABLE_API is None,
-        reason="core's streamable MCP endpoint is not importable on this install",
+        reason="core's MCP server has no streamable endpoint before Home Assistant 2025.11",
     )
     def test_core_streamable_endpoint_is_the_path_this_integration_serves(self):
         """The conflict this integration works around is core serving MCP_PATH.

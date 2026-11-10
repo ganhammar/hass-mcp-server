@@ -237,10 +237,12 @@ class TestContinueConfigFlow:
 
         assert result["type"] == "form"
         assert result["step_id"] == "manual"
-        assert result["data_schema"] == [
-            {"name": "host", "required": True, "type": "string"},
-            {"name": "port", "required": False, "optional": True, "default": 80, "type": "integer"},
-        ]
+        host, port = result["data_schema"]
+        assert host == {"name": "host", "required": True, "type": "string"}
+        # voluptuous-serialize marks an optional key "optional". From 2.7, which HA 2025.6
+        # predates, it also adds "required": False.
+        assert port.pop("required", False) is False
+        assert port == {"name": "port", "optional": True, "default": 80, "type": "integer"}
         assert result["last_step"] is True
         assert "errors" not in result
 

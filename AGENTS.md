@@ -52,8 +52,8 @@ when core changes underneath it.
 
 Black and Ruff at line length 100, both enforced in CI. Tools register through
 `@register_tool` and return `{"content": [{"type": "text", ...}]}`; a failure a
-handler anticipates comes back as text in that same shape rather than as a raised
-exception.
+handler anticipates comes back as `error_result(text)`, the same shape with
+`isError: true`, rather than as a raised exception.
 
 Serialize any JSON a tool, resource, or prompt returns with `json_utils.dumps`. It
 is compact and keeps non-ASCII text as is, which is a third fewer tokens than
@@ -70,12 +70,26 @@ against a missing required key. Anything a handler raises that it did not expect
 is caught and returned as a result with `isError: true`, so a single failing tool
 cannot take down the JSON-RPC response.
 
-Two consequences worth knowing before you write a tool. Listing a property in
-`required` means the handler is guaranteed it, so any guidance the handler wants
-to give about that property being absent is unreachable — put the reason in the
-property's schema `description`, which the `-32602` message quotes back. And
-`isError` is currently set only by that wrapper, so a handler-caught failure still
-returns a success-shaped result whose text happens to describe an error.
+Listing a property in `required` means the handler is guaranteed it, so any
+guidance the handler wants to give about that property being absent is
+unreachable. Put the reason in the property's schema `description`, which the
+`-32602` message quotes back.
+
+Return `error_result` whenever the call did not do what was asked, so a client can
+tell failure from success without reading the text: an unknown ID, an argument the
+handler rejects, an option that is off, an integration that is not loaded, a
+refused operation, a missing `confirm=true`, an exception the handler caught, a
+write Home Assistant turned down. Decide by what happened, not by how the message
+reads. A result that reports the tool worked carries no `isError`, and that
+includes an empty listing, a preview or dry run, a no-op that finds the state
+already as asked, partial success that names what it skipped, and a config flow
+step the model is meant to read and answer: an abort, a form shown again with
+errors, or input the step rejected while the flow stays open. A lookup of one named
+thing that does not exist (`get_state` on a missing entity) is an error; a listing
+that finds nothing is not. The transport audits an `isError` result with the
+outcome `error`, so a refused call to a tool that can change something fires the
+audit event as one. `tests/test_tools_is_error.py` holds a failing call for every
+tool module and fails when a module is added without one.
 
 `call_tool` and `get_tool_schemas` also apply the two options that limit the tool
 set: read-only mode and the list of disabled tools. Read-only mode goes by the

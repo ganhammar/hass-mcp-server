@@ -218,6 +218,8 @@ class TestResources:
         mock_device.model = "Model1"
         mock_device.area_id = "living_room"
         mock_device.name_by_user = None
+        mock_device.labels = set()
+        mock_device.disabled_by = None
         mock_registry = Mock()
         mock_registry.devices = {"device1": mock_device}
 
@@ -429,6 +431,9 @@ class TestResources:
         mock_entry.title = "Philips Hue"
         mock_entry.state = "loaded"
         mock_entry.entry_id = "entry1"
+        mock_entry.disabled_by = None
+        mock_entry.supports_options = False
+        mock_entry.supports_reconfigure = False
         mock_hass.config_entries.async_entries.return_value = [mock_entry]
 
         request = Mock()

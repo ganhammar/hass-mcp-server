@@ -211,6 +211,8 @@ def mock_device_registry():
     device_hue.model = "BSB002"
     device_hue.area_id = "living_room"
     device_hue.name_by_user = None
+    device_hue.labels = set()
+    device_hue.disabled_by = None
 
     device_sensor = Mock()
     device_sensor.id = "aqara_sensor"
@@ -219,6 +221,8 @@ def mock_device_registry():
     device_sensor.model = "WSDCGQ11LM"
     device_sensor.area_id = "bedroom"
     device_sensor.name_by_user = "Bedroom Sensor"
+    device_sensor.labels = set()
+    device_sensor.disabled_by = None
 
     device_plug = Mock()
     device_plug.id = "smart_plug"
@@ -227,6 +231,8 @@ def mock_device_registry():
     device_plug.model = "HS110"
     device_plug.area_id = "kitchen"
     device_plug.name_by_user = None
+    device_plug.labels = set()
+    device_plug.disabled_by = None
 
     registry = Mock()
     registry.devices = {
@@ -260,7 +266,7 @@ class TestMCPClientSession:
 
         return json.loads(response.body)
 
-    async def test_full_session_lifecycle(self, view):
+    async def test_full_session_lifecycle(self, view, list_every_tool):
         """Test a complete MCP session: initialize → discover → use."""
         # Step 1: Initialize
         result = await self._call(view, "initialize")
@@ -271,6 +277,7 @@ class TestMCPClientSession:
         assert "prompts" in caps
 
         # Step 2: Discover tools
+        list_every_tool(view.hass)
         result = await self._call(view, "tools/list", msg_id=2)
         tool_names = [t["name"] for t in result["result"]["tools"]]
         assert len(tool_names) == 117
@@ -1566,6 +1573,9 @@ class TestMCPClientSession:
         mock_entry.title = "Philips Hue"
         mock_entry.state = "loaded"
         mock_entry.entry_id = "entry1"
+        mock_entry.disabled_by = None
+        mock_entry.supports_options = False
+        mock_entry.supports_reconfigure = False
         populated_hass.config_entries.async_entries.return_value = [mock_entry]
 
         tool_result = await self._call(

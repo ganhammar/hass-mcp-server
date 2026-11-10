@@ -525,6 +525,8 @@ class TestToolsEntities:
         mock_device1.model = "TRADFRI"
         mock_device1.area_id = "living_room"
         mock_device1.name_by_user = None
+        mock_device1.labels = set()
+        mock_device1.disabled_by = None
 
         mock_device2 = Mock()
         mock_device2.id = "device2"
@@ -533,6 +535,8 @@ class TestToolsEntities:
         mock_device2.model = "WSDCGQ11LM"
         mock_device2.area_id = "kitchen"
         mock_device2.name_by_user = None
+        mock_device2.labels = set()
+        mock_device2.disabled_by = None
 
         mock_registry = Mock()
         mock_registry.devices = {"device1": mock_device1, "device2": mock_device2}
@@ -573,6 +577,8 @@ class TestToolsEntities:
         mock_device1.model = "TRADFRI"
         mock_device1.area_id = "living_room"
         mock_device1.name_by_user = None
+        mock_device1.labels = set()
+        mock_device1.disabled_by = None
 
         mock_device2 = Mock()
         mock_device2.id = "device2"
@@ -581,6 +587,8 @@ class TestToolsEntities:
         mock_device2.model = "WSDCGQ11LM"
         mock_device2.area_id = "kitchen"
         mock_device2.name_by_user = None
+        mock_device2.labels = set()
+        mock_device2.disabled_by = None
 
         mock_registry = Mock()
         mock_registry.devices = {"device1": mock_device1, "device2": mock_device2}
@@ -623,6 +631,8 @@ class TestToolsEntities:
         mock_device.model = "X10"
         mock_device.area_id = "living_room"
         mock_device.name_by_user = None
+        mock_device.labels = set()
+        mock_device.disabled_by = None
         mock_dr = Mock()
         mock_dr.async_get.return_value = mock_device
 
@@ -732,6 +742,8 @@ class TestToolsEntities:
         mock_device.model = "PF1"
         mock_device.area_id = None
         mock_device.name_by_user = None
+        mock_device.labels = set()
+        mock_device.disabled_by = None
         mock_dr = Mock()
         mock_dr.async_get.return_value = mock_device
 
@@ -789,6 +801,8 @@ class TestToolsEntities:
         mock_device.model = "PF1"
         mock_device.area_id = None
         mock_device.name_by_user = None
+        mock_device.labels = set()
+        mock_device.disabled_by = None
         mock_dr = Mock()
         mock_dr.async_get.return_value = mock_device
 

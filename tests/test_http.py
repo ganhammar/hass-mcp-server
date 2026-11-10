@@ -360,11 +360,12 @@ class TestMCPEndpointView:
         assert "resources" in capabilities
         assert "prompts" in capabilities
 
-    async def test_post_tools_list_request(self, view):
+    async def test_post_tools_list_request(self, view, list_every_tool):
         """Test POST with tools/list request."""
         request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "tools/list", "id": 2})
+        list_every_tool(view.hass)
 
         with patch.object(view, "_validate_token", return_value=TOKEN):
             response = await view.post(request)

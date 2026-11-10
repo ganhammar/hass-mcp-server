@@ -27,14 +27,18 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.mcp_server_http_transport.const import DOMAIN
-from custom_components.mcp_server_http_transport.resources import _read_areas, _read_floors
+from custom_components.mcp_server_http_transport.resources import (
+    _read_areas,
+    _read_devices,
+    _read_floors,
+)
 from custom_components.mcp_server_http_transport.tools import (
     TOOLS,
     call_tool,
     registries,
     tool_is_read_only,
 )
-from custom_components.mcp_server_http_transport.tools.entities import list_areas
+from custom_components.mcp_server_http_transport.tools.entities import list_areas, list_devices
 from custom_components.mcp_server_http_transport.tools.entity_registry import (
     delete_entity,
     update_entity_registry,
@@ -380,6 +384,20 @@ class TestFloors:
         assert message in text
         assert fr.async_get(hass).async_get_floor(floor).level == 0
 
+    async def test_a_level_is_cleared(self, hass, floor):
+        updated = _json_after(
+            "Updated floor ", await update_floor(hass, {"floor_id": floor, "clear_level": True})
+        )
+
+        assert updated["level"] is None
+        assert fr.async_get(hass).async_get_floor(floor).level is None
+
+    async def test_a_level_cannot_be_set_and_cleared_at_once(self, hass, floor):
+        text = _text(await update_floor(hass, {"floor_id": floor, "level": 2, "clear_level": True}))
+
+        assert text == "Error updating floor: Give a level or clear_level, not both"
+        assert fr.async_get(hass).async_get_floor(floor).level == 0
+
     async def test_unknown_floor_is_not_deleted(self, hass):
         text = _text(await delete_floor(hass, {"floor_id": "attic"}))
 
@@ -435,6 +453,17 @@ class TestUpdateDevice:
             await update_device(hass, {"device_id": device.id, "disabled": False}),
         )
         assert enabled["disabled_by"] is None
+
+    async def test_a_disabled_device_is_listed_as_disabled_with_its_labels(
+        self, hass, device, label
+    ):
+        await update_device(hass, {"device_id": device.id, "disabled": True, "labels": [label]})
+
+        (listed,) = _json(await list_devices(hass, {}))
+        resource = json.loads(_read_devices(hass, "hass://devices")[0]["text"])
+
+        assert (listed["disabled_by"], listed["labels"]) == ("user", [label])
+        assert resource == [listed]
 
     async def test_a_device_something_else_disabled_keeps_that_reason(self, hass, device):
         registry = dr.async_get(hass)
@@ -603,6 +632,21 @@ class TestDeleteDevice:
         """Config entries only set up for a domain that has a flow handler."""
         with mock_config_flow("gadget", _StandInFlow), mock_config_flow("gizmo", _StandInFlow):
             yield
+
+    @pytest.fixture(autouse=True)
+    def integration_management(self, hass: HomeAssistant) -> None:
+        hass.data[DOMAIN] = {"integration_management": True}
+
+    async def test_is_off_until_integration_management_is_on(self, hass):
+        hass.data[DOMAIN] = {"integration_management": False}
+        hook = AsyncMock(return_value=True)
+        _, device = await _owned_device(hass, hook=hook)
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text.startswith("Deleting a device is part of integration management")
+        assert dr.async_get(hass).async_get(device.id) is not None
+        hook.assert_not_awaited()
 
     async def test_deletes_the_device_and_its_entities(self, hass):
         hook = AsyncMock(return_value=True)

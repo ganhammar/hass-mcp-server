@@ -25,14 +25,13 @@ from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_F
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.ban import process_success_login, process_wrong_login
 from homeassistant.components.recorder import Recorder
+from homeassistant.components.recorder import services as recorder_services
+from homeassistant.components.recorder.const import DOMAIN as RECORDER_DOMAIN
 from homeassistant.components.recorder.history import (
     get_significant_states,
     get_significant_states_with_session,
 )
-from homeassistant.components.recorder.services import (
-    SERVICE_GET_STATISTICS,
-    _async_handle_get_statistics_service,
-)
+from homeassistant.components.recorder.services import SERVICE_GET_STATISTICS
 from homeassistant.components.recorder.statistics import (
     list_statistic_ids,
     validate_statistics,
@@ -192,47 +191,52 @@ class TestRecorderGetStatisticsService:
         """
         assert SERVICE_GET_STATISTICS == "get_statistics"
 
-    async def test_response_wraps_rows_under_a_statistics_key(self):
+    @staticmethod
+    async def _call(hass: HomeAssistant, rows: dict) -> dict:
+        """Call recorder.get_statistics through core's handler, answering with rows.
+
+        Newer cores register the handler module-wide through async_setup_services.
+        Older ones, 2025.6 among them, close it over the recorder instance in
+        async_register_services.
+        """
+        instance = Mock(async_add_executor_job=AsyncMock(return_value=rows))
+        hass.data[DATA_INSTANCE] = instance
+        if hasattr(recorder_services, "async_setup_services"):
+            recorder_services.async_setup_services(hass)
+        else:
+            recorder_services.async_register_services(hass, instance)
+        return await hass.services.async_call(
+            RECORDER_DOMAIN,
+            SERVICE_GET_STATISTICS,
+            {
+                "start_time": datetime(2024, 1, 1, tzinfo=UTC),
+                "statistic_ids": ["sensor.energy"],
+                "period": "hour",
+                "types": ["mean"],
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    async def test_response_wraps_rows_under_a_statistics_key(self, hass: HomeAssistant):
         """The response is {"statistics": {statistic_id: [rows]}}.
 
         get_statistics reads through that envelope. Without it the lookup
         misses silently and the tool reports no data rather than failing.
         """
         rows = {"sensor.energy": [{"start": 1704067200.0, "end": 1704070800.0, "mean": 1.5}]}
-        hass = Mock()
-        hass.data = {DATA_INSTANCE: Mock(async_add_executor_job=AsyncMock(return_value=rows))}
-        call = Mock(
-            hass=hass,
-            data={
-                "start_time": datetime(2024, 1, 1, tzinfo=UTC),
-                "statistic_ids": ["sensor.energy"],
-                "period": "hour",
-                "types": ["mean"],
-            },
-        )
 
-        response = await _async_handle_get_statistics_service(call)
+        response = await self._call(hass, rows)
 
         assert set(response) == {"statistics"}
         assert list(response["statistics"]) == ["sensor.energy"]
         assert response["statistics"]["sensor.energy"][0]["mean"] == 1.5
 
-    async def test_response_renders_start_and_end_as_iso_strings(self):
+    async def test_response_renders_start_and_end_as_iso_strings(self, hass: HomeAssistant):
         """get_statistics passes start and end through to the caller verbatim."""
         rows = {"sensor.energy": [{"start": 1704067200.0, "end": 1704070800.0, "mean": 1.5}]}
-        hass = Mock()
-        hass.data = {DATA_INSTANCE: Mock(async_add_executor_job=AsyncMock(return_value=rows))}
-        call = Mock(
-            hass=hass,
-            data={
-                "start_time": datetime(2024, 1, 1, tzinfo=UTC),
-                "statistic_ids": ["sensor.energy"],
-                "period": "hour",
-                "types": ["mean"],
-            },
-        )
 
-        row = (await _async_handle_get_statistics_service(call))["statistics"]["sensor.energy"][0]
+        row = (await self._call(hass, rows))["statistics"]["sensor.energy"][0]
 
         assert row["start"] == "2024-01-01T00:00:00+00:00"
         assert row["end"] == "2024-01-01T01:00:00+00:00"

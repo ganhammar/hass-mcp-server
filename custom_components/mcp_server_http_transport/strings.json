@@ -90,6 +90,10 @@
     "oidc_audience_unsupported": {
       "title": "OIDC provider does not check the token audience",
       "description": "The installed **OIDC Provider** integration (hass-oidc-server) is too old to bind access tokens to a resource, so this integration validates them without checking the audience. A token issued for another resource on the same Home Assistant is therefore accepted by the MCP server.\n\nUpdate the OIDC Provider integration (hass-oidc-server) to version {minimum_version} or newer, then restart Home Assistant. This repair disappears once the check is in place."
+    },
+    "multiple_entries": {
+      "title": "More than one MCP Server entry is set up",
+      "description": "This integration is set up more than once. All entries share one set of options, so only the options of the entry that was set up last apply, including read-only mode, the disabled tools and the feature options. The other entries have no effect.\n\nRemove all but one under Settings > Devices & Services > MCP Server. The entry that remains is reloaded automatically, and this repair disappears."
     }
   }
 }

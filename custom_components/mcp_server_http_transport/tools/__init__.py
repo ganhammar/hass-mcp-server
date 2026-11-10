@@ -120,10 +120,47 @@ def _unavailable_reason(hass: HomeAssistant, name: str) -> str | None:
     return None
 
 
+# The option that switches a group of tools on, by the module that holds them and,
+# where a module mixes groups, by tool. A tool whose option is off answers a call
+# with how to switch it on, so it is only left out of the listing.
+_OPTION_BY_MODULE = {
+    "appdaemon_files": "appdaemon_file_access",
+    "config_files": "config_file_access",
+    "integrations": "integration_management",
+}
+_OPTION_BY_TOOL = {
+    "delete_device": "integration_management",
+    "get_camera_image": "camera_image_access",
+    "get_image_file": "image_file_access",
+    "render_template": "template_rendering",
+}
+
+
+def _is_usable(hass: HomeAssistant, name: str) -> bool:
+    """Return False for a tool that could only answer that it is switched off.
+
+    Listing those would spend a client's context on tools it cannot use: on a
+    default setup they are more than a quarter of the catalogue.
+    """
+    module = TOOLS[name]["handler"].__module__.rpartition(".")[2]
+    option = _OPTION_BY_TOOL.get(name) or _OPTION_BY_MODULE.get(module)
+    options = hass.data.get(DOMAIN)
+    if option and isinstance(options, dict) and not options.get(option, False):
+        return False
+    # The KNX tools go by the same check they make themselves when called.
+    return module != "knx" or knx._get_knx_module(hass) is not None
+
+
 def get_tool_schemas(hass: HomeAssistant) -> list[dict[str, Any]]:
-    """Return the schemas of the tools the server's options make available."""
+    """Return the schemas of the tools a client can use as the server is set up.
+
+    A tool the limits withhold is left out, and so is one whose own option is off
+    or whose integration is not loaded.
+    """
     return [
-        tool["schema"] for name, tool in TOOLS.items() if _unavailable_reason(hass, name) is None
+        tool["schema"]
+        for name, tool in TOOLS.items()
+        if _unavailable_reason(hass, name) is None and _is_usable(hass, name)
     ]
 
 

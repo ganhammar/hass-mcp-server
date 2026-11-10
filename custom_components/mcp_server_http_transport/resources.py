@@ -197,6 +197,8 @@ def _read_devices(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
             "model": device.model,
             "area_id": device.area_id,
             "name_by_user": device.name_by_user,
+            "labels": sorted(device.labels),
+            "disabled_by": device.disabled_by,
         }
         for device in registry.devices.values()
     ]
@@ -323,6 +325,9 @@ def _read_integrations(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
             "title": entry.title,
             "state": str(entry.state),
             "entry_id": entry.entry_id,
+            "disabled_by": entry.disabled_by,
+            "supports_options": entry.supports_options,
+            "supports_reconfigure": entry.supports_reconfigure,
         }
         for entry in entries
     ]

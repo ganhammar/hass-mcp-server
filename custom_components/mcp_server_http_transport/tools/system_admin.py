@@ -351,7 +351,11 @@ async def check_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
 
 @register_tool(
     name="list_integrations",
-    description="List installed integrations and their status",
+    description=(
+        "List installed integrations and their status, whether each config entry is "
+        "disabled, and whether it has an options flow (start_options_flow) or can be "
+        "reconfigured (start_reconfigure_flow)"
+    ),
     input_schema={
         "type": "object",
         "properties": {},
@@ -367,6 +371,9 @@ async def list_integrations(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             "title": entry.title,
             "state": str(entry.state),
             "entry_id": entry.entry_id,
+            "disabled_by": entry.disabled_by,
+            "supports_options": entry.supports_options,
+            "supports_reconfigure": entry.supports_reconfigure,
         }
         for entry in entries
     ]

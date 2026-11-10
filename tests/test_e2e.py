@@ -831,7 +831,9 @@ async def test_read_only_mode_and_disabled_tools_limit_what_a_client_can_reach(
 
     await hass.async_block_till_done()
     assert events == []
-    # The refused write is still on the audit trail, marked as never having run.
-    (refusal,) = audit
-    assert refusal.data["tool"] == "fire_event"
-    assert refusal.data["outcome"] == "invalid"
+    # Both refusals are on the audit trail, marked as never having run. The
+    # disabled tool only reads, and a read that ran would not be there.
+    assert [(event.data["tool"], event.data["outcome"]) for event in audit] == [
+        ("fire_event", "invalid"),
+        ("get_error_log", "invalid"),
+    ]

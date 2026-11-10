@@ -28,7 +28,14 @@ from .const import (
 from .json_utils import dumps
 from .prompts import InvalidPromptRequest, get_prompt, get_prompts
 from .resources import get_resources, read_resource
-from .tools import TOOLS, InvalidToolRequest, call_tool, get_tool_schemas, tool_is_read_only
+from .tools import (
+    TOOLS,
+    InvalidToolRequest,
+    ToolNotAvailable,
+    call_tool,
+    get_tool_schemas,
+    tool_is_read_only,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -702,7 +709,13 @@ class MCPEndpointView(HomeAssistantView):
             try:
                 result = await self._call_tool(name, arguments)
             except InvalidToolRequest as err:
-                self._audit_tool_call(caller, name, arguments, OUTCOME_INVALID)
+                self._audit_tool_call(
+                    caller,
+                    name,
+                    arguments,
+                    OUTCOME_INVALID,
+                    withheld=isinstance(err, ToolNotAvailable),
+                )
                 return _jsonrpc_error(-32602, str(err), msg_id)
             except Exception:
                 self._audit_tool_call(caller, name, arguments, OUTCOME_ERROR)
@@ -787,16 +800,19 @@ class MCPEndpointView(HomeAssistantView):
         """Call a tool by name."""
         return await call_tool(self.hass, name, arguments)
 
-    def _audit_tool_call(self, caller: Caller, name: Any, arguments: Any, outcome: str) -> None:
+    def _audit_tool_call(
+        self, caller: Caller, name: Any, arguments: Any, outcome: str, *, withheld: bool = False
+    ) -> None:
         """Record who called a tool, with what, and how it ended.
 
         A tool that can change something is logged at INFO and fired as
         EVENT_TOOL_CALLED, with the caller as the event context's user. A read-only
         tool is logged at DEBUG only: an event per read would flood the recorder.
-        Secret-named argument values are masked and the arguments shortened in
-        both.
+        A call to a tool the options withhold is recorded like a write whatever
+        the tool does, since the client was never offered it. Secret-named
+        argument values are masked and the arguments shortened in both.
         """
-        read_only = tool_is_read_only(name)
+        read_only = tool_is_read_only(name) and not withheld
         level = logging.DEBUG if read_only else logging.INFO
         if read_only and not _LOGGER.isEnabledFor(level):
             return

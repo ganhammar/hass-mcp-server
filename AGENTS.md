@@ -83,7 +83,9 @@ set: read-only mode and the list of disabled tools. Read-only mode goes by the
 boundary. Give every tool an annotation, and use `ANNOTATION_READ_ONLY` only for a
 tool that cannot change anything. A tool that previews by default but can apply
 the change is not read-only. A withheld tool raises `ToolNotAvailable`, an
-`InvalidToolRequest`, so it never reaches the handler.
+`InvalidToolRequest`, so it never reaches the handler. The list of disabled
+tools is stored by name, so renaming a tool silently switches it back on for
+anyone who had disabled it.
 
 `get_prompt` does the same for `prompts/get`: an unknown name, non-object
 `arguments`, or a `required` argument that is absent or null raises

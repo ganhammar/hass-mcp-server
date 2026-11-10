@@ -291,6 +291,34 @@ class TestMCPServerConfigFlow:
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
         assert result["data"][CONF_INTEGRATION_MANAGEMENT] is True
 
+    async def test_user_flow_form_tool_limits_default_to_none(self):
+        """Test user flow form offers read-only mode off and no tool preselected."""
+        flow = MCPServerConfigFlow()
+        flow.hass = Mock()
+
+        result = await flow.async_step_user(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_READ_ONLY].default() is False
+        assert schema_keys[CONF_DISABLED_TOOLS].default() == []
+
+    async def test_user_flow_persists_tool_limits(self):
+        """Test read-only mode and the disabled tools are stored on the created entry."""
+        flow = MCPServerConfigFlow()
+        flow.hass = Mock()
+
+        result = await flow.async_step_user(
+            user_input={
+                CONF_NATIVE_AUTH: True,
+                CONF_READ_ONLY: True,
+                CONF_DISABLED_TOOLS: ["restart_ha"],
+            }
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_READ_ONLY] is True
+        assert result["data"][CONF_DISABLED_TOOLS] == ["restart_ha"]
+
     async def test_version_is_set(self):
         """Test config flow version is set."""
         flow = MCPServerConfigFlow()

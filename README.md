@@ -69,6 +69,8 @@ Two options decide which tools a client is offered at all (Settings > Devices & 
 
 Both apply on top of the feature options below, which still decide whether tools such as `render_template` or `get_camera_image` do anything.
 
+The limits cover tools only. Resources such as `hass://entities` are still served, so disabling a listing tool does not hide the data it lists. A call to a withheld tool is logged at `info` and fires the audit event, whether or not the tool only reads.
+
 ### Integration management
 
 `start_config_flow`, `continue_config_flow`, `abort_config_flow`, `reload_integration` and `delete_integration` are off by default. They run the same config flows as the "Add integration" dialog and act on existing config entries, so a client can add an integration or remove one along with its devices and entities. Turn on **Enable integration management** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that.

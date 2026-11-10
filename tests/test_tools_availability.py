@@ -20,7 +20,7 @@ from custom_components.mcp_server_http_transport.tools import (
 
 def _hass(**options) -> Mock:
     hass = Mock()
-    hass.data = {DOMAIN: options}
+    hass.data = {DOMAIN: {"read_only": False, **options}}
     hass.states.get.return_value = None
     hass.services.async_call = AsyncMock()
     return hass
@@ -31,12 +31,22 @@ def _listed(hass: Mock) -> set[str]:
 
 
 class TestListing:
-    @pytest.mark.parametrize("data", [{}, {DOMAIN: {}}, {DOMAIN: {"read_only": False}}])
-    def test_every_tool_is_listed_by_default(self, data):
+    def test_every_tool_is_listed_by_default(self):
+        assert _listed(_hass()) == set(TOOLS)
+
+    @pytest.mark.parametrize(
+        "data",
+        [{}, {DOMAIN: None}, {DOMAIN: {}}],
+        ids=["never set up", "none", "unloaded"],
+    )
+    async def test_no_tool_is_available_while_the_entry_is_not_loaded(self, data):
+        """Unloading empties hass.data[DOMAIN], which then allows nothing."""
         hass = Mock()
         hass.data = data
 
-        assert _listed(hass) == set(TOOLS)
+        assert _listed(hass) == set()
+        with pytest.raises(ToolNotAvailable, match="not loaded"):
+            await call_tool(hass, "get_state", {"entity_id": "sun.sun"})
 
     def test_read_only_mode_lists_only_the_tools_annotated_read_only(self):
         listed = _listed(_hass(read_only=True))

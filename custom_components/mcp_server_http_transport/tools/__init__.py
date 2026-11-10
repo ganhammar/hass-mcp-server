@@ -100,8 +100,14 @@ def _unavailable_reason(hass: HomeAssistant, name: str) -> str | None:
 
     Read-only mode goes by the readOnlyHint annotation alone, so that annotation
     is a security boundary: a tool that can change anything must not carry it.
+
+    The limits live in hass.data[DOMAIN], which is populated while the config
+    entry is loaded and empty otherwise. With nothing there to say a tool is
+    allowed, every tool is withheld.
     """
     options = hass.data.get(DOMAIN)
+    if not options:
+        return "The MCP Server integration is not loaded, so no tool is available"
     if not isinstance(options, dict):
         return None
     if name in options.get("disabled_tools", ()):

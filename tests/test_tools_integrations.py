@@ -89,7 +89,7 @@ async def _manual_step(hass: HomeAssistant) -> str:
 
 class TestDisabled:
     @pytest.mark.parametrize(
-        "data", [{}, {DOMAIN: {}}, {DOMAIN: {"integration_management": False}}]
+        "data", [{DOMAIN: {"read_only": False}}, {DOMAIN: {"integration_management": False}}]
     )
     @pytest.mark.parametrize(
         "name, arguments",

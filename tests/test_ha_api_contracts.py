@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
+import attr
 import pytest
 import voluptuous as vol
 from aiohttp import web
@@ -418,7 +419,7 @@ class TestRegistryWriteContracts:
         )
         assert issubclass(dr.ChildDeviceEntry, dr.BaseDeviceEntry)
         assert {"id", "name", "name_by_user", "area_id", "labels", "disabled_by"} <= {
-            f.name for f in dataclasses.fields(dr.BaseDeviceEntry)
+            f.name for f in attr.fields(dr.BaseDeviceEntry)
         }
 
     def test_devices_in_an_area_are_counted_through_the_helper(self):
@@ -429,6 +430,49 @@ class TestRegistryWriteContracts:
 
         assert isinstance(RELOAD_AFTER_UPDATE_DELAY, int)
         assert MockConfigEntry(domain="demo").supports_unload in (None, False)
+
+    def test_a_device_names_the_config_entries_it_belongs_to(self):
+        """delete_device asks each one's integration.
+
+        A core with DeviceEntry.config_entry_id has one per device. The ones before
+        share a device between several, and detach them one at a time.
+        """
+        fields = {f.name for f in attr.fields(dr.DeviceEntry)}
+
+        if "config_entry_id" not in fields:
+            assert "config_entries" in fields
+            assert "remove_config_entry_id" in _params(dr.DeviceRegistry.async_update_device)
+
+    def test_a_child_device_names_its_parent(self):
+        """delete_device counts the child devices that go with a parent, where they exist."""
+        if not hasattr(dr, "ChildDeviceEntry"):
+            assert not hasattr(dr.DeviceRegistry, "async_update_child_device")
+            return
+
+        assert {"id", "parent_device_id"} <= {f.name for f in attr.fields(dr.ChildDeviceEntry)}
+        assert "child_devices" in dr.DeviceRegistry.__annotations__
+
+    async def test_core_decides_device_removal_by_the_integrations_hook(self, hass):
+        """delete_device reads supports_remove_device and calls the hook core looks for."""
+        from homeassistant.config_entries import support_remove_from_device
+
+        mock_integration(
+            hass, MockModule("removable", async_remove_config_entry_device=AsyncMock())
+        )
+        mock_integration(hass, MockModule("fixed"))
+
+        assert await support_remove_from_device(hass, "removable") is True
+        assert await support_remove_from_device(hass, "fixed") is False
+        assert MockConfigEntry(domain="fixed").supports_remove_device is None
+
+    def test_removal_takes_an_id(self):
+        assert _params(dr.DeviceRegistry.async_remove_device) == ["self", "device_id"]
+        assert _params(EntityRegistry.async_remove) == ["self", "entity_id"]
+        assert _params(er.async_entries_for_device)[:3] == [
+            "registry",
+            "device_id",
+            "include_disabled_entities",
+        ]
 
     def test_lookups_and_deletes_take_an_id(self):
         assert _params(ar.AreaRegistry.async_get_area) == ["self", "area_id"]

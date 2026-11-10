@@ -6,16 +6,25 @@ is Home Assistant's own rather than one the test assumes.
 
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import attr
 import pytest
+from homeassistant.config_entries import ConfigEntryState, ConfigFlow
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.loader import IntegrationNotFound
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    MockModule,
+    mock_config_flow,
+    mock_integration,
+    mock_platform,
+)
 
 from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.resources import _read_areas, _read_floors
@@ -27,12 +36,14 @@ from custom_components.mcp_server_http_transport.tools import (
 )
 from custom_components.mcp_server_http_transport.tools.entities import list_areas
 from custom_components.mcp_server_http_transport.tools.entity_registry import (
+    delete_entity,
     update_entity_registry,
 )
 from custom_components.mcp_server_http_transport.tools.registries import (
     create_area,
     create_floor,
     delete_area,
+    delete_device,
     delete_floor,
     list_floors,
     update_area,
@@ -102,6 +113,8 @@ def _set_supports_unload(hass: HomeAssistant, entity: str, value: bool) -> None:
 class TestRegistration:
     def test_only_the_listing_tool_is_read_only(self):
         tools = {
+            "delete_device",
+            "delete_entity",
             "create_area",
             "update_area",
             "delete_area",
@@ -115,7 +128,9 @@ class TestRegistration:
         assert tools <= set(TOOLS)
         assert {name for name in tools if tool_is_read_only(name)} == {"list_floors"}
 
-    @pytest.mark.parametrize("name", ["delete_area", "delete_floor", "update_device"])
+    @pytest.mark.parametrize(
+        "name", ["delete_area", "delete_floor", "update_device", "delete_device", "delete_entity"]
+    )
     def test_tools_that_can_take_something_away_are_destructive(self, name):
         assert TOOLS[name]["schema"]["annotations"]["destructiveHint"] is True
 
@@ -542,6 +557,285 @@ class TestUpdateDeviceOnASplitAwareRegistry:
         text = await self._update(hass, _SplitAwareRegistry(), {"device_id": "dev", "name": "X"})
 
         assert text == "Error updating device: No device with device_id 'dev' (see list_devices)"
+
+
+# A device belongs to one config entry on cores that have DeviceEntry.config_entry_id,
+# and may be shared between several on the ones before.
+_SHARED_DEVICES = "config_entry_id" not in {f.name for f in attr.fields(dr.DeviceEntry)}
+
+
+async def _owned_device(hass: HomeAssistant, domain: str = "gadget", *, hook=None, **module):
+    """Set up a stand-in integration and give it a device with one entity."""
+    if hook is not None:
+        module["async_remove_config_entry_device"] = hook
+    mock_integration(
+        hass, MockModule(domain, async_setup_entry=AsyncMock(return_value=True), **module)
+    )
+    mock_platform(hass, f"{domain}.config_flow", None)
+    entry = MockConfigEntry(domain=domain)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("gadget", "old-plug")}, name="Old plug"
+    )
+    er.async_get(hass).async_get_or_create(
+        "switch", domain, "old-plug", device_id=device.id, config_entry=entry
+    )
+    return entry, device
+
+
+class _StandInFlow(ConfigFlow):
+    VERSION = 1
+
+
+class TestDeleteDevice:
+    @pytest.fixture(autouse=True)
+    def flows(self):
+        """Config entries only set up for a domain that has a flow handler."""
+        with mock_config_flow("gadget", _StandInFlow), mock_config_flow("gizmo", _StandInFlow):
+            yield
+
+    async def test_deletes_the_device_and_its_entities(self, hass):
+        hook = AsyncMock(return_value=True)
+        entry, device = await _owned_device(hass, hook=hook)
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+        await hass.async_block_till_done()
+
+        assert text == f"Deleted device 'Old plug' ({device.id}), with 1 entity"
+        assert dr.async_get(hass).async_get(device.id) is None
+        assert er.async_entries_for_device(er.async_get(hass), device.id, True) == []
+        assert hook.await_args.args[1:] == (entry, device)
+
+    async def test_child_devices_and_their_entities_are_counted(self, hass):
+        """A core with child devices removes them along with their parent."""
+        _, device = await _owned_device(hass, hook=AsyncMock(return_value=True))
+        registry = dr.async_get(hass)
+        child = registry.async_get_or_create(
+            config_entry_id=device.primary_config_entry, identifiers={("gadget", "socket-1")}
+        )
+        er.async_get(hass).async_get_or_create("switch", "gadget", "s1", device_id=child.id)
+        children = [
+            SimpleNamespace(id=child.id, parent_device_id=device.id),
+            SimpleNamespace(id="other", parent_device_id="another-parent"),
+        ]
+
+        with patch.object(registry, "child_devices", children, create=True):
+            text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text == (
+            f"Deleted device 'Old plug' ({device.id}), with 1 child device and 2 entities"
+        )
+
+    async def test_reports_the_name_the_user_gave(self, hass):
+        _, device = await _owned_device(hass, hook=AsyncMock(return_value=True))
+        dr.async_get(hass).async_update_device(device.id, name_by_user="Hall plug")
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text.startswith("Deleted device 'Hall plug' ")
+
+    async def test_a_device_the_integration_already_removed_is_not_removed_twice(self, hass):
+        async def hook(hass, entry, device):
+            dr.async_get(hass).async_remove_device(device.id)
+            return True
+
+        _, device = await _owned_device(hass, hook=hook)
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text.startswith("Deleted device 'Old plug' ")
+        assert dr.async_get(hass).async_get(device.id) is None
+
+    @pytest.mark.parametrize("confirm", [False, "true", 1])
+    async def test_nothing_is_deleted_without_confirm(self, hass, confirm):
+        hook = AsyncMock(return_value=True)
+        _, device = await _owned_device(hass, hook=hook)
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": confirm}))
+
+        assert text.startswith("Deleting a device requires confirm=true")
+        assert dr.async_get(hass).async_get(device.id) is not None
+        hook.assert_not_awaited()
+
+    async def test_an_integration_without_device_removal_is_refused(self, hass):
+        _, device = await _owned_device(hass)
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text.startswith(
+            "Error deleting device: The integration 'gadget' does not support deleting a device"
+        )
+        assert dr.async_get(hass).async_get(device.id) is not None
+
+    async def test_the_integrations_refusal_is_reported(self, hass):
+        _, device = await _owned_device(hass, hook=AsyncMock(return_value=False))
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text.startswith(
+            "Error deleting device: The integration 'gadget' refused to remove the device"
+        )
+        assert dr.async_get(hass).async_get(device.id) is not None
+        assert len(er.async_entries_for_device(er.async_get(hass), device.id, True)) == 1
+
+    async def test_an_integration_that_cannot_be_loaded_is_reported(self, hass):
+        _, device = await _owned_device(hass, hook=AsyncMock(return_value=True))
+
+        with patch.object(
+            registries.loader, "async_get_integration", side_effect=IntegrationNotFound("gadget")
+        ):
+            text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text == "Error deleting device: The integration 'gadget' could not be loaded"
+        assert dr.async_get(hass).async_get(device.id) is not None
+
+    async def test_unknown_device_is_reported(self, hass):
+        text = _text(await delete_device(hass, {"device_id": "nope", "confirm": True}))
+
+        assert text == "Error deleting device: No device with device_id 'nope' (see list_devices)"
+
+    async def test_a_device_whose_config_entry_is_gone_is_reported(self, hass):
+        _, device = await _owned_device(hass, hook=AsyncMock(return_value=True))
+
+        with patch.object(hass.config_entries, "async_get_entry", return_value=None):
+            text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert "no longer exists" in text
+        assert dr.async_get(hass).async_get(device.id) is not None
+
+    @pytest.mark.skipif(not _SHARED_DEVICES, reason="a device has one config entry on this core")
+    async def test_a_shared_device_is_let_go_of_by_each_integration(self, hass):
+        first = AsyncMock(return_value=True)
+        second = AsyncMock(return_value=True)
+        _, device = await _owned_device(hass, "gadget", hook=first)
+        other, shared = await _owned_device(hass, "gizmo", hook=second)
+        assert shared.id == device.id
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text.startswith("Deleted device 'Old plug' ")
+        assert dr.async_get(hass).async_get(device.id) is None
+        first.assert_awaited_once()
+        second.assert_awaited_once()
+
+    @pytest.mark.skipif(not _SHARED_DEVICES, reason="a device has one config entry on this core")
+    @pytest.mark.parametrize(
+        ("outcome", "message"),
+        [
+            ({"return_value": False}, "refused to remove the device"),
+            ({"side_effect": RuntimeError("bridge offline")}, "bridge offline"),
+        ],
+    )
+    async def test_a_delete_that_stops_halfway_says_what_is_already_gone(
+        self, hass, outcome, message
+    ):
+        hooks = {"gadget": AsyncMock(return_value=True), "gizmo": AsyncMock(return_value=True)}
+        entries = {}
+        for domain, hook in hooks.items():
+            entries[domain], device = await _owned_device(hass, domain, hook=hook)
+        # The integrations are asked in the order of their config entry IDs.
+        first, second = sorted(entries, key=lambda domain: entries[domain].entry_id)
+        hooks[second].configure_mock(**outcome)
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert text.startswith("Error deleting device: ")
+        assert message in text
+        assert text.endswith(
+            f"The device is still there, but {first} had already let go of it and its "
+            "entities from there are gone"
+        )
+        assert dr.async_get(hass).async_get(device.id).config_entries == {entries[second].entry_id}
+
+    @pytest.mark.skipif(not _SHARED_DEVICES, reason="a device has one config entry on this core")
+    async def test_a_shared_device_stays_when_one_integration_cannot_remove_it(self, hass):
+        hook = AsyncMock(return_value=True)
+        await _owned_device(hass, "gadget", hook=hook)
+        _, device = await _owned_device(hass, "gizmo")
+
+        text = _text(await delete_device(hass, {"device_id": device.id, "confirm": True}))
+
+        assert "'gizmo' does not support deleting a device" in text
+        assert len(dr.async_get(hass).async_get(device.id).config_entries) == 2
+        hook.assert_not_awaited()
+
+
+class TestDeviceConfigEntries:
+    def test_a_device_with_one_config_entry_reports_it(self):
+        device = SimpleNamespace(config_entry_id="one", config_entries={"one"})
+
+        assert registries._config_entry_ids(device) == ["one"]
+
+    def test_a_shared_device_reports_each_in_a_stable_order(self):
+        device = SimpleNamespace(config_entries={"b", "a"})
+
+        assert registries._config_entry_ids(device) == ["a", "b"]
+
+
+class TestDeleteEntity:
+    async def test_deletes_an_entry_nothing_provides(self, hass, entity):
+        result = _json(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
+
+        assert result["deleted"]["entity_id"] == entity
+        assert er.async_get(hass).async_get(entity) is None
+
+    async def test_deletes_an_entry_whose_state_is_only_restored(self, hass, entity):
+        hass.states.async_set(entity, "unavailable", {"restored": True})
+
+        await delete_entity(hass, {"entity_id": entity, "confirm": True})
+
+        assert er.async_get(hass).async_get(entity) is None
+
+    async def test_a_disabled_entity_is_refused(self, hass, entity):
+        """It has no state whether or not it is still provided."""
+        er.async_get(hass).async_update_entity(entity, disabled_by=er.RegistryEntryDisabler.USER)
+
+        text = _text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
+
+        assert text.startswith(f"Error: {entity} is disabled")
+        assert er.async_get(hass).async_get(entity) is not None
+
+    async def test_an_entity_a_loaded_integration_has_yet_to_add_is_refused(self, hass, entity):
+        entry_id = er.async_get(hass).async_get(entity).config_entry_id
+        hass.config_entries.async_get_entry(entry_id).mock_state(hass, ConfigEntryState.LOADED)
+
+        text = _text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
+
+        assert text.startswith(f"Error: {entity} has no state yet although 'demo' is loaded")
+        assert er.async_get(hass).async_get(entity) is not None
+
+    async def test_an_entry_without_a_config_entry_is_a_leftover(self, hass):
+        entity = er.async_get(hass).async_get_or_create("light", "yaml", "gone").entity_id
+
+        await delete_entity(hass, {"entity_id": entity, "confirm": True})
+
+        assert er.async_get(hass).async_get(entity) is None
+
+    @pytest.mark.parametrize("state", ["on", "unavailable"])
+    async def test_an_entity_still_provided_is_refused(self, hass, entity, state):
+        hass.states.async_set(entity, state)
+
+        text = _text(await delete_entity(hass, {"entity_id": entity, "confirm": True}))
+
+        assert text.startswith(f"Error: {entity} is still provided by 'demo'")
+        assert er.async_get(hass).async_get(entity) is not None
+
+    @pytest.mark.parametrize("confirm", [False, "true", 1])
+    async def test_nothing_is_deleted_without_confirm(self, hass, entity, confirm):
+        text = _text(await delete_entity(hass, {"entity_id": entity, "confirm": confirm}))
+
+        assert text == "Error: Deleting an entity's registry entry requires confirm=true."
+        assert er.async_get(hass).async_get(entity) is not None
+
+    @pytest.mark.parametrize(
+        ("entity_id", "message"),
+        [("nonsense", "Invalid entity_id"), ("light.missing", "Entity is not in the registry")],
+    )
+    async def test_an_unknown_entity_is_reported(self, hass, entity_id, message):
+        text = _text(await delete_entity(hass, {"entity_id": entity_id, "confirm": True}))
+
+        assert text.startswith(f"Error: {message}")
 
 
 class TestEntityRegistryFields:

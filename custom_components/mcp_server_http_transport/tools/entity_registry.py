@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
+from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY, ConfigEntryState
+from homeassistant.const import ATTR_RESTORED
 from homeassistant.core import HomeAssistant, valid_domain, valid_entity_id
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -296,3 +297,82 @@ async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any])
             "warning": _WARNING,
         }
     )
+
+
+def _still_provided(hass: HomeAssistant, entry: er.RegistryEntry) -> str | None:
+    """Return why an entity cannot be taken for a leftover, or None when it is one.
+
+    Home Assistant gives a registered entity that nothing provides a state marked
+    restored. A disabled entity has no state either way, and neither has one whose
+    integration is loaded but has yet to add it, so those are not taken for leftovers.
+    """
+    state = hass.states.get(entry.entity_id)
+    if state is not None:
+        if state.attributes.get(ATTR_RESTORED):
+            return None
+        return (
+            f"{entry.entity_id} is still provided by '{entry.platform}', so Home Assistant "
+            "would add it back. Disable it with update_entity_registry (disabled=true), or "
+            "delete what provides it."
+        )
+    if entry.disabled_by is not None:
+        return (
+            f"{entry.entity_id} is disabled, which hides whether '{entry.platform}' still "
+            "provides it. Leave it disabled, or enable it and delete it once its state is "
+            "marked restored."
+        )
+    config_entry = (
+        hass.config_entries.async_get_entry(entry.config_entry_id)
+        if entry.config_entry_id
+        else None
+    )
+    if config_entry is not None and config_entry.state is ConfigEntryState.LOADED:
+        return (
+            f"{entry.entity_id} has no state yet although '{entry.platform}' is loaded, so "
+            "it may still be provided. Try again once it has a state."
+        )
+    return None
+
+
+@register_tool(
+    name="delete_entity",
+    description=(
+        "Delete an entity's registry entry, for a leftover entity that no integration "
+        "provides any more (its state is marked restored). An entity that is still "
+        "provided is refused, because Home Assistant would add it straight back: disable "
+        "it with update_entity_registry instead, or use delete_helper, delete_automation "
+        "and the like for what those tools manage. A disabled entity is refused too, as "
+        "nothing shows whether it is still provided. Requires explicit confirmation."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_id": _ENTITY_ID,
+            "confirm": {
+                "type": "boolean",
+                "description": "Must be true to confirm deleting the registry entry.",
+            },
+        },
+        "required": ["entity_id", "confirm"],
+        "additionalProperties": False,
+    },
+    annotations=ANNOTATION_DESTRUCTIVE,
+)
+async def delete_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Remove a registry entry nothing provides, as the frontend allows."""
+    entity_id = arguments["entity_id"]
+    if not _valid_id(entity_id):
+        return _error("Invalid entity_id; expected domain.object_id.")
+    if arguments["confirm"] is not True:
+        return _error("Deleting an entity's registry entry requires confirm=true.")
+
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    if entry is None:
+        return _error(f"Entity is not in the registry: {entity_id}")
+
+    if reason := _still_provided(hass, entry):
+        return _error(reason)
+
+    registry.async_remove(entity_id)
+    return _result({"deleted": _entry(entry)})

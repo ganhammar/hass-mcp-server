@@ -149,7 +149,7 @@ async def get_camera_image(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         "Read an image file (JPEG, PNG, GIF, or WebP) from disk and return it for visual "
         "analysis. Use this to retrieve camera snapshots saved by the camera.snapshot service "
         "or other saved images. The path must be inside a directory Home Assistant is allowed "
-        "to access (the config directory and configured media dirs by default)"
+        "to access (www in the config directory and the media dirs by default)"
     ),
     input_schema={
         "type": "object",
@@ -191,10 +191,11 @@ async def get_image_file(hass: HomeAssistant, arguments: dict[str, Any]) -> dict
 def _read_image_file_sync(hass: HomeAssistant, raw_path: str) -> bytes | str:
     """Validate and read an image file. Returns bytes, or an error string for the model.
 
-    Path access is delegated to ``hass.config.is_allowed_path``, which honours
-    Home Assistant's ``allowlist_external_dirs`` (config dir and media dirs) — the
-    same allowlist that gates where ``camera.snapshot`` may write, so any snapshot
-    the model created is readable here while everything else stays out of reach.
+    Path access is delegated to ``hass.config.is_allowed_path``, which allows
+    ``www`` in the config directory, the media dirs and whatever is listed in
+    ``allowlist_external_dirs``. The same check gates where ``camera.snapshot``
+    may write, so any snapshot the model created is readable here while
+    everything else stays out of reach.
     """
     path = Path(raw_path)
     if not path.is_absolute():
@@ -203,7 +204,7 @@ def _read_image_file_sync(hass: HomeAssistant, raw_path: str) -> bytes | str:
     if not hass.config.is_allowed_path(str(path)):
         return (
             f"Access to '{raw_path}' is not allowed. The path must be within a Home Assistant "
-            "allowed directory (the config directory or a configured media dir)."
+            "allowed directory (www in the config directory, or a configured media dir)."
         )
     if not path.exists():
         return f"File '{raw_path}' does not exist"

@@ -929,16 +929,15 @@ async def test_areas_devices_and_entities_are_managed_over_http(
 async def test_diagnostics_are_read_over_http(
     loaded_entry: MockConfigEntry,
     hass: HomeAssistant,
+    backup_manager,
     hass_client: ClientSessionGenerator,
 ) -> None:
     """Repairs, system health and backups come from this core's own components."""
     assert await async_setup_component(hass, "system_health", {})
-    assert await async_setup_component(hass, "backup", {})
-    await hass.async_block_till_done()
     ir.async_create_issue(
         hass,
         DOMAIN,
-        "endpoint_conflict",
+        "mcp_e2e",
         is_fixable=False,
         severity=ir.IssueSeverity.WARNING,
         translation_key="endpoint_conflict",
@@ -961,8 +960,8 @@ async def test_diagnostics_are_read_over_http(
         return json.loads(result["content"][0]["text"])
 
     issues = {issue["issue_id"]: issue for issue in await call("list_repairs")}
-    assert issues["endpoint_conflict"]["title"] == "Another integration also serves /api/mcp"
-    assert issues["endpoint_conflict"]["severity"] == "warning"
+    assert issues["mcp_e2e"]["title"] == "Another integration also serves /api/mcp"
+    assert issues["mcp_e2e"]["severity"] == "warning"
 
     assert isinstance(await call("get_system_health"), dict)
 

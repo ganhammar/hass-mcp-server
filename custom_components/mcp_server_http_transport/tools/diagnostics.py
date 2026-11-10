@@ -6,6 +6,8 @@ the system_health component's get_info and the backup manager in hass.data, so e
 is guarded for its component not being loaded.
 """
 
+import asyncio
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -13,9 +15,14 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import translation
 
 from . import ANNOTATION_READ_ONLY, dumps, register_tool
+from .system_admin import redact_log_text
 
 DEFAULT_BACKUP_LIMIT = 20
 MAX_BACKUP_LIMIT = 200
+
+# Integrations answer system health one after another, and each of their
+# reachability checks may wait several seconds on an unreachable server.
+SYSTEM_HEALTH_TIMEOUT = 30
 
 
 def _text(text: str) -> dict[str, Any]:
@@ -57,8 +64,9 @@ async def list_repairs(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         for issue in ir.async_get(hass).issues.values()
         if issue.active and (include_ignored or issue.dismissed_version is None)
     ]
-    # An issue's text lives in the translations of the integration it is about.
-    domains = {issue.issue_domain or issue.domain for issue in issues}
+    # An issue's text is in the translations of the integration that raised it.
+    # issue_domain only names the integration the issue is about.
+    domains = {issue.domain for issue in issues}
     texts = (
         await translation.async_get_translations(hass, hass.config.language, "issues", domains)
         if domains
@@ -66,11 +74,25 @@ async def list_repairs(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     )
 
     def text(issue: ir.IssueEntry, part: str) -> str | None:
-        key = (
-            f"component.{issue.issue_domain or issue.domain}.issues."
-            f"{issue.translation_key or issue.issue_id}.{part}"
-        )
-        return _fill(texts.get(key), issue.translation_placeholders)
+        """Return an issue's title or description, or that of its fix flow's first step.
+
+        A fixable issue often has no description of its own: what it says is on
+        the steps of the flow that fixes it.
+        """
+        prefix = f"component.{issue.domain}.issues.{issue.translation_key or issue.issue_id}."
+        found = texts.get(f"{prefix}{part}")
+        if found is None and issue.is_fixable:
+            steps = f"{prefix}fix_flow.step."
+            candidates = {
+                key[len(steps) :].split(".")[0]: value
+                for key, value in texts.items()
+                if key.startswith(steps) and key.endswith(f".{part}")
+            }
+            for step in ("init", "confirm", *sorted(candidates)):
+                if step in candidates:
+                    found = candidates[step]
+                    break
+        return _fill(found, issue.translation_placeholders)
 
     result = [
         {
@@ -97,7 +119,9 @@ async def list_repairs(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         "Get Home Assistant's system health report (Settings > System > Repairs > System "
         "information): what each integration reports about itself, such as installation "
         "type, versions, cloud and server reachability, and database size. It makes the "
-        "same network checks as that page, so it can take a few seconds"
+        "same network checks as that page, one integration after another, so it can take "
+        f"a while when servers are unreachable and gives up after {SYSTEM_HEALTH_TIMEOUT} "
+        "seconds"
     ),
     input_schema={"type": "object", "properties": {}},
     annotations=ANNOTATION_READ_ONLY,
@@ -109,7 +133,35 @@ async def get_system_health(hass: HomeAssistant, arguments: dict[str, Any]) -> d
 
     from homeassistant.components import system_health
 
-    return _text(dumps(await system_health.get_info(hass)))
+    try:
+        async with asyncio.timeout(SYSTEM_HEALTH_TIMEOUT):
+            report = await system_health.get_info(hass)
+    except TimeoutError:
+        return _text(
+            f"System health did not answer within {SYSTEM_HEALTH_TIMEOUT} seconds, usually "
+            "because an integration is waiting on a server it cannot reach."
+        )
+    return _text(dumps(_redacted(report)))
+
+
+def _redacted(value: Any) -> Any:
+    """Mask credentials in the texts integrations report, such as an error they hit."""
+    if isinstance(value, str):
+        return redact_log_text(value)
+    if isinstance(value, dict):
+        return {key: _redacted(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redacted(item) for item in value]
+    return value
+
+
+def _backup_time(backup: Any) -> datetime:
+    """Return when a backup was made, comparable across UTC offsets."""
+    try:
+        made = datetime.fromisoformat(backup.date)
+    except (TypeError, ValueError):
+        return datetime.fromtimestamp(0, UTC)
+    return made if made.tzinfo else made.astimezone()
 
 
 def _backup_json(backup: Any) -> dict[str, Any]:
@@ -135,7 +187,8 @@ def _backup_json(backup: Any) -> dict[str, Any]:
     description=(
         "List Home Assistant's backups, newest first, with where each is stored and its "
         "size in bytes there, along with when the last automatic backup ran and when the "
-        "next is due. Read-only: it cannot create, restore or delete a backup"
+        "next is due. It asks every backup location for its list, cloud and network "
+        "storage included. Read-only: it cannot create, restore or delete a backup"
     ),
     input_schema={
         "type": "object",
@@ -166,7 +219,7 @@ async def list_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         return _text("Backups are not available: the backup integration is not loaded.")
 
     backups, agent_errors = await manager.async_get_backups()
-    newest_first = sorted(backups.values(), key=lambda backup: backup.date, reverse=True)
+    newest_first = sorted(backups.values(), key=_backup_time, reverse=True)
     config = manager.config.data
     return _text(
         dumps(
@@ -178,7 +231,8 @@ async def list_backups(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
                 "last_completed_automatic_backup": config.last_completed_automatic_backup,
                 "next_automatic_backup": config.schedule.next_automatic_backup,
                 "location_errors": {
-                    agent_id: str(error) for agent_id, error in agent_errors.items()
+                    agent_id: redact_log_text(str(error))
+                    for agent_id, error in agent_errors.items()
                 },
             }
         )

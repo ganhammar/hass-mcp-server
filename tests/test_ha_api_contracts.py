@@ -55,7 +55,6 @@ from homeassistant.helpers.json import json_encoder_default
 from homeassistant.helpers.label_registry import LabelEntry, LabelRegistry
 from homeassistant.helpers.recorder import DATA_INSTANCE
 from homeassistant.loader import Integration, async_get_integration
-from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     MockModule,
@@ -511,14 +510,11 @@ class TestDiagnosticsContracts:
         assert system_health.DOMAIN == "system_health"
 
     async def test_the_backup_manager_lists_backups_and_knows_the_schedule(
-        self, hass: HomeAssistant
+        self, hass: HomeAssistant, backup_manager
     ):
-        from homeassistant.components.backup.const import DATA_MANAGER
         from homeassistant.components.backup.manager import AgentBackupStatus, ManagerBackup
 
-        assert await async_setup_component(hass, "backup", {})
-        await hass.async_block_till_done()
-        manager = hass.data[DATA_MANAGER]
+        manager = backup_manager
 
         backups, agent_errors = await manager.async_get_backups()
         assert (backups, agent_errors) == ({}, {})
@@ -540,6 +536,21 @@ class TestDiagnosticsContracts:
             "with_automatic_settings",
         } <= {f.name for f in dataclasses.fields(ManagerBackup)}
         assert {f.name for f in dataclasses.fields(AgentBackupStatus)} == {"protected", "size"}
+
+    async def test_an_issues_text_is_keyed_by_the_integration_that_raised_it(
+        self, hass: HomeAssistant
+    ):
+        """list_repairs builds the translation key the frontend does.
+
+        Core raises its reauth issue as homeassistant with the integration it is
+        about in issue_domain, and the text is under homeassistant.
+        """
+        from homeassistant.helpers import translation
+
+        texts = await translation.async_get_translations(hass, "en", "issues", {"homeassistant"})
+
+        assert "{name}" in texts["component.homeassistant.issues.config_entry_reauth.title"]
+        assert "component.homeassistant.issues.config_entry_reauth.description" in texts
 
     def test_an_issue_carries_the_listed_fields(self):
         assert {

@@ -5,6 +5,7 @@ translations, system health against the real component, and backups against the
 real backup manager, so the shapes read here are Home Assistant's own.
 """
 
+import asyncio
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
@@ -15,7 +16,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 
 from custom_components.mcp_server_http_transport.const import DOMAIN
-from custom_components.mcp_server_http_transport.tools import TOOLS, tool_is_read_only
+from custom_components.mcp_server_http_transport.tools import TOOLS, diagnostics, tool_is_read_only
 from custom_components.mcp_server_http_transport.tools.diagnostics import (
     get_system_health,
     list_backups,
@@ -82,6 +83,63 @@ class TestListRepairs:
 
         assert (issue["title"], issue["description"]) == (None, None)
 
+    async def test_the_text_comes_from_the_integration_that_raised_the_issue(
+        self, hass: HomeAssistant
+    ):
+        """Core raises issues about other integrations, named in issue_domain."""
+        ir.async_create_issue(
+            hass,
+            "homeassistant",
+            "config_entry_reauth_gadget_1",
+            issue_domain="gadget",
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="config_entry_reauth",
+            translation_placeholders={"name": "My gadget"},
+        )
+
+        (issue,) = _json(await list_repairs(hass, {}))
+
+        assert (issue["domain"], issue["issue_domain"]) == ("homeassistant", "gadget")
+        assert issue["title"] == "Authentication expired for My gadget"
+        assert issue["description"]
+
+    async def test_a_fixable_issue_takes_its_text_from_its_fix_flow(self, hass: HomeAssistant):
+        self._raise(hass, "fixable", translation_key="fixable", is_fixable=True)
+        texts = {
+            f"component.{DOMAIN}.issues.fixable.title": "Old setting for {path}",
+            f"component.{DOMAIN}.issues.fixable.fix_flow.step.zeta.description": "Later step",
+            f"component.{DOMAIN}.issues.fixable.fix_flow.step.confirm.description": "Fix {path}?",
+            f"component.{DOMAIN}.issues.fixable.fix_flow.step.confirm.title": "Unused",
+        }
+
+        with patch(
+            "homeassistant.helpers.translation.async_get_translations",
+            AsyncMock(return_value=texts),
+        ):
+            (issue,) = _json(await list_repairs(hass, {}))
+
+        assert issue["title"] == "Old setting for /api/mcp"
+        assert issue["description"] == "Fix /api/mcp?"
+        assert issue["is_fixable"] is True
+
+    async def test_a_fix_flow_without_the_usual_first_step_gives_its_first_by_name(
+        self, hass: HomeAssistant
+    ):
+        self._raise(hass, "fixable", translation_key="fixable", is_fixable=True)
+        texts = {
+            f"component.{DOMAIN}.issues.fixable.fix_flow.step.b.description": "B",
+            f"component.{DOMAIN}.issues.fixable.fix_flow.step.a.description": "A",
+        }
+
+        with patch(
+            "homeassistant.helpers.translation.async_get_translations",
+            AsyncMock(return_value=texts),
+        ):
+            (issue,) = _json(await list_repairs(hass, {}))
+
+        assert (issue["title"], issue["description"]) == (None, "A")
+
     async def test_ignored_issues_are_left_out_unless_asked_for(
         self, hass: HomeAssistant, enable_custom_integrations: None
     ):
@@ -120,6 +178,41 @@ class TestSystemHealth:
             "api": "ok",
         }
 
+    async def test_credentials_in_what_an_integration_reports_are_masked(self, hass: HomeAssistant):
+        assert await async_setup_component(hass, "system_health", {})
+        report = {
+            "gadget": {
+                "api": "Exception: GET https://user:pw@example.com failed",
+                "n": 1,
+                "servers": ["https://a:b@one.example.com", "two.example.com"],
+            }
+        }
+
+        with patch(
+            "homeassistant.components.system_health.get_info", AsyncMock(return_value=report)
+        ):
+            result = _json(await get_system_health(hass, {}))
+
+        assert "pw@" not in result["gadget"]["api"]
+        assert result["gadget"]["api"].endswith("example.com failed")
+        assert result["gadget"]["n"] == 1
+        assert "a:b@" not in result["gadget"]["servers"][0]
+        assert result["gadget"]["servers"][1] == "two.example.com"
+
+    async def test_gives_up_on_a_report_that_does_not_come(self, hass: HomeAssistant):
+        assert await async_setup_component(hass, "system_health", {})
+
+        async def never(hass):
+            await asyncio.sleep(3600)
+
+        with (
+            patch("homeassistant.components.system_health.get_info", never),
+            patch.object(diagnostics, "SYSTEM_HEALTH_TIMEOUT", 0.01),
+        ):
+            text = _text(await get_system_health(hass, {}))
+
+        assert text.startswith("System health did not answer within")
+
     async def test_says_so_when_the_component_is_not_loaded(self, hass: HomeAssistant):
         text = _text(await get_system_health(hass, {}))
 
@@ -128,12 +221,8 @@ class TestSystemHealth:
 
 class TestListBackups:
     @pytest.fixture
-    async def manager(self, hass: HomeAssistant):
-        from homeassistant.components.backup.const import DATA_MANAGER
-
-        assert await async_setup_component(hass, "backup", {})
-        await hass.async_block_till_done()
-        return hass.data[DATA_MANAGER]
+    def manager(self, backup_manager):
+        return backup_manager
 
     def _backup(self, backup_id: str, date: str, **overrides):
         from homeassistant.components.backup import AddonInfo, Folder
@@ -178,7 +267,7 @@ class TestListBackups:
             "new": self._backup("new", "2026-03-01T00:00:00+00:00"),
             "mid": self._backup("mid", "2026-02-01T00:00:00+00:00"),
         }
-        errors = {"cloud.cloud": RuntimeError("not signed in")}
+        errors = {"cloud.cloud": RuntimeError("GET https://user:pw@nas.local/list: not signed in")}
 
         with patch.object(
             type(manager), "async_get_backups", AsyncMock(return_value=(backups, errors))
@@ -187,7 +276,9 @@ class TestListBackups:
 
         assert [backup["backup_id"] for backup in result["backups"]] == ["new", "mid"]
         assert result["total"] == 3
-        assert result["location_errors"] == {"cloud.cloud": "not signed in"}
+        (error,) = result["location_errors"].values()
+        assert "pw@" not in error
+        assert error.endswith("nas.local/list: not signed in")
         assert result["backups"][0] == {
             "backup_id": "new",
             "name": "Backup new",
@@ -200,6 +291,27 @@ class TestListBackups:
             "locations": {"backup.local": {"size": 1234, "protected": True}},
             "failed_locations": ["cloud.cloud"],
         }
+
+    async def test_backups_are_ordered_by_time_not_by_how_the_date_is_written(self, hass, manager):
+        backups = {
+            # 01:00+02:00 is 23:00 UTC the day before, so it is the older of the two.
+            "offset": self._backup("offset", "2026-03-02T01:00:00+02:00"),
+            "utc": self._backup("utc", "2026-03-01T23:30:00+00:00"),
+            "naive": self._backup("naive", "2020-01-01T00:00:00"),
+            "broken": self._backup("broken", "not a date"),
+        }
+
+        with patch.object(
+            type(manager), "async_get_backups", AsyncMock(return_value=(backups, {}))
+        ):
+            result = _json(await list_backups(hass, {}))
+
+        assert [backup["backup_id"] for backup in result["backups"]] == [
+            "utc",
+            "offset",
+            "naive",
+            "broken",
+        ]
 
     @pytest.mark.parametrize("limit", [0, 201, "5", True])
     async def test_an_invalid_limit_is_refused(self, hass, manager, limit):

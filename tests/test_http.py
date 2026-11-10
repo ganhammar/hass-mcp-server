@@ -34,6 +34,7 @@ from custom_components.mcp_server_http_transport.http import (
     _get_issuer,
     _get_protected_resource_metadata,
     mask_secrets,
+    mask_tool_arguments,
     mcp_path_is_contested,
     register_mcp_views,
     serves_mcp_path,
@@ -372,7 +373,7 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert body["jsonrpc"] == "2.0"
         assert "tools" in body["result"]
-        assert len(body["result"]["tools"]) == 95
+        assert len(body["result"]["tools"]) == 100
         tool_names = [t["name"] for t in body["result"]["tools"]]
         assert "get_state" in tool_names
         assert "call_service" in tool_names
@@ -1607,6 +1608,33 @@ class TestFailedLoginCounting:
         assert response.status == 401
         assert json.loads(response.body)["error"] == "invalid_token"
         process_wrong_login.assert_awaited_once()
+
+
+class TestMaskToolArguments:
+    """A config flow step's input is audited by key only."""
+
+    def test_every_config_flow_input_value_is_masked(self):
+        arguments = {"flow_id": "abc", "user_input": {"url": "https://x/?t=1", "verify_ssl": True}}
+
+        assert mask_tool_arguments("continue_config_flow", arguments) == {
+            "flow_id": "abc",
+            "user_input": {"url": SECRET_MASK, "verify_ssl": SECRET_MASK},
+        }
+        assert arguments["user_input"]["url"] == "https://x/?t=1"
+
+    def test_other_tools_keep_values_that_are_not_secret_named(self):
+        arguments = {"user_input": {"url": "https://x", "password": "p"}}
+
+        assert mask_tool_arguments("call_service", arguments) == {
+            "user_input": {"url": "https://x", "password": SECRET_MASK}
+        }
+
+    @pytest.mark.parametrize("arguments", [None, [], {"user_input": "text"}, {"flow_id": "abc"}])
+    def test_malformed_arguments_pass_through(self, arguments):
+        assert mask_tool_arguments("continue_config_flow", arguments) == arguments
+
+    def test_unhashable_tool_name_is_tolerated(self):
+        assert mask_tool_arguments(["x"], {"a": 1}) == {"a": 1}
 
 
 class TestMaskSecrets:

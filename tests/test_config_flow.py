@@ -20,6 +20,7 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_APPDAEMON_FILE_ACCESS,
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
+    CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
@@ -266,6 +267,28 @@ class TestMCPServerConfigFlow:
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
         assert result["data"][CONF_TEMPLATE_RENDERING] is True
 
+    async def test_user_flow_form_has_integration_management_default_off(self):
+        """Test user flow form offers integration management, off by default."""
+        flow = MCPServerConfigFlow()
+        flow.hass = Mock()
+
+        result = await flow.async_step_user(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_INTEGRATION_MANAGEMENT].default() is False
+
+    async def test_user_flow_persists_integration_management(self):
+        """Test the integration management choice is stored on the created entry."""
+        flow = MCPServerConfigFlow()
+        flow.hass = Mock()
+
+        result = await flow.async_step_user(
+            user_input={CONF_NATIVE_AUTH: True, CONF_INTEGRATION_MANAGEMENT: True}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_INTEGRATION_MANAGEMENT] is True
+
     async def test_version_is_set(self):
         """Test config flow version is set."""
         flow = MCPServerConfigFlow()
@@ -430,6 +453,29 @@ class TestMCPServerOptionsFlow:
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
         call_kwargs = flow.hass.config_entries.async_update_entry.call_args
         assert call_kwargs[1]["data"][CONF_TEMPLATE_RENDERING] is True
+
+    @pytest.mark.parametrize("stored", [None, True])
+    async def test_init_step_shows_current_integration_management_value(self, stored):
+        """Test init step reflects the stored integration management value, off if unset."""
+        flow = self._create_flow(
+            data={} if stored is None else {CONF_INTEGRATION_MANAGEMENT: stored}
+        )
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_INTEGRATION_MANAGEMENT].default() is bool(stored)
+
+    async def test_init_step_persists_integration_management(self):
+        """Test init step merges integration management into entry data."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_INTEGRATION_MANAGEMENT: True}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_INTEGRATION_MANAGEMENT] is True
 
     async def test_init_step_defaults_appdaemon_root(self):
         """Existing entries without the new option retain the legacy root."""

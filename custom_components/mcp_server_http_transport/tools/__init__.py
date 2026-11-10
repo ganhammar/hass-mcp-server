@@ -166,6 +166,7 @@ from . import (  # noqa: E402
     helpers,  # noqa: F401
     icons,  # noqa: F401
     images,  # noqa: F401
+    integrations,  # noqa: F401
     knx,  # noqa: F401
     labels,  # noqa: F401
     statistics,  # noqa: F401

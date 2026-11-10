@@ -36,19 +36,29 @@ from homeassistant.components.recorder.statistics import (
     list_statistic_ids,
     validate_statistics,
 )
+from homeassistant.config_entries import ConfigFlow
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.category_registry import CategoryEntry, CategoryRegistry
+from homeassistant.helpers.data_entry_flow import FlowManagerResourceView
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.entity_registry import EntityRegistry, RegistryEntry
 from homeassistant.helpers.json import json_encoder_default
 from homeassistant.helpers.label_registry import LabelEntry, LabelRegistry
 from homeassistant.helpers.recorder import DATA_INSTANCE
 from homeassistant.loader import Integration, async_get_integration
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    MockModule,
+    mock_config_flow,
+    mock_integration,
+    mock_platform,
+)
 
 from custom_components.mcp_server_http_transport.const import MCP_PATH
 from custom_components.mcp_server_http_transport.tools.labels import THEME_COLORS
@@ -664,3 +674,63 @@ class TestProcessSuccessLoginContract:
     def test_is_a_plain_function_taking_only_the_request(self):
         assert not inspect.iscoroutinefunction(process_success_login)
         assert _params(process_success_login) == ["request"]
+
+
+class TestFlowResultSerializationContract:
+    """tools/integrations.py serializes a step's schema through core's flow view.
+
+    ``_prepare_result_json`` is private, but it is the only place that knows
+    which library turns a voluptuous schema into the field list on a given Home
+    Assistant version: voluptuous_serialize up to 2026.4, probatio after. If it
+    is renamed or stops returning ``data_schema`` as a list, serialize the schema
+    in the tool the way the view then does. test_e2e.py drives the same call
+    through a real flow on every version in the matrix.
+    """
+
+    def test_view_is_built_from_a_flow_manager_alone(self):
+        assert _params(FlowManagerResourceView.__init__) == ["self", "flow_mgr"]
+
+    def test_prepare_result_json_takes_only_the_result(self):
+        assert _params(FlowManagerResourceView._prepare_result_json) == ["self", "result"]
+
+    def test_schema_becomes_a_field_list_and_none_an_empty_one(self):
+        view = FlowManagerResourceView(Mock())
+        result = {"type": "form", "flow_id": "f", "handler": "demo", "step_id": "user"}
+
+        fields = view._prepare_result_json(
+            {**result, "data_schema": vol.Schema({vol.Required("host"): str})}
+        )["data_schema"]
+
+        assert fields == [{"name": "host", "required": True, "type": "string"}]
+        assert view._prepare_result_json({**result, "data_schema": None})["data_schema"] == []
+
+
+class TestFlowProgressContract:
+    """continue_config_flow reads a flow's current step to vet a menu answer.
+
+    ``async_get`` and ``async_progress`` return a partial result without the
+    step's type or menu options, so the tool reads ``cur_step`` off the flow
+    object in the manager's private ``_progress`` mapping. The lookup is guarded
+    and skips the check when it finds nothing, which means a rename here would
+    silently bring back the behavior it prevents: Home Assistant dropping a flow
+    over a mistyped menu option.
+    """
+
+    async def test_progress_maps_flow_id_to_a_flow_carrying_its_current_step(
+        self, hass: HomeAssistant
+    ):
+        class _MenuFlow(ConfigFlow):
+            async def async_step_user(self, user_input=None):
+                return self.async_show_menu(step_id="user", menu_options=["a", "b"])
+
+        mock_integration(hass, MockModule("mcp_contract"))
+        mock_platform(hass, "mcp_contract.config_flow", None)
+        with mock_config_flow("mcp_contract", _MenuFlow):
+            result = await hass.config_entries.flow.async_init(
+                "mcp_contract", context={"source": "user"}
+            )
+
+            step = hass.config_entries.flow._progress[result["flow_id"]].cur_step
+
+        assert step["type"] == FlowResultType.MENU
+        assert list(step["menu_options"]) == ["a", "b"]

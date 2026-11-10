@@ -60,6 +60,12 @@ You can change this setting later via Settings > Devices & Services > MCP Server
 
 `render_template` is off by default. A template can read every state, attribute, device and area on the instance in one call, and can call functions such as `states`, `state_attr`, `device_attr` and `integration_entities`, which is why Home Assistant limits its own template developer tool to administrators. Turn on **Enable template rendering** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that access.
 
+### Integration management
+
+`start_config_flow`, `continue_config_flow`, `abort_config_flow`, `reload_integration` and `delete_integration` are off by default. They run the same config flows as the "Add integration" dialog and act on existing config entries, so a client can add an integration or remove one along with its devices and entities. Turn on **Enable integration management** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that.
+
+Two limits are worth knowing. Whatever a flow asks for is typed by the model, so a password or API key entered this way passes through the conversation and the client's transcript; the audit log records only the field names. And a flow that needs a browser, such as an OAuth sign-in, cannot be finished over MCP: the tool reports the step and its URL so you can complete it yourself or abort the flow.
+
 ### Server name
 
 By default, every instance of this integration reports the name `home-assistant-mcp-server` to MCP clients (`serverInfo.name`). That only matters when one client connects to more than one Home Assistant instance: some clients derive the namespace they show for a server's tools from that name, so two servers reporting the same name become one and only one instance stays reachable. VS Code, for example, keeps the first 13 characters of the name before using it.
@@ -315,6 +321,11 @@ been copied and source identity/metadata checked for changes during copying.
 | `list_services` | List available services, optionally filtered by domain |
 | `describe_service` | Get a service's full parameter schema: fields, selectors, examples, and targets |
 | `list_integrations` | List installed integrations and their status |
+| `start_config_flow` | Start an integration's config flow and get its first step: form schema, menu, abort reason or created entry (requires "Enable integration management") |
+| `continue_config_flow` | Submit a config flow step and get the next one, validation errors, or the created entry (requires "Enable integration management") |
+| `abort_config_flow` | Abort a config flow in progress (requires "Enable integration management") |
+| `reload_integration` | Reload a config entry by ID (requires "Enable integration management") |
+| `delete_integration` | Remove a config entry with its devices and entities; requires `confirm=true` (requires "Enable integration management") |
 
 **KNX**
 

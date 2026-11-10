@@ -13,6 +13,7 @@ from .const import (
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_CONFIG_FILE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
+    CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
@@ -34,6 +35,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_CAMERA_IMAGE_ACCESS, default=False): bool,
         vol.Optional(CONF_IMAGE_FILE_ACCESS, default=False): bool,
         vol.Optional(CONF_TEMPLATE_RENDERING, default=False): bool,
+        vol.Optional(CONF_INTEGRATION_MANAGEMENT, default=False): bool,
         vol.Optional(CONF_APPDAEMON_FILE_ACCESS, default=False): bool,
         vol.Optional(CONF_APPDAEMON_APPS_ROOT, default=DEFAULT_APPDAEMON_APPS_ROOT): str,
         vol.Optional(CONF_SERVER_NAME, default=DEFAULT_SERVER_NAME): str,
@@ -121,6 +123,9 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
         current_camera_image_access = self.config_entry.data.get(CONF_CAMERA_IMAGE_ACCESS, False)
         current_image_file_access = self.config_entry.data.get(CONF_IMAGE_FILE_ACCESS, False)
         current_template_rendering = self.config_entry.data.get(CONF_TEMPLATE_RENDERING, False)
+        current_integration_management = self.config_entry.data.get(
+            CONF_INTEGRATION_MANAGEMENT, False
+        )
         current_appdaemon_file_access = self.config_entry.data.get(
             CONF_APPDAEMON_FILE_ACCESS, False
         )
@@ -177,6 +182,9 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
         )
         current_image_file_access = values.get(CONF_IMAGE_FILE_ACCESS, current_image_file_access)
         current_template_rendering = values.get(CONF_TEMPLATE_RENDERING, current_template_rendering)
+        current_integration_management = values.get(
+            CONF_INTEGRATION_MANAGEMENT, current_integration_management
+        )
         current_appdaemon_file_access = values.get(
             CONF_APPDAEMON_FILE_ACCESS, current_appdaemon_file_access
         )
@@ -197,6 +205,9 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                     ): bool,
                     vol.Optional(CONF_IMAGE_FILE_ACCESS, default=current_image_file_access): bool,
                     vol.Optional(CONF_TEMPLATE_RENDERING, default=current_template_rendering): bool,
+                    vol.Optional(
+                        CONF_INTEGRATION_MANAGEMENT, default=current_integration_management
+                    ): bool,
                     vol.Optional(
                         CONF_APPDAEMON_FILE_ACCESS, default=current_appdaemon_file_access
                     ): bool,

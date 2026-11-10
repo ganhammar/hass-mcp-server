@@ -10,6 +10,7 @@ Every contract below is either unavoidable or cheaper than its public
 alternative; the docstrings say which, and what to do when one breaks.
 """
 
+import ast
 import dataclasses
 import inspect
 from datetime import UTC, datetime
@@ -20,6 +21,7 @@ import attr
 import pytest
 import voluptuous as vol
 from aiohttp import web
+from homeassistant import components as ha_components
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.components.calendar.const import DATA_COMPONENT, LIST_EVENT_FIELDS
 from homeassistant.components.http import HomeAssistantView
@@ -65,14 +67,29 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.mcp_server_http_transport.const import MCP_PATH
 from custom_components.mcp_server_http_transport.tools.labels import THEME_COLORS
 
-# Core's built-in MCP server is what claims /api/mcp (#81). Importing it needs
-# aiohttp_sse, which only its own manifest pulls in, and the streamable endpoint
-# it collides on only exists from Home Assistant 2025.11; both absences raise
-# ImportError here and skip the contract rather than failing it.
-try:
-    from homeassistant.components.mcp_server.http import STREAMABLE_API
-except ImportError:
-    STREAMABLE_API = None
+
+def _core_streamable_api() -> str | None:
+    """Return the path core's built-in MCP server serves its streamable endpoint on.
+
+    Core's MCP server is what claims /api/mcp (#81). Importing it takes its own
+    requirements and those of the conversation integration, which no test
+    environment installs, so the constant is read from its source instead. The
+    endpoint exists from Home Assistant 2025.11.
+    """
+    source = Path(ha_components.__file__).parent / "mcp_server" / "http.py"
+    if not source.exists():
+        return None
+    for node in ast.parse(source.read_text()).body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(getattr(target, "id", None) == "STREAMABLE_API" for target in node.targets)
+            and isinstance(node.value, ast.Constant)
+        ):
+            return node.value.value
+    return None
+
+
+STREAMABLE_API = _core_streamable_api()
 
 # The KNX contracts below need the integration and its telegram store importable,
 # which takes KNX's own requirements (xknx, knx-frontend, knx-telegram-store) on
@@ -834,7 +851,7 @@ class TestViewRegistrationContracts:
 
     @pytest.mark.skipif(
         STREAMABLE_API is None,
-        reason="core's streamable MCP endpoint is not importable on this install",
+        reason="core's MCP server has no streamable endpoint before Home Assistant 2025.11",
     )
     def test_core_streamable_endpoint_is_the_path_this_integration_serves(self):
         """The conflict this integration works around is core serving MCP_PATH.

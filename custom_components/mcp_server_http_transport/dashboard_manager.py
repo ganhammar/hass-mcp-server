@@ -99,6 +99,48 @@ async def get_dashboard_config(hass: HomeAssistant, url_path: str) -> dict[str, 
     return config if config is not None else {}
 
 
+async def read_storage_dashboards(
+    hass: HomeAssistant,
+) -> tuple[list[tuple[str, str | None, Any]], dict[str, str]]:
+    """Return the stored config of every storage-mode dashboard.
+
+    Each dashboard comes back as (url_path, title, config), with "default" for the
+    Overview dashboard. A dashboard Home Assistant generates on the fly has nothing
+    stored and is left out, and so is a YAML-mode dashboard, whose config is a
+    file. The second value maps the url_path of any dashboard whose config failed
+    to load to the error.
+    """
+    from homeassistant.components.lovelace.const import (
+        LOVELACE_DATA,
+        MODE_STORAGE,
+        ConfigNotFound,
+    )
+
+    data = hass.data.get(LOVELACE_DATA)
+    if data is None:
+        raise ValueError("Lovelace is not loaded")
+
+    found: list[tuple[str, str | None, Any]] = []
+    failed: dict[str, str] = {}
+    for key, dashboard in list(data.dashboards.items()):
+        if getattr(dashboard, "mode", None) != MODE_STORAGE:
+            continue
+        url_path = "default" if key is None else key
+        try:
+            config = await dashboard.async_load(force=False)
+        except ConfigNotFound:
+            continue
+        except Exception as exc:  # noqa: BLE001 - one dashboard must not end the read
+            failed[url_path] = str(exc) or type(exc).__name__
+            continue
+        metadata = dashboard.config if isinstance(dashboard.config, dict) else {}
+        title = metadata.get("title")
+        if not title and isinstance(config, dict):
+            title = config.get("title")
+        found.append((url_path, title if isinstance(title, str) else None, config))
+    return found, failed
+
+
 async def save_dashboard_config(hass: HomeAssistant, url_path: str, config: dict[str, Any]) -> None:
     """Save (replace) the full dashboard configuration."""
     from homeassistant.components.lovelace.const import LOVELACE_DATA

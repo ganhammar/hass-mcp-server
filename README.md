@@ -210,6 +210,7 @@ Update hass-oidc-server to 1.5.0 or newer and restart Home Assistant; the repair
 
 | Tool | Description |
 |------|-------------|
+| `search_config` | Find every automation, script, scene and storage-mode dashboard whose config mentions some text (an entity ID, service, device, area, label or helper), with a JSON Pointer and snippet per match; narrow with `types`, cap with `limit` (default 20 items) and `matches_per_item` (default 5) |
 | `list_automations` | List all automations with full configuration |
 | `get_automation_config` | Get full configuration of a single automation |
 | `create_automation` | Create a new automation, optionally in a category and with an icon |

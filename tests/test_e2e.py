@@ -939,6 +939,35 @@ async def test_a_second_entry_of_the_integration_cannot_be_set_up(
     assert hass.config_entries.async_entries(DOMAIN) == [loaded_entry]
 
 
+async def test_entries_from_before_the_single_entry_rule_are_reported_and_recover(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """A second entry left over from an older version shares the first one's options."""
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "multiple_entries") is None
+    second = MockConfigEntry(domain=DOMAIN, data={CONF_NATIVE_AUTH: True, CONF_READ_ONLY: True})
+    second.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(second.entry_id)
+    await hass.async_block_till_done()
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "multiple_entries") is not None
+    assert hass.data[DOMAIN]["read_only"] is True
+
+    # Removing the extra entry puts the remaining one's options back in effect.
+    await hass.config_entries.async_remove(second.entry_id)
+    await hass.async_block_till_done()
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "multiple_entries") is None
+    assert loaded_entry.state is ConfigEntryState.LOADED
+    assert hass.data[DOMAIN]["read_only"] is False
+    client = await hass_client()
+    resp = await client.post(
+        MCP_HTTP_PATH, json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": 1}
+    )
+    assert "get_state" in {tool["name"] for tool in (await resp.json())["result"]["tools"]}
+
+
 async def test_diagnostics_are_read_over_http(
     loaded_entry: MockConfigEntry,
     hass: HomeAssistant,

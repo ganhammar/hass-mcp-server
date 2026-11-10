@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_SERVER_NAME,
     DOMAIN,
     ISSUE_ENDPOINT_CONFLICT,
+    ISSUE_MULTIPLE_ENTRIES,
     MCP_HTTP_PATH,
     MCP_PATH,
 )
@@ -95,6 +96,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _async_report_endpoint_conflict(hass)
 
     entry.async_on_unload(async_at_started(hass, _async_report_endpoint_conflict))
+    entry.async_on_unload(async_at_started(hass, _async_report_multiple_entries))
     entry.async_on_unload(hass.bus.async_listen(EVENT_COMPONENT_LOADED, _async_component_loaded))
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
@@ -134,6 +136,34 @@ def _async_report_endpoint_conflict(hass: HomeAssistant) -> None:
     )
 
 
+@callback
+def _async_report_multiple_entries(hass: HomeAssistant) -> None:
+    """Raise a repair issue while more than one config entry of this integration exists.
+
+    Home Assistant allows no second entry to be set up, but leaves alone the ones
+    made before the manifest said so. Every entry writes its options to the same
+    place, so only the one set up last is in effect.
+    """
+    if len(hass.config_entries.async_entries(DOMAIN)) < 2:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_MULTIPLE_ENTRIES)
+        return
+
+    if ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_MULTIPLE_ENTRIES) is None:
+        _LOGGER.warning(
+            "More than one MCP Server config entry is set up. Only the options of the one "
+            "set up last apply, read-only mode and disabled tools included: remove the others"
+        )
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_MULTIPLE_ENTRIES,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_MULTIPLE_ENTRIES,
+    )
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload integration when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
@@ -148,3 +178,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """
     hass.data[DOMAIN].clear()
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Put a remaining entry's options back in effect once another is removed.
+
+    Unloading the removed entry cleared the options every entry shares, which
+    leaves a remaining one serving no tools until it is set up again.
+    """
+    for other in hass.config_entries.async_entries(DOMAIN):
+        if other.entry_id != entry.entry_id and not other.disabled_by:
+            hass.config_entries.async_schedule_reload(other.entry_id)

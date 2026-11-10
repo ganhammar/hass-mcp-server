@@ -1,6 +1,6 @@
 # MCP Server for Home Assistant
 
-Let an AI assistant such as Claude work with your Home Assistant: read what is going on, explain why something happened, and change automations, dashboards and devices for you. It is a custom integration that speaks the Model Context Protocol over HTTP, so it works from anywhere your Home Assistant is reachable, including Claude on the web.
+Let an AI assistant such as Claude work with your Home Assistant: read what is going on, explain why something happened, and change automations, dashboards and devices for you. It is a custom integration that gives the assistant a set of tools for your Home Assistant, and it works wherever Home Assistant is reachable, including Claude on the web.
 
 Things you can ask once it is connected:
 
@@ -12,23 +12,20 @@ Things you can ask once it is connected:
 
 ## Why this one
 
-- **Works remotely, not only at home.** It uses MCP's streamable HTTP transport with OAuth 2.0 and dynamic client registration, which is what browser-based clients such as Claude require. Long-lived access tokens work too, for local agents and custom clients.
-- **You decide how far it reaches.** Read-only mode, a switch for every single tool, and separate opt-ins for the groups that reach furthest: config files, camera images, templates and integration management. Only administrators can connect unless you say otherwise.
-- **You can see what it did.** Every tool call that changes something is logged and fires an event you can build a notification on.
-- **It covers the whole instance.** 117 tools across entities, automations, scripts and scenes, dashboards, helpers, areas, devices and labels, integrations, statistics, traces and diagnostics, plus resources and ready-made prompts.
-- **It is tested against Home Assistant itself.** The full test suite runs on every supported version, from 2025.6 to 2026.10, on each change.
+- **It administers the whole instance**, not only the entities exposed to Assist as Home Assistant's built-in MCP Server does: 117 tools for automations, dashboards, the registries, integrations, traces and diagnostics. See [how the two differ](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/faq.md#how-is-this-different-from-home-assistants-built-in-mcp-server).
+- **Everyone signs in as themselves.** Clients authenticate through Home Assistant as a real user, with OAuth or a long-lived access token, so there is no shared secret URL and every change is logged with who made it.
+- **You decide how far it reaches.** Read-only mode, a switch for every tool, and opt-ins for the groups that reach furthest. A tool that is off is not even shown to the client.
+- **It is tested on each change** against Home Assistant 2025.6, the oldest supported version, and three newer releases up to 2026.10.
 
 ## Quick start
 
-1. **Install.** In HACS, search for "MCP Server", download it and restart Home Assistant. To install by hand, copy `custom_components/mcp_server_http_transport` into your `custom_components` folder instead.
-2. **Add the integration.** Go to Settings > Devices & Services > Add Integration and search for "MCP Server". For Claude on the web, also install [hass-oidc-server](https://github.com/ganhammar/hass-oidc-server), which provides the OAuth sign-in.
-3. **Connect your client.** In Claude, open Settings > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp`. Claude registers itself and sends you to Home Assistant to approve it.
+**You need:** Home Assistant 2025.6 or newer, HACS, an administrator account and, for Claude on the web, an HTTPS address for Home Assistant that can be reached from the internet.
 
-[Connecting a client](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/connecting.md) has the full steps, including long-lived access tokens.
+1. **Install.** In HACS, download "MCP Server" and "OIDC Provider", then restart Home Assistant. The OIDC Provider handles the sign-in for Claude; skip it if you will only use long-lived access tokens.
+2. **Add the integrations.** Under Settings > Devices & Services > Add Integration, add "OIDC Provider" first, then "MCP Server (HTTP Transport)".
+3. **Connect Claude.** In Claude, open Settings > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`. Claude sends you to Home Assistant to sign in and approve the connection.
 
-### Another integration also serves /api/mcp
-
-Home Assistant's built-in Model Context Protocol Server uses the same `/api/mcp` path. If you have both, point your client at `/api/mcp_http`, which only this integration serves. [Troubleshooting](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/troubleshooting.md#another-integration-also-serves-apimcp) explains how to tell and what to do.
+Start in read-only mode if you want to see what it does before letting it change anything. [Connecting a client](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/connecting.md) covers other clients and long-lived access tokens.
 
 ## What it can do
 
@@ -41,33 +38,36 @@ Home Assistant's built-in Model Context Protocol Server uses the same `/api/mcp`
 | Helpers | Create and manage toggles, counters, timers, schedules and the other helper types |
 | Areas, floors, devices and labels | Organize the instance: create areas and floors, move and rename devices, label things |
 | Integrations (opt-in) | Add an integration, change its options, reload, disable or remove it |
-| Diagnostics | System status, repair issues, system health, backups, the error log, config validation |
-| Config files (opt-in) | Read and edit YAML files, with a backup before every change |
+| Diagnostics | System status, repair issues, system health, the list of backups, the error log, config validation |
+| Config files (opt-in) | Read and edit YAML files, with a snapshot of the top-level files before every change |
 | Cameras and images (opt-in) | Capture a camera frame or read a saved image for the assistant to look at |
 | KNX | Manage KNX entities and read recent telegrams, when KNX is set up |
 
-The [full reference](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/tools.md) lists every tool, resource and prompt.
+The [full reference](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/tools.md) lists every tool, resource and prompt. A few tools rely on Home Assistant internals and can break on an update; they are marked there.
 
 ## Staying in control
 
-An assistant with write access to your home deserves limits, so the limits are part of the product:
-
 - **Read-only mode** offers only the tools that read. Nothing can be changed.
 - **Disabled tools** switches off individual tools, such as `restart_ha`.
-- **Opt-in groups** stay off until you enable them, and a tool that is off is not even shown to the client.
+- **Opt-in groups** stay off until you enable them: config files, cameras and images, templates, AppDaemon apps and integration management.
 - **The audit log and event** record who called what, with secrets masked.
+- **Only administrators can connect**, unless you decide otherwise.
 
 See [Configuration](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/configuration.md) and [Security and auditing](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/security.md).
 
 ## Documentation
 
 - [Connecting a client](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/connecting.md): Claude on the web, long-lived access tokens
-- [Configuration](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/configuration.md): every option, limiting the tools, integration management
+- [Configuration](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/configuration.md): every option, limiting the tools, the opt-in groups
 - [Security and auditing](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/security.md): who may connect, the audit log and event
 - [Tools, resources and prompts](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/tools.md): the full reference
-- [FAQ](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/faq.md): worked examples of common tasks
-- [Troubleshooting](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/troubleshooting.md): path conflicts, IP bans, token audience
+- [FAQ](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/faq.md): what it is, what it can do, and staying safe
+- [Troubleshooting](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/troubleshooting.md): setup problems, path conflicts, IP bans
+
+**Updating and removing.** HACS shows updates as they are released. To remove it, delete the integration under Settings > Devices & Services, remove it in HACS, restart, and remove the connector in your client.
+
+**Help.** Questions and bugs go to the [issue tracker](https://github.com/ganhammar/hass-mcp-server/issues).
 
 ## License
 
-MIT
+[MIT](https://github.com/ganhammar/hass-mcp-server/blob/main/LICENSE)

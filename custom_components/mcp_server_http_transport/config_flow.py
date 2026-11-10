@@ -109,7 +109,7 @@ class MCPServerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
             description_placeholders={
-                "oidc_provider_url": "https://github.com/ganhammar/hass-oidc-provider"
+                "oidc_provider_url": "https://github.com/ganhammar/hass-oidc-server"
             },
         )
 

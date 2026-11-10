@@ -6,11 +6,11 @@ Everything the server offers a client. Tools marked opt-in, and the KNX tools wh
 
 You do not call these yourself: the assistant picks them from what you ask. The list is here so you can see what it is able to do, and which tools to switch off if you want it to do less.
 
-**Experimental tools.** `create_dashboard`, `update_dashboard`, `delete_dashboard` and the helper tools other than `list_helpers` use Home Assistant internals that have no stable API, so a Home Assistant update can break them. The helper tools only manage helpers created in the UI, not ones defined in YAML.
+**Experimental tools.** `create_dashboard`, `update_dashboard`, `delete_dashboard`, the helper tools other than `list_helpers`, and the three KNX entity tools use Home Assistant internals that have no stable API, so a Home Assistant update can break them. The helper tools only manage helpers created in the UI, not ones defined in YAML.
 
 ## Tools
 
-**Entities & State**
+### Entities and state
 
 | Tool | Description |
 |------|-------------|
@@ -38,7 +38,7 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `clear_statistics` | Permanently delete a statistic's history so it can start clean (irreversible; requires `confirm=true`) |
 | `render_template` | Evaluate a Jinja2 template (requires "Enable template rendering") |
 
-**Automations, Scenes & Scripts**
+### Automations, scenes and scripts
 
 | Tool | Description |
 |------|-------------|
@@ -61,19 +61,9 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `list_traces` | List recent execution traces for an automation/script (or a whole domain), newest first |
 | `get_trace` | Get the full step-by-step execution trace of one run: which trigger fired, which conditions passed or failed, and the variables at each step (`summary=true` for an outline of large traces) |
 
-> **Automation update options:** `update_automation` accepts an `automation_id` and a
-> complete replacement `config` object. Its default behavior remains unchanged:
-> save and reload automations, without a full configuration check or backup.
-> `dry_run=true` previews added, changed and removed top-level keys without
-> modifying anything. It returns an original configuration hash that may be sent
-> as `expected_hash` on the subsequent write to reject stale previews.
-> `reload=false` saves without calling `automation.reload`.
-> `validate=true` enables a full HA configuration check before reloading.
-> Only the original `automations.yaml` is temporarily backed up for that check;
-> a failed validation restores it without reloading. The temporary copy is removed
-> on success. Validation can be slow on large Home Assistant installations.
+`update_automation` can preview a change (`dry_run`), refuse to overwrite a newer version (`expected_hash`), and check the whole configuration before reloading (`validate`), restoring the file if the check fails.
 
-**Helpers**
+### Helpers
 
 | Tool | Description |
 |------|-------------|
@@ -83,14 +73,14 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `update_helper` | Update an existing UI-managed helper by entity ID, optionally changing its icon (experimental) |
 | `delete_helper` | Delete a UI-managed helper by entity ID (experimental) |
 
-**Categories**
+### Categories
 
 | Tool | Description |
 |------|-------------|
 | `list_categories` | List the categories for automations, scripts, scenes or helpers, with the entities in each |
 | `set_category` | Put an automation, script, scene or helper in a category (created by name if new), or take it out of one |
 
-**Labels**
+### Labels
 
 | Tool | Description |
 |------|-------------|
@@ -99,13 +89,13 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `update_label` | Rename a label or change its color, icon or description; an empty string clears an optional field |
 | `delete_label` | Delete a label and remove it from every entity, device and area that carries it |
 
-**Icons**
+### Icons
 
 | Tool | Description |
 |------|-------------|
 | `set_icon` | Set or remove the icon override of any registered entity, such as an automation, without changing its config |
 
-**Config Files**
+### Config files (opt-in)
 
 | Tool | Description |
 |------|-------------|
@@ -119,7 +109,7 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `restore_config_backup` | Restore files from the latest or a specific backup; creates a pre-restore snapshot of the current state and runs config validation after restoring |
 | `cleanup_config_backups` | Delete backup snapshots older than N days (default 30); keeps the folder from growing indefinitely |
 
-**AppDaemon Files (opt-in)**
+### AppDaemon files (opt-in)
 
 | Tool | Description |
 |------|-------------|
@@ -132,13 +122,9 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `cleanup_appdaemon_backups` | Delete AppDaemon snapshots older than N days (default 30) |
 | `restore_appdaemon_backup` | Restore a named AppDaemon snapshot with rollback protection |
 
-AppDaemon file reads and save payloads are limited to 1 MB. Rollback snapshots
-use a separate streaming-copy path with bounded memory and no per-file payload
-limit, so an existing large history/data file does not make an unrelated save
-or delete unusable. A snapshot is published only after every regular file has
-been copied and source identity/metadata checked for changes during copying.
+Files up to 1 MB can be read or saved. Snapshots copy every file, whatever its size.
 
-**Dashboards**
+### Dashboards
 
 | Tool | Description |
 |------|-------------|
@@ -151,9 +137,9 @@ been copied and source identity/metadata checked for changes during copying.
 | `update_dashboard` | Update dashboard metadata (experimental) |
 | `delete_dashboard` | Delete a dashboard and its config (experimental) |
 
-A real dashboard can be over 100 KB, too much to read and write back for a one-card change. `get_dashboard_config` with `summary=true` returns an outline with a JSON Pointer per view and card. Pass a pointer as `path` to read one card, and to `patch_dashboard_config` to change it with [RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902) operations. A leading `test` operation makes the patch fail, rather than edit the wrong card, if the dashboard changed since it was read.
+A real dashboard can be over 100 KB, too much to read and write back for a one-card change. `get_dashboard_config` with `summary=true` returns an outline with a JSON Pointer per view and card. Pass a pointer as `path` to read one card, and to `patch_dashboard_config` to change it with [RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902) operations. Operations apply in order and all or nothing, so a failing one leaves the dashboard untouched. A leading `test` operation makes the patch fail, rather than edit the wrong card, if the dashboard changed since it was read.
 
-**System & Infrastructure**
+### System and diagnostics
 
 | Tool | Description |
 |------|-------------|
@@ -166,6 +152,14 @@ A real dashboard can be over 100 KB, too much to read and write back for a one-c
 | `list_repairs` | List the repair issues Home Assistant raises, with severity, title and description |
 | `get_system_health` | System health report: what each integration says about itself (versions, reachability, database size) |
 | `list_backups` | List backups, newest first, with where each is stored, and when automatic backups last ran and run next |
+| `list_services` | List available services, optionally filtered by domain |
+| `describe_service` | Get a service's full parameter schema: fields, selectors, examples, and targets |
+| `list_integrations` | List installed integrations with their status, whether each is disabled, and whether it has an options or reconfigure flow |
+
+### Areas, floors and devices
+
+| Tool | Description |
+|------|-------------|
 | `list_areas` | List all areas |
 | `list_devices` | List devices with their area, labels and whether they are disabled, optionally filtered by area |
 | `update_device` | Rename a device, move it to an area, set its labels, or disable or enable it |
@@ -177,9 +171,11 @@ A real dashboard can be over 100 KB, too much to read and write back for a one-c
 | `create_floor` | Create a floor with an optional level, icon and aliases |
 | `update_floor` | Rename a floor or change its level, icon or aliases; `clear_level` removes the level |
 | `delete_floor` | Delete a floor, leaving its areas without one |
-| `list_services` | List available services, optionally filtered by domain |
-| `describe_service` | Get a service's full parameter schema: fields, selectors, examples, and targets |
-| `list_integrations` | List installed integrations with their status, whether each is disabled, and whether it has an options or reconfigure flow |
+
+### Integrations (opt-in)
+
+| Tool | Description |
+|------|-------------|
 | `start_config_flow` | Start an integration's config flow and get its first step: form schema, menu, abort reason or created entry (requires "Enable integration management") |
 | `continue_config_flow` | Submit a config flow step and get the next one, validation errors, or the created entry (requires "Enable integration management") |
 | `abort_config_flow` | Abort a config flow in progress (requires "Enable integration management") |
@@ -189,20 +185,20 @@ A real dashboard can be over 100 KB, too much to read and write back for a one-c
 | `start_reconfigure_flow` | Start a config entry's reconfigure flow to change what was entered at setup (requires "Enable integration management") |
 | `set_integration_enabled` | Disable or enable a config entry, keeping its configuration (requires "Enable integration management") |
 
-**KNX**
+### KNX
 
 | Tool | Description |
 |------|-------------|
 | `knx_recent_telegrams` | Read Home Assistant's KNX group-monitor telegram history: recent bus telegrams with their **source device** and decoded value; regex-filter by group address / name, with a result limit. Retrospective (reads the stored buffer), ideal for finding which KNX device wrote a given group address |
 | `knx_get_base_data` | KNX connection + project info: bus connection status, gateway address, xknx version, loaded ETS project metadata, and UI-creatable platforms |
-| `knx_get_entities` | List KNX group addresses and the entities bound to each (the KNX-specific group-address↔entity binding view); optional regex filter on the group address |
+| `knx_get_entities` | List KNX group addresses and the entities bound to each (the KNX-specific group-address to entity binding view); optional regex filter on the group address |
 | `knx_create_entity` | Create a KNX entity in the KNX UI config (config_store) from `platform` + `data` (experimental) |
 | `knx_update_entity` | Update a UI-managed KNX entity by `entity_id` (experimental) |
 | `knx_delete_entity` | Delete a UI-managed KNX entity by `entity_id` (experimental) |
 
-**Camera & Images**
+### Cameras and images (opt-in)
 
-These tools are disabled by default; enable them per capability via Settings → Devices & Services → MCP Server → Configure. They return images directly to the model for visual analysis.
+These tools are disabled by default; enable them per capability via Settings > Devices & Services > MCP Server > Configure. They return images directly to the model for visual analysis.
 
 | Tool | Description |
 |------|-------------|
@@ -245,4 +241,4 @@ These tools are disabled by default; enable them per capability via Settings →
 
 ## Completions
 
-Autocompletion is supported for `entity_id`, `entity_ids`, `domain`, `service`, `area_id`, `url_path`, `automation_id`, `scene_id`, script `key`, `trigger_type`, `period`, `config_type`, and helper `domain` arguments.
+Clients that support it get autocompletion for entity IDs, domains, services, areas, dashboards, and automation, scene and script IDs.

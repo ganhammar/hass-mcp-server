@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from custom_components.mcp_server_http_transport import tools
 from custom_components.mcp_server_http_transport.prompts import get_prompts
 from custom_components.mcp_server_http_transport.resources import RESOURCE_TEMPLATES, RESOURCES
 from custom_components.mcp_server_http_transport.tools import TOOLS
@@ -63,11 +64,27 @@ class TestToolReference:
 
         assert sorted(documented) == sorted(prompt["name"] for prompt in get_prompts())
 
-    def test_the_tool_count_quoted_elsewhere_is_current(self):
-        for page in (ROOT / "README.md", DOCS / "configuration.md"):
-            counts = re.findall(r"(\d+)(?: of the (\d+))? tools", page.read_text())
-            assert counts, page.name
-            assert {int(total or count) for count, total in counts} == {len(TOOLS)}, page.name
+    def test_the_tool_counts_quoted_elsewhere_are_current(self):
+        """The README gives the total, and the configuration page how many start hidden."""
+        behind_an_option = [
+            name
+            for name, tool in TOOLS.items()
+            if name in tools._OPTION_BY_TOOL
+            or tool["handler"].__module__.rpartition(".")[2] in {*tools._OPTION_BY_MODULE, "knx"}
+        ]
+
+        assert f"{len(TOOLS)} tools" in (ROOT / "README.md").read_text()
+        assert (
+            f"{len(behind_an_option)} of the {len(TOOLS)} tools"
+            in (DOCS / "configuration.md").read_text()
+        )
+
+
+def test_the_repair_for_a_contested_path_links_to_a_section_that_exists():
+    source = (ROOT / "custom_components/mcp_server_http_transport/__init__.py").read_text()
+    path, anchor = re.search(r'blob/main/(docs/[a-z]+\.md)"\s+"#([a-z0-9-]+)"', source).groups()
+
+    assert anchor in _anchors(ROOT / path)
 
 
 @pytest.mark.parametrize("page", PAGES, ids=lambda page: page.name)

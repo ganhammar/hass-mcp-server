@@ -29,6 +29,7 @@ from . import (
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 
@@ -268,7 +269,7 @@ def _text(text: str) -> dict[str, Any]:
 
 
 def _error(action: str, exc: Exception) -> dict[str, Any]:
-    return _text(f"Error {action}: {str(exc)}")
+    return error_result(f"Error {action}: {str(exc)}")
 
 
 @register_tool(
@@ -635,13 +636,13 @@ def _already_detached(domains: list[str]) -> str:
 async def delete_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete a device the way the frontend does, with its integrations' consent."""
     if not hass.data.get(DOMAIN, {}).get("integration_management", False):
-        return _text(
+        return error_result(
             "Deleting a device is part of integration management, which is disabled. Enable "
             "it in the MCP Server integration settings: Settings → Devices & Services → "
             "MCP Server → Configure → Enable integration management."
         )
     if arguments["confirm"] is not True:
-        return _text(
+        return error_result(
             "Deleting a device requires confirm=true. It removes the device together with "
             "its entities."
         )

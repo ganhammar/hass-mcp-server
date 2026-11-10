@@ -41,7 +41,7 @@ from custom_components.mcp_server_http_transport.http import (
     truncate_arguments,
 )
 from custom_components.mcp_server_http_transport.json_utils import dumps
-from custom_components.mcp_server_http_transport.tools import TOOLS, call_tool
+from custom_components.mcp_server_http_transport.tools import TOOLS, call_tool, error_result
 
 # What a validated bearer token resolves to; the view then looks its user up.
 TOKEN = ValidatedToken(sub="user123", auth_method="native")
@@ -77,6 +77,7 @@ async def test_appdaemon_tool_is_callable_through_production_registry():
     hass = Mock()
     hass.data = {"mcp_server_http_transport": {"appdaemon_file_access": False}}
     result = await call_tool(hass, "list_appdaemon_files", {})
+    assert result["isError"] is True
     assert "disabled" in result["content"][0]["text"]
 
 
@@ -1861,6 +1862,42 @@ class TestToolAuditLog:
         assert body["result"]["isError"] is True
         (record,) = self._audit_records(caplog)
         assert "-> error" in record.getMessage()
+
+    async def test_a_failure_the_handler_reports_is_audited_as_error(
+        self, view, audit_hass, caplog
+    ):
+        handler = AsyncMock(return_value=error_result("Error calling service: no such light"))
+
+        with caplog.at_level(logging.DEBUG):
+            body = await self._call(
+                view, "call_service", {"domain": "light", "service": "turn_on"}, handler
+            )
+
+        assert body["result"]["isError"] is True
+        (record,) = self._audit_records(caplog)
+        assert record.levelno == logging.INFO
+        assert "-> error" in record.getMessage()
+        (event,) = self._audit_events(audit_hass)
+        assert event.args[1]["outcome"] == "error"
+        # Only an exception the handler did not catch is logged by the dispatcher.
+        assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+    async def test_a_read_only_failure_stays_at_debug_and_fires_no_event(
+        self, view, audit_hass, caplog
+    ):
+        handler = AsyncMock(return_value=error_result("Entity sun.sun not found"))
+
+        with caplog.at_level(logging.INFO, logger=_HTTP_LOGGER):
+            body = await self._call(view, "get_state", {"entity_id": "sun.sun"}, handler)
+        assert body["result"]["isError"] is True
+        assert self._audit_records(caplog) == []
+
+        with caplog.at_level(logging.DEBUG, logger=_HTTP_LOGGER):
+            await self._call(view, "get_state", {"entity_id": "sun.sun"}, handler)
+        (record,) = self._audit_records(caplog)
+        assert record.levelno == logging.DEBUG
+        assert "-> error" in record.getMessage()
+        assert self._audit_events(audit_hass) == []
 
     async def test_an_invalid_call_is_logged_as_invalid(self, view, audit_hass, caplog):
         with caplog.at_level(logging.INFO, logger=_HTTP_LOGGER):

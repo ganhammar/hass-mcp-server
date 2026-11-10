@@ -67,6 +67,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         config = json.loads(body["result"]["content"][0]["text"])
         assert config["location_name"] == "Home"
         assert config["latitude"] == 59.0
@@ -108,6 +109,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert body["result"]["content"][0]["text"] == "Living Room Light is on"
 
     async def test_post_tools_call_render_template_error(self, view, mock_hass):
@@ -137,6 +139,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error rendering template" in body["result"]["content"][0]["text"]
 
     @pytest.mark.parametrize("data", [{}, {DOMAIN: {}}, {DOMAIN: {"template_rendering": False}}])
@@ -149,6 +152,7 @@ class TestToolsSystem:
             result = await render_template(hass, {"template": "{{ states('light.x') }}"})
 
         template_cls.assert_not_called()
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "disabled" in text
         assert "Enable template rendering" in text
@@ -165,6 +169,7 @@ class TestToolsSystem:
 
         cls.assert_called_once_with("{{ x }}", hass)
         mock_tpl.async_render.assert_called_once_with(variables={"x": 42}, parse_result=False)
+        assert "isError" not in result
         assert result["content"][0]["text"] == "42"
 
     async def test_render_template_description_mentions_opt_in(self):
@@ -219,6 +224,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         history = json.loads(body["result"]["content"][0]["text"])
         assert len(history) == 2
         assert history[0]["state"] == "off"
@@ -257,6 +263,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         history = json.loads(body["result"]["content"][0]["text"])
         assert len(history) == 0
 
@@ -295,6 +302,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error getting history" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_fire_event(self, view, mock_hass):
@@ -324,6 +332,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         assert "Successfully fired event" in body["result"]["content"][0]["text"]
         assert _fired_by_tool(mock_hass.bus.async_fire) == [call("custom_event", {"key": "value"})]
 
@@ -376,6 +385,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "not allowed" in body["result"]["content"][0]["text"]
         assert _fired_by_tool(mock_hass.bus.async_fire) == []
 
@@ -406,6 +416,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "not allowed" in body["result"]["content"][0]["text"]
         assert _fired_by_tool(mock_hass.bus.async_fire) == []
 
@@ -433,6 +444,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error firing event" in body["result"]["content"][0]["text"]
 
     async def test_post_tools_call_get_logbook(self, view, mock_hass):
@@ -476,6 +488,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 1
         assert data[0]["entity_id"] == "light.test"
@@ -523,6 +536,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert len(data) == 2
         # Verify entity_ids=None was passed when no entity_id argument
@@ -570,6 +584,7 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert "isError" not in body["result"]
         data = json.loads(body["result"]["content"][0]["text"])
         assert data == []
 
@@ -600,4 +615,5 @@ class TestToolsSystem:
 
         assert response.status == 200
         body = json.loads(response.body)
+        assert body["result"]["isError"] is True
         assert "Error getting logbook" in body["result"]["content"][0]["text"]

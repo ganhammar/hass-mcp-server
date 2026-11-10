@@ -34,16 +34,19 @@ class TestDisabledByDefault:
     async def test_list_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await list_config_files(hass, {})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
     async def test_get_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await get_config_file(hass, {"filename": "automations.yaml"})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
     async def test_save_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await save_config_file(hass, {"filename": "test.yaml", "content": "x: 1"})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
         assert not (tmp_path / "test.yaml").exists()
 
@@ -51,12 +54,14 @@ class TestDisabledByDefault:
         (tmp_path / "custom.yaml").write_text("x: 1")
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await delete_config_file(hass, {"filename": "custom.yaml"})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
         assert (tmp_path / "custom.yaml").exists()
 
     async def test_backup_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await backup_config_files(hass, {})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
 
@@ -68,6 +73,7 @@ class TestListConfigFiles:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert "automations.yaml" in files
@@ -80,6 +86,7 @@ class TestListConfigFiles:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert "secrets.yaml" not in files
@@ -90,6 +97,7 @@ class TestListConfigFiles:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert "secrets.yml" not in files
@@ -102,6 +110,7 @@ class TestListConfigFiles:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert "lights.yaml" not in files
@@ -113,6 +122,7 @@ class TestListConfigFiles:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert files == sorted(files)
@@ -120,6 +130,7 @@ class TestListConfigFiles:
     async def test_list_empty_dir(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await list_config_files(hass, {})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
         assert files == []
 
@@ -127,6 +138,7 @@ class TestListConfigFiles:
         hass = _make_hass(tmp_path)
         with patch.object(Path, "iterdir", side_effect=OSError("permission denied")):
             result = await list_config_files(hass, {})
+            assert result["isError"] is True
         assert "Error listing config files" in result["content"][0]["text"]
 
 
@@ -141,6 +153,7 @@ class TestListConfigFilesRecursive:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {"recursive": True})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert "includes/templates/dishwasher.yaml" in files
@@ -157,6 +170,7 @@ class TestListConfigFilesRecursive:
             (await list_config_files(hass, {"recursive": True}))["content"][0]["text"]
         )
         result = await get_config_file(hass, {"filename": listed[0]})
+        assert "isError" not in result
 
         assert "marker: present" in result["content"][0]["text"]
 
@@ -168,6 +182,7 @@ class TestListConfigFilesRecursive:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {"recursive": True})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert "includes/secrets.yaml" not in files
@@ -183,6 +198,7 @@ class TestListConfigFilesRecursive:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {"recursive": True})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert files == ["packages/real.yaml"]
@@ -195,6 +211,7 @@ class TestListConfigFilesRecursive:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {"recursive": True})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert files == []
@@ -210,6 +227,7 @@ class TestListConfigFilesRecursive:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {"recursive": True})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert files == ["includes/real.yaml"]
@@ -223,6 +241,7 @@ class TestListConfigFilesRecursive:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {"recursive": True})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert files == []
@@ -243,6 +262,7 @@ class TestListConfigFilesRecursive:
 
         with patch.object(Path, "iterdir", fail_on_locked):
             result = await list_config_files(hass, {"recursive": True})
+            assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert files == ["readable/real.yaml"]
@@ -263,6 +283,7 @@ class TestListConfigFilesRecursive:
 
         with patch.object(Path, "resolve", fail_on_bad):
             result = await list_config_files(hass, {"recursive": True})
+            assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert files == ["good.yaml"]
@@ -274,6 +295,7 @@ class TestListConfigFilesRecursive:
         hass = _make_hass(tmp_path)
 
         result = await list_config_files(hass, {"recursive": True})
+        assert "isError" not in result
         files = json.loads(result["content"][0]["text"])
 
         assert files == sorted(files)
@@ -285,12 +307,14 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "templates.yaml"})
+        assert "isError" not in result
 
         assert result["content"][0]["text"] == "- alias: test\n"
 
     async def test_read_nonexistent_file(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "missing.yaml"})
+        assert result["isError"] is True
         assert "does not exist" in result["content"][0]["text"]
 
     async def test_read_blocks_secrets(self, tmp_path):
@@ -298,6 +322,7 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "secrets.yaml"})
+        assert result["isError"] is True
 
         text = result["content"][0]["text"]
         assert "blocked" in text
@@ -310,6 +335,7 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "automations.yaml"})
+        assert result["isError"] is True
 
         text = result["content"][0]["text"]
         assert "blocked" in text
@@ -321,6 +347,7 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "scenes.yaml"})
+        assert result["isError"] is True
 
         text = result["content"][0]["text"]
         assert "blocked" in text
@@ -331,6 +358,7 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "scripts.yaml"})
+        assert result["isError"] is True
 
         text = result["content"][0]["text"]
         assert "blocked" in text
@@ -341,6 +369,7 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "script.py"})
+        assert result["isError"] is True
 
         assert (
             "Error" in result["content"][0]["text"] or "Only YAML" in result["content"][0]["text"]
@@ -353,11 +382,13 @@ class TestGetConfigFile:
         (nested / "dishwasher.yaml").write_text("- sensor:\n    - name: Dishwasher\n")
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "includes/templates/dishwasher.yaml"})
+        assert "isError" not in result
         assert "name: Dishwasher" in result["content"][0]["text"]
 
     async def test_read_blocks_path_traversal(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "../etc/passwd"})
+        assert result["isError"] is True
         assert "'..'" in result["content"][0]["text"]
 
     async def test_read_blocks_traversal_that_lands_inside_config_dir(self, tmp_path):
@@ -366,6 +397,7 @@ class TestGetConfigFile:
         (tmp_path / "includes").mkdir()
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "includes/../configuration.yaml"})
+        assert result["isError"] is True
         assert "'..'" in result["content"][0]["text"]
 
     async def test_read_blocks_empty_filename(self, tmp_path):
@@ -373,11 +405,13 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
         for empty in ("", "   "):
             result = await get_config_file(hass, {"filename": empty})
+            assert result["isError"] is True
             assert "must not be empty" in result["content"][0]["text"]
 
     async def test_read_blocks_absolute_path(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "/etc/passwd.yaml"})
+        assert result["isError"] is True
         assert "Absolute paths are not allowed" in result["content"][0]["text"]
 
     async def test_read_blocks_nested_secrets(self, tmp_path):
@@ -387,6 +421,7 @@ class TestGetConfigFile:
         (nested / "secrets.yaml").write_text("api_key: hunter2")
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "includes/secrets.yaml"})
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "blocked" in text
         assert "hunter2" not in text
@@ -398,6 +433,7 @@ class TestGetConfigFile:
         (nested / "scripts.yaml").write_text("my_package: true")
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "packages/scripts.yaml"})
+        assert "isError" not in result
         assert "my_package: true" in result["content"][0]["text"]
 
     async def test_read_blocks_backup_folder(self, tmp_path):
@@ -408,6 +444,7 @@ class TestGetConfigFile:
         result = await get_config_file(
             hass, {"filename": "mcp_backups/2026-01-01_00-00-00-0/configuration.yaml"}
         )
+        assert result["isError"] is True
         assert "blocked" in result["content"][0]["text"]
 
     async def test_read_blocks_subdirectory_symlink_escape(self, tmp_path):
@@ -419,6 +456,7 @@ class TestGetConfigFile:
         (nested / "escape.yaml").symlink_to(outside)
         hass = _make_hass(tmp_path)
         result = await get_config_file(hass, {"filename": "includes/escape.yaml"})
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "Path traversal detected" in text
         assert "secret: data" not in text
@@ -432,6 +470,7 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "escape.yaml"})
+        assert result["isError"] is True
 
         assert "Path traversal detected" in result["content"][0]["text"]
 
@@ -441,6 +480,7 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "big.yaml"})
+        assert result["isError"] is True
 
         assert "too large" in result["content"][0]["text"]
 
@@ -449,6 +489,7 @@ class TestGetConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await get_config_file(hass, {"filename": "scripts.yml"})
+        assert "isError" not in result
 
         assert "my_script" in result["content"][0]["text"]
 
@@ -477,6 +518,7 @@ class TestSaveConfigFile:
             result = await save_config_file(
                 hass, {"filename": "new.yaml", "content": "key: value\n"}
             )
+            assert "isError" not in result
 
         assert "Successfully saved" in result["content"][0]["text"]
         assert (tmp_path / "new.yaml").read_text() == "key: value\n"
@@ -488,6 +530,7 @@ class TestSaveConfigFile:
             result = await save_config_file(
                 hass, {"filename": "templates.yaml", "content": "updated"}
             )
+            assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Backup:" in text
         assert "mcp_backups/" in text
@@ -506,6 +549,7 @@ class TestSaveConfigFile:
         hass = _make_hass(tmp_path)
         with _mock_create_backup(), _mock_check_config(valid=True):
             result = await save_config_file(hass, {"filename": "test.yaml", "content": "x: 1"})
+            assert "isError" not in result
         assert "Config check: OK" in result["content"][0]["text"]
 
     async def test_config_check_errors_reported(self, tmp_path):
@@ -515,6 +559,7 @@ class TestSaveConfigFile:
             _mock_check_config(valid=False, errors=["Invalid entity: light.missing"]),
         ):
             result = await save_config_file(hass, {"filename": "test.yaml", "content": "x: 1"})
+            assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Config check: ERRORS FOUND" in text
         assert "light.missing" in text
@@ -525,6 +570,7 @@ class TestSaveConfigFile:
             result = await save_config_file(
                 hass, {"filename": "test.yaml", "content": "x: 1", "run_check": False}
             )
+            assert "isError" not in result
         mock_check.assert_not_called()
         assert "Config check" not in result["content"][0]["text"]
 
@@ -538,6 +584,7 @@ class TestSaveConfigFile:
             ),
         ):
             result = await save_config_file(hass, {"filename": "test.yaml", "content": "x: 1"})
+            assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Successfully saved" in text
         assert "Config check failed to run" in text
@@ -547,6 +594,7 @@ class TestSaveConfigFile:
         result = await save_config_file(
             hass, {"filename": "secrets.yaml", "content": "token: hacked"}
         )
+        assert result["isError"] is True
         assert "blocked" in result["content"][0]["text"]
         assert not (tmp_path / "secrets.yaml").exists()
 
@@ -556,6 +604,7 @@ class TestSaveConfigFile:
         result = await save_config_file(
             hass, {"filename": "automations.yaml", "content": "- alias: hijacked"}
         )
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "blocked" in text
         assert "update_automation" in text or "create_automation" in text
@@ -566,6 +615,7 @@ class TestSaveConfigFile:
         result = await save_config_file(
             hass, {"filename": "scenes.yaml", "content": "- name: hijacked"}
         )
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "blocked" in text
         assert "update_scene" in text or "create_scene" in text
@@ -575,6 +625,7 @@ class TestSaveConfigFile:
         result = await save_config_file(
             hass, {"filename": "scripts.yaml", "content": "hijacked: {}"}
         )
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "blocked" in text
         assert "update_script" in text or "create_script" in text
@@ -582,6 +633,7 @@ class TestSaveConfigFile:
     async def test_write_blocks_non_yaml(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await save_config_file(hass, {"filename": "malicious.sh", "content": "rm -rf /"})
+        assert result["isError"] is True
         assert (
             "Error" in result["content"][0]["text"] or "Only YAML" in result["content"][0]["text"]
         )
@@ -596,6 +648,7 @@ class TestSaveConfigFile:
         result = await save_config_file(
             hass, {"filename": "includes/templates/dishwasher.yaml", "content": "new: 2"}
         )
+        assert "isError" not in result
 
         assert "Successfully saved" in result["content"][0]["text"]
         assert (nested / "dishwasher.yaml").read_text() == "new: 2"
@@ -607,6 +660,7 @@ class TestSaveConfigFile:
         result = await save_config_file(
             hass, {"filename": "packages/dishwasher.yaml", "content": "x: 1"}
         )
+        assert "isError" not in result
 
         assert "Successfully saved" in result["content"][0]["text"]
         assert (tmp_path / "packages" / "dishwasher.yaml").read_text() == "x: 1"
@@ -618,6 +672,7 @@ class TestSaveConfigFile:
         result = await save_config_file(
             hass, {"filename": "nonexistent/file.yaml", "content": "x: 1"}
         )
+        assert result["isError"] is True
 
         assert "does not exist" in result["content"][0]["text"]
         assert not (tmp_path / "nonexistent").exists()
@@ -630,6 +685,7 @@ class TestSaveConfigFile:
         result = await save_config_file(
             hass, {"filename": "includes/secrets.yaml", "content": "x: 1"}
         )
+        assert result["isError"] is True
 
         assert "blocked" in result["content"][0]["text"]
         assert not (nested / "secrets.yaml").exists()
@@ -642,6 +698,7 @@ class TestDeleteConfigFile:
 
         with _mock_create_backup():
             result = await delete_config_file(hass, {"filename": "custom.yaml"})
+            assert "isError" not in result
 
         assert "Successfully deleted" in result["content"][0]["text"]
         assert not (tmp_path / "custom.yaml").exists()
@@ -651,6 +708,7 @@ class TestDeleteConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await delete_config_file(hass, {"filename": "custom.yaml"})
+        assert "isError" not in result
 
         text = result["content"][0]["text"]
         assert "Successfully deleted" in text
@@ -660,6 +718,7 @@ class TestDeleteConfigFile:
     async def test_delete_nonexistent_file(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await delete_config_file(hass, {"filename": "ghost.yaml"})
+        assert result["isError"] is True
         assert "does not exist" in result["content"][0]["text"]
 
     async def test_delete_blocks_secrets(self, tmp_path):
@@ -667,6 +726,7 @@ class TestDeleteConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await delete_config_file(hass, {"filename": "secrets.yaml"})
+        assert result["isError"] is True
 
         assert "blocked" in result["content"][0]["text"]
         assert (tmp_path / "secrets.yaml").exists()
@@ -677,6 +737,7 @@ class TestDeleteConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await delete_config_file(hass, {"filename": "automations.yaml"})
+        assert result["isError"] is True
 
         text = result["content"][0]["text"]
         assert "blocked" in text
@@ -689,6 +750,7 @@ class TestDeleteConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await delete_config_file(hass, {"filename": "script.py"})
+        assert result["isError"] is True
 
         assert (
             "Error" in result["content"][0]["text"] or "Only YAML" in result["content"][0]["text"]
@@ -702,6 +764,7 @@ class TestDeleteConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await delete_config_file(hass, {"filename": "includes/templates/old.yaml"})
+        assert "isError" not in result
 
         assert "Successfully deleted" in result["content"][0]["text"]
         assert not (nested / "old.yaml").exists()
@@ -715,6 +778,7 @@ class TestDeleteConfigFile:
         hass = _make_hass(tmp_path)
 
         result = await delete_config_file(hass, {"filename": "includes/secrets.yaml"})
+        assert result["isError"] is True
 
         assert "blocked" in result["content"][0]["text"]
         assert (nested / "secrets.yaml").exists()
@@ -727,6 +791,7 @@ class TestBackupConfigFiles:
         hass = _make_hass(tmp_path)
 
         result = await backup_config_files(hass, {})
+        assert "isError" not in result
         text = result["content"][0]["text"]
 
         assert "mcp_backups/" in text
@@ -789,6 +854,7 @@ class TestBackupConfigFiles:
         hass = _make_hass(tmp_path)
 
         result = await backup_config_files(hass, {})
+        assert "isError" not in result
         text = result["content"][0]["text"]
 
         assert "3 files" in text
@@ -799,6 +865,7 @@ class TestBackupConfigFiles:
     async def test_backup_empty_dir_no_folder_created(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await backup_config_files(hass, {})
+        assert "isError" not in result
         assert "No YAML files" in result["content"][0]["text"]
         assert not (tmp_path / "mcp_backups").exists()
 
@@ -818,6 +885,7 @@ class TestBackupConfigFiles:
 
         with patch("shutil.copy2", side_effect=OSError("disk full")):
             result = await backup_config_files(hass, {})
+            assert result["isError"] is True
 
         assert "Error creating backup" in result["content"][0]["text"]
 
@@ -826,12 +894,14 @@ class TestListConfigBackups:
     async def test_list_no_backup_dir(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await list_config_backups(hass, {})
+        assert "isError" not in result
         assert "No backups found" in result["content"][0]["text"]
 
     async def test_list_empty_backup_dir(self, tmp_path):
         (tmp_path / "mcp_backups").mkdir()
         hass = _make_hass(tmp_path)
         result = await list_config_backups(hass, {})
+        assert "isError" not in result
         assert "No backups found" in result["content"][0]["text"]
 
     async def test_list_shows_backups_newest_first(self, tmp_path):
@@ -845,6 +915,7 @@ class TestListConfigBackups:
         hass = _make_hass(tmp_path)
 
         result = await list_config_backups(hass, {})
+        assert "isError" not in result
         backups = json.loads(result["content"][0]["text"])
 
         assert backups[0]["timestamp"] == "2026-01-02_10-00-00-000000"
@@ -858,6 +929,7 @@ class TestListConfigBackups:
         hass = _make_hass(tmp_path)
 
         result = await list_config_backups(hass, {})
+        assert "isError" not in result
         backups = json.loads(result["content"][0]["text"])
 
         assert "automations.yaml" in backups[0]["files"]
@@ -874,6 +946,7 @@ class TestListConfigBackups:
         hass = _make_hass(tmp_path)
 
         result = await list_config_backups(hass, {})
+        assert "isError" not in result
         backups = json.loads(result["content"][0]["text"])
 
         assert len(backups) == 1
@@ -882,6 +955,7 @@ class TestListConfigBackups:
     async def test_list_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await list_config_backups(hass, {})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
 
@@ -894,6 +968,7 @@ class TestRestoreConfigBackup:
 
         with _mock_check_config():
             result = await restore_config_backup(hass, {})
+            assert "isError" not in result
 
         assert (tmp_path / "automations.yaml").read_text() == "original"
         assert "Restored" in result["content"][0]["text"]
@@ -907,6 +982,7 @@ class TestRestoreConfigBackup:
 
         with _mock_check_config():
             result = await restore_config_backup(hass, {"timestamp": "2026-01-01_10-00-00-000000"})
+            assert "isError" not in result
 
         assert (tmp_path / "automations.yaml").read_text() == "from specific backup"
         assert "2026-01-01_10-00-00-000000" in result["content"][0]["text"]
@@ -915,11 +991,13 @@ class TestRestoreConfigBackup:
         (tmp_path / "mcp_backups").mkdir()
         hass = _make_hass(tmp_path)
         result = await restore_config_backup(hass, {"timestamp": "nonexistent"})
+        assert result["isError"] is True
         assert "not found" in result["content"][0]["text"]
 
     async def test_restore_no_backups(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await restore_config_backup(hass, {})
+        assert result["isError"] is True
         assert "No backups found" in result["content"][0]["text"]
 
     async def test_restore_does_not_delete_new_files(self, tmp_path):
@@ -943,6 +1021,7 @@ class TestRestoreConfigBackup:
 
         with _mock_check_config(valid=True):
             result = await restore_config_backup(hass, {})
+            assert "isError" not in result
 
         assert "Config check: OK" in result["content"][0]["text"]
 
@@ -954,18 +1033,21 @@ class TestRestoreConfigBackup:
 
         with _mock_check_config(valid=False, errors=["Syntax error in automations.yaml"]):
             result = await restore_config_backup(hass, {})
+            assert "isError" not in result
 
         assert "Config check: ERRORS FOUND" in result["content"][0]["text"]
 
     async def test_restore_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await restore_config_backup(hass, {})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
     async def test_restore_backup_dir_exists_but_no_subdirs(self, tmp_path):
         (tmp_path / "mcp_backups").mkdir()
         hass = _make_hass(tmp_path)
         result = await restore_config_backup(hass, {})
+        assert result["isError"] is True
         assert "No backups found" in result["content"][0]["text"]
 
     async def test_restore_backup_with_no_yaml_files(self, tmp_path):
@@ -974,6 +1056,7 @@ class TestRestoreConfigBackup:
         (backup_dir / "readme.txt").write_text("not yaml")
         hass = _make_hass(tmp_path)
         result = await restore_config_backup(hass, {})
+        assert result["isError"] is True
         assert "contained no YAML files" in result["content"][0]["text"]
 
     async def test_restore_check_failure_doesnt_hide_restore_success(self, tmp_path):
@@ -987,6 +1070,7 @@ class TestRestoreConfigBackup:
             side_effect=Exception("check unavailable"),
         ):
             result = await restore_config_backup(hass, {})
+            assert "isError" not in result
 
         text = result["content"][0]["text"]
         assert "Restored" in text
@@ -1000,6 +1084,7 @@ class TestRestoreConfigBackup:
 
         with patch("shutil.copy2", side_effect=OSError("disk full")):
             result = await restore_config_backup(hass, {})
+            assert result["isError"] is True
 
         assert "Error restoring backup" in result["content"][0]["text"]
 
@@ -1015,6 +1100,7 @@ class TestRestoreConfigBackup:
 
         with _mock_check_config():
             result = await restore_config_backup(hass, {})
+            assert "isError" not in result
 
         text = result["content"][0]["text"]
         assert "Restored" in text
@@ -1036,6 +1122,7 @@ class TestRestoreConfigBackup:
 
         with _mock_check_config():
             result = await restore_config_backup(hass, {})
+            assert "isError" not in result
 
         text = result["content"][0]["text"]
         assert "Restored" in text
@@ -1048,6 +1135,7 @@ class TestListConfigBackupsErrors:
         hass = _make_hass(tmp_path)
         with patch.object(Path, "iterdir", side_effect=OSError("permission denied")):
             result = await list_config_backups(hass, {})
+            assert result["isError"] is True
         assert "Error listing backups" in result["content"][0]["text"]
 
 
@@ -1068,6 +1156,7 @@ class TestRunConfigCheck:
             new=AsyncMock(return_value=mock_res),
         ):
             result = await _run_config_check(hass)
+            assert "isError" not in result
 
         assert result == {"valid": True, "errors": []}
 
@@ -1087,6 +1176,7 @@ class TestRunConfigCheck:
             new=AsyncMock(return_value=mock_res),
         ):
             result = await _run_config_check(hass)
+            assert "isError" not in result
 
         assert result["valid"] is False
 
@@ -1097,6 +1187,7 @@ class TestBatchEditConfigFiles:
         result = await batch_edit_config_files(
             hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
         )
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
     async def test_saves_multiple_files(self, tmp_path):
@@ -1111,6 +1202,7 @@ class TestBatchEditConfigFiles:
                     ]
                 },
             )
+            assert "isError" not in result
         text = result["content"][0]["text"]
         assert "a.yaml" in text
         assert "b.yaml" in text
@@ -1123,6 +1215,7 @@ class TestBatchEditConfigFiles:
         hass = _make_hass(tmp_path)
         with _mock_create_backup(), _mock_check_config():
             result = await batch_edit_config_files(hass, {"deletes": ["old1.yaml", "old2.yaml"]})
+            assert "isError" not in result
         text = result["content"][0]["text"]
         assert "old1.yaml" in text
         assert "old2.yaml" in text
@@ -1140,6 +1233,7 @@ class TestBatchEditConfigFiles:
                     "deletes": ["remove_me.yaml"],
                 },
             )
+            assert "isError" not in result
         text = result["content"][0]["text"]
         assert "new.yaml" in text
         assert "remove_me.yaml" in text
@@ -1185,6 +1279,7 @@ class TestBatchEditConfigFiles:
                 ]
             },
         )
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "error" in text.lower()
         assert not (tmp_path / "ok.yaml").exists()
@@ -1207,6 +1302,7 @@ class TestBatchEditConfigFiles:
                     "run_check": False,
                 },
             )
+            assert "isError" not in result
 
         text = result["content"][0]["text"]
         assert "includes/templates/new.yaml" in text
@@ -1227,6 +1323,7 @@ class TestBatchEditConfigFiles:
                 ]
             },
         )
+        assert result["isError"] is True
 
         assert "error" in result["content"][0]["text"].lower()
         assert not (tmp_path / "ok.yaml").exists()
@@ -1235,6 +1332,7 @@ class TestBatchEditConfigFiles:
     async def test_delete_missing_file_aborts(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await batch_edit_config_files(hass, {"deletes": ["does_not_exist.yaml"]})
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "error" in text.lower()
 
@@ -1245,6 +1343,7 @@ class TestBatchEditConfigFiles:
                 hass,
                 {"saves": [{"filename": "x.yaml", "content": "x: 1"}], "run_check": False},
             )
+            assert "isError" not in result
         text = result["content"][0]["text"]
         assert "config check" not in text.lower()
 
@@ -1254,18 +1353,21 @@ class TestBatchEditConfigFiles:
             result = await batch_edit_config_files(
                 hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
             )
+            assert "isError" not in result
         text = result["content"][0]["text"]
         assert "bad thing" in text
 
     async def test_empty_saves_and_deletes_returns_error(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await batch_edit_config_files(hass, {})
+        assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "error" in text.lower()
 
     async def test_delete_invalid_filename_returns_error(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await batch_edit_config_files(hass, {"deletes": ["secrets.yaml"]})
+        assert result["isError"] is True
         assert "Error in deletes" in result["content"][0]["text"]
 
     async def test_save_write_failure_reports_error(self, tmp_path):
@@ -1278,6 +1380,7 @@ class TestBatchEditConfigFiles:
             result = await batch_edit_config_files(
                 hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
             )
+            assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "Errors:" in text
         assert "disk full" in text
@@ -1291,6 +1394,7 @@ class TestBatchEditConfigFiles:
             patch("pathlib.Path.unlink", side_effect=OSError("permission denied")),
         ):
             result = await batch_edit_config_files(hass, {"deletes": ["x.yaml"]})
+            assert result["isError"] is True
         text = result["content"][0]["text"]
         assert "Errors:" in text
         assert "permission denied" in text
@@ -1309,6 +1413,7 @@ class TestBatchEditConfigFiles:
             result = await batch_edit_config_files(
                 hass, {"saves": [{"filename": "x.yaml", "content": "x: 1"}]}
             )
+            assert "isError" not in result
         assert "check exploded" in result["content"][0]["text"]
 
 
@@ -1325,6 +1430,7 @@ class TestCleanupConfigBackups:
         self._make_backup(backup_root, "2026-01-02_10-00-00-000000")
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {"older_than_days": 1})
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Deleted 2" in text
         assert "0 backup(s) remaining" in text
@@ -1342,6 +1448,7 @@ class TestCleanupConfigBackups:
         self._make_backup(backup_root, f"{today}_10-00-00-000000")
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {"older_than_days": 30})
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Deleted 1" in text
         assert "1 backup(s) remaining" in text
@@ -1350,6 +1457,7 @@ class TestCleanupConfigBackups:
     async def test_no_backups_found(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {})
+        assert "isError" not in result
         assert "No backups found" in result["content"][0]["text"]
 
     async def test_no_old_backups_to_delete(self, tmp_path):
@@ -1360,6 +1468,7 @@ class TestCleanupConfigBackups:
         self._make_backup(backup_root, f"{today}_10-00-00-000000")
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {"older_than_days": 30})
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Deleted 0" in text
         assert "1 backup(s) remaining" in text
@@ -1370,6 +1479,7 @@ class TestCleanupConfigBackups:
         (backup_root / "@eaDir").mkdir()
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {"older_than_days": 1})
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Deleted 1" in text
         assert (backup_root / "@eaDir").exists()
@@ -1379,12 +1489,14 @@ class TestCleanupConfigBackups:
         self._make_backup(backup_root, "2026-01-01_10-00-00-000000")
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {})
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Deleted 1" in text
 
     async def test_rejects_zero_days(self, tmp_path):
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {"older_than_days": 0})
+        assert result["isError"] is True
         assert "error" in result["content"][0]["text"].lower()
 
     async def test_skips_dir_matching_regex_but_invalid_date(self, tmp_path):
@@ -1394,6 +1506,7 @@ class TestCleanupConfigBackups:
         (backup_root / "2026-13-99_99-99-99-000000").mkdir()
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {"older_than_days": 1})
+        assert "isError" not in result
         text = result["content"][0]["text"]
         assert "Deleted 1" in text
 
@@ -1403,6 +1516,7 @@ class TestCleanupConfigBackups:
         (backup_root / "@eaDir").mkdir()
         hass = _make_hass(tmp_path)
         result = await cleanup_config_backups(hass, {})
+        assert "isError" not in result
         assert "No backups found" in result["content"][0]["text"]
 
     async def test_handles_os_error(self, tmp_path):
@@ -1410,11 +1524,13 @@ class TestCleanupConfigBackups:
         hass = _make_hass(tmp_path)
         with patch.object(Path, "iterdir", side_effect=OSError("permission denied")):
             result = await cleanup_config_backups(hass, {})
+            assert result["isError"] is True
         assert "Error cleaning up backups" in result["content"][0]["text"]
 
     async def test_disabled(self, tmp_path):
         hass = _make_hass(tmp_path, config_file_access=False)
         result = await cleanup_config_backups(hass, {})
+        assert result["isError"] is True
         assert "disabled" in result["content"][0]["text"].lower()
 
 
@@ -1446,6 +1562,7 @@ class TestAtomicWrite:
             patch.object(Path, "write_text", fail_on_tmp),
         ):
             result = await save_config_file(hass, {"filename": "boom.yaml", "content": "x: 1"})
+            assert result["isError"] is True
 
         assert "Error saving config file" in result["content"][0]["text"]
         # The original target was never touched, and the temp file was cleaned up.
@@ -1470,6 +1587,7 @@ class TestAtomicWrite:
             patch.object(Path, "unlink", side_effect=OSError("cleanup failed")),
         ):
             result = await save_config_file(hass, {"filename": "boom.yaml", "content": "x: 1"})
+            assert result["isError"] is True
 
         # Original write error is what surfaces — not the unlink failure.
         assert "Error saving config file" in result["content"][0]["text"]
@@ -1487,6 +1605,7 @@ class TestAtomicWrite:
             result = await save_config_file(
                 hass, {"filename": "existing.yaml", "content": "new: data\n"}
             )
+            assert result["isError"] is True
 
         assert "Error saving config file" in result["content"][0]["text"]
         # Original file is intact — atomic write means partial state never reaches the target.
@@ -1502,6 +1621,7 @@ class TestRunsInExecutor:
         hass = _make_hass(tmp_path)
         with _mock_check_config():
             result = await save_config_file(hass, {"filename": "a.yaml", "content": "a: 2"})
+            assert "isError" not in result
 
         assert "Successfully saved" in result["content"][0]["text"]
         # Executor was actually used — at least one call goes through async_add_executor_job.
@@ -1551,5 +1671,6 @@ class TestRunsInExecutor:
 
     async def test_restore_uses_executor(self, tmp_path):
         hass = _make_hass(tmp_path)
-        await restore_config_backup(hass, {})
+        result = await restore_config_backup(hass, {})
+        assert result["isError"] is True
         assert hass.async_add_executor_job.await_count >= 1

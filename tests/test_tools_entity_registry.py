@@ -27,6 +27,7 @@ def _make_entry(entity_id, name=None, disabled_by=None):
 
 
 def _data(result):
+    assert "isError" not in result
     return json.loads(result["content"][0]["text"])
 
 
@@ -115,7 +116,7 @@ async def test_list_registry_rejects_invalid_arguments(registry_hass, arguments)
     hass, _ = registry_hass
     result = await registry_tools.list_entity_registry(hass, arguments)
     assert result["content"][0]["text"].startswith("Error:")
-    assert "isError" not in result
+    assert result["isError"] is True
 
 
 async def test_get_registry_entity_even_when_disabled(registry_hass):
@@ -141,7 +142,7 @@ async def test_get_registry_error_is_plain_text(registry_hass, arguments):
     hass, _ = registry_hass
     result = await registry_tools.get_entity_registry(hass, arguments)
     assert result["content"][0]["text"].startswith("Error:")
-    assert "isError" not in result
+    assert result["isError"] is True
 
 
 async def test_update_registry_preview_only(registry_hass):
@@ -219,7 +220,7 @@ async def test_update_registry_invalid_request_does_not_mutate(registry_hass, ar
     hass, registry = registry_hass
     result = await registry_tools.update_entity_registry(hass, arguments)
     assert result["content"][0]["text"].startswith("Error:")
-    assert "isError" not in result
+    assert result["isError"] is True
     registry.async_update_entity.assert_not_called()
 
 
@@ -244,7 +245,7 @@ async def test_update_registry_delegates_id_validation_to_ha(registry_hass, new_
     )
     registry.async_update_entity.assert_called_once_with("light.living_room", new_entity_id=new_id)
     assert message in result["content"][0]["text"]
-    assert "isError" not in result
+    assert result["isError"] is True
 
 
 async def test_unexpected_registry_error_is_handled_by_dispatcher(registry_hass):

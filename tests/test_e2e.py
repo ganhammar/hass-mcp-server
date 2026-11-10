@@ -779,6 +779,8 @@ async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
         assert "isError" not in rejected, rejected
         assert "still on the same step" in rejected["content"][0]["text"]
         assert '"url"' in rejected["content"][0]["text"]
+        await hass.async_block_till_done()
+        assert events[-1].data["outcome"] == "ok"
 
         created = await call(
             "continue_config_flow",
@@ -826,11 +828,16 @@ async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
                 "id": 1,
             },
         )
-        assert (
-            "Refusing to configure the MCP Server itself"
-            in (await refused.json())["result"]["content"][0]["text"]
-        )
+        refused_result = (await refused.json())["result"]
+        assert refused_result["isError"] is True
+        assert "Refusing to configure the MCP Server itself" in refused_result["content"][0]["text"]
         assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+        # A refusal the handler gives is audited as a failed call.
+        await hass.async_block_till_done()
+        assert (events[-1].data["tool"], events[-1].data["outcome"]) == (
+            "start_config_flow",
+            "error",
+        )
 
         reloaded = await call("reload_integration", {"entry_id": entry.entry_id})
         assert reloaded["state"] == str(ConfigEntryState.LOADED)
@@ -871,7 +878,7 @@ async def test_areas_devices_and_entities_are_managed_over_http(
     leftover = entities.async_get_or_create("sensor", "mcp_gadget", "gone").entity_id
     client = await hass_client()
 
-    async def call(name: str, arguments: dict) -> str:
+    async def call(name: str, arguments: dict, *, error: bool = False) -> str:
         resp = await client.post(
             MCP_HTTP_PATH,
             json={
@@ -882,7 +889,10 @@ async def test_areas_devices_and_entities_are_managed_over_http(
             },
         )
         result = (await resp.json())["result"]
-        assert "isError" not in result, result
+        if error:
+            assert result["isError"] is True, result
+        else:
+            assert "isError" not in result, result
         return result["content"][0]["text"]
 
     def created(text: str) -> dict:
@@ -903,7 +913,7 @@ async def test_areas_devices_and_entities_are_managed_over_http(
     assert hidden["after"]["hidden_by"] == "user"
 
     hass.states.async_set(entity_id, "on")
-    refused = await call("delete_entity", {"entity_id": entity_id, "confirm": True})
+    refused = await call("delete_entity", {"entity_id": entity_id, "confirm": True}, error=True)
     assert "still provided" in refused
     assert (
         json.loads(await call("delete_entity", {"entity_id": leftover, "confirm": True}))[
@@ -912,7 +922,7 @@ async def test_areas_devices_and_entities_are_managed_over_http(
         == leftover
     )
 
-    gated = await call("delete_device", {"device_id": device.id, "confirm": True})
+    gated = await call("delete_device", {"device_id": device.id, "confirm": True}, error=True)
     assert gated.startswith("Deleting a device is part of integration management")
     hass.data[DOMAIN]["integration_management"] = True
     deleted = await call("delete_device", {"device_id": device.id, "confirm": True})

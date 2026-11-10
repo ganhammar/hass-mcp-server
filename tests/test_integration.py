@@ -504,6 +504,7 @@ class TestMCPClientSession:
             )
             text = result["result"]["content"][0]["text"]
             assert "not found" in text
+            assert result["result"]["isError"] is True
 
     async def test_resource_read_entity_not_found(self, view):
         """Test resources/read for nonexistent entity returns error."""
@@ -898,6 +899,7 @@ class TestMCPClientSession:
                 msg_id=103,
             )
             assert "Error" in result["result"]["content"][0]["text"]
+            assert result["result"]["isError"] is True
 
             # Update
             result = await self._call(
@@ -981,6 +983,7 @@ class TestMCPClientSession:
                 msg_id=110,
             )
             assert "Successfully created script" in result["result"]["content"][0]["text"]
+            assert "isError" not in result["result"]
             assert "test_script" in yaml_store
 
             # List
@@ -1012,6 +1015,7 @@ class TestMCPClientSession:
                 msg_id=116,
             )
             assert "Error" in result["result"]["content"][0]["text"]
+            assert result["result"]["isError"] is True
 
             # Update
             result = await self._call(
@@ -1027,6 +1031,7 @@ class TestMCPClientSession:
                 msg_id=111,
             )
             assert "Successfully updated" in result["result"]["content"][0]["text"]
+            assert "isError" not in result["result"]
             assert yaml_store["test_script"]["alias"] == "Updated Script"
 
             # Duplicate create fails
@@ -1043,6 +1048,7 @@ class TestMCPClientSession:
                 msg_id=112,
             )
             assert "Error creating script" in result["result"]["content"][0]["text"]
+            assert result["result"]["isError"] is True
 
             # Delete
             result = await self._call(
@@ -1052,6 +1058,7 @@ class TestMCPClientSession:
                 msg_id=113,
             )
             assert "Successfully deleted" in result["result"]["content"][0]["text"]
+            assert "isError" not in result["result"]
             assert "test_script" not in yaml_store
 
     async def test_scene_crud_round_trip(self, view, populated_hass):
@@ -1133,6 +1140,7 @@ class TestMCPClientSession:
                 msg_id=123,
             )
             assert "Error" in result["result"]["content"][0]["text"]
+            assert result["result"]["isError"] is True
 
             # Update
             result = await self._call(
@@ -1181,6 +1189,7 @@ class TestMCPClientSession:
             {"name": "list_automations", "arguments": {}},
         )
         assert "Error" in result["result"]["content"][0]["text"]
+        assert result["result"]["isError"] is True
 
         result = await self._call(
             view,
@@ -1189,6 +1198,7 @@ class TestMCPClientSession:
             msg_id=2,
         )
         assert "Error" in result["result"]["content"][0]["text"]
+        assert result["result"]["isError"] is True
 
         result = await self._call(
             view,
@@ -1197,6 +1207,7 @@ class TestMCPClientSession:
             msg_id=3,
         )
         assert "Error" in result["result"]["content"][0]["text"]
+        assert result["result"]["isError"] is True
 
     async def test_dashboard_config_round_trip(self, view, populated_hass):
         """Test get/save/delete dashboard config round-trip."""
@@ -1710,6 +1721,7 @@ class TestMCPClientSession:
             )
             text = result["result"]["content"][0]["text"]
             assert "not allowed" in text
+            assert result["result"]["isError"] is True
             assert _fired_by_tool(populated_hass.bus.async_fire) == []
 
     async def test_search_entities_by_area(

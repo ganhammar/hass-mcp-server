@@ -14,6 +14,7 @@ from . import (
     ANNOTATION_NON_IDEMPOTENT,
     ANNOTATION_READ_ONLY,
     dumps,
+    error_result,
     register_tool,
 )
 from .categories import CATEGORY_PROPERTY, async_category_suffix
@@ -63,7 +64,7 @@ async def create_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error creating automation: {str(e)}"}]}
+        return error_result(f"Error creating automation: {str(e)}")
 
 
 def _automation_config_hash(config: dict[str, Any]) -> str:
@@ -127,20 +128,22 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     automation_id = arguments["automation_id"]
     submitted = arguments["config"]
     if not isinstance(automation_id, str) or not automation_id:
-        return result("Error updating automation: automation_id must be a non-empty string")
+        return error_result("Error updating automation: automation_id must be a non-empty string")
     if not isinstance(submitted, dict) or not submitted:
-        return result("Error updating automation: config must be a non-empty object")
+        return error_result("Error updating automation: config must be a non-empty object")
     if "id" in submitted and str(submitted["id"]) != automation_id:
-        return result("Error updating automation: config ID differs from automation_id")
+        return error_result("Error updating automation: config ID differs from automation_id")
 
     dry_run = arguments.get("dry_run", False)
     reload = arguments.get("reload", True)
     validate = arguments.get("validate", False)
     expected_hash = arguments.get("expected_hash")
     if not all(isinstance(flag, bool) for flag in (dry_run, reload, validate)):
-        return result("Error updating automation: dry_run, reload and validate must be booleans")
+        return error_result(
+            "Error updating automation: dry_run, reload and validate must be booleans"
+        )
     if expected_hash is not None and not isinstance(expected_hash, str):
-        return result("Error updating automation: expected_hash must be a string")
+        return error_result("Error updating automation: expected_hash must be a string")
 
     new_config = {**submitted, "id": automation_id}
     try:
@@ -163,7 +166,7 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                     "Pass this hash as expected_hash when applying the update."
                 )
             if expected_hash is not None and expected_hash != original_hash:
-                return result(
+                return error_result(
                     "Error updating automation: changed since preview; expected_hash "
                     "does not match. Run dry_run again before updating."
                 )
@@ -195,11 +198,11 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
                 try:
                     await hass.async_add_executor_job(os.replace, backup, path)
                 except Exception as restore_exc:
-                    return result(
+                    return error_result(
                         f"Error updating automation: validation failed ({exc}); "
                         f"CRITICAL: rollback failed ({restore_exc}). Backup: {backup}"
                     )
-                return result(
+                return error_result(
                     f"Error updating automation: validation failed ({exc}); "
                     "automations.yaml restored without reload."
                 )
@@ -216,7 +219,7 @@ async def update_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         tail = f" ({', '.join(details)})" if details else ""
         return result(f"Successfully updated automation{suffix}{tail}")
     except Exception as exc:
-        return result(f"Error updating automation: {exc}")
+        return error_result(f"Error updating automation: {exc}")
 
 
 @register_tool(
@@ -242,7 +245,7 @@ async def delete_automation(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         await delete_list_entry(hass, "automations.yaml", arguments["automation_id"], "automation")
         return {"content": [{"type": "text", "text": "Successfully deleted automation"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error deleting automation: {str(e)}"}]}
+        return error_result(f"Error deleting automation: {str(e)}")
 
 
 @register_tool(
@@ -262,7 +265,7 @@ async def list_automations(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         entries = await read_list_entries(hass, "automations.yaml")
         return {"content": [{"type": "text", "text": dumps(entries)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error listing automations: {str(e)}"}]}
+        return error_result(f"Error listing automations: {str(e)}")
 
 
 @register_tool(
@@ -288,7 +291,7 @@ async def get_automation_config(hass: HomeAssistant, arguments: dict[str, Any]) 
         entry = await read_list_entry(hass, "automations.yaml", arguments["automation_id"])
         return {"content": [{"type": "text", "text": dumps(entry)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error getting automation config: {str(e)}"}]}
+        return error_result(f"Error getting automation config: {str(e)}")
 
 
 # --- Scene Tools ---
@@ -326,7 +329,7 @@ async def create_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error creating scene: {str(e)}"}]}
+        return error_result(f"Error creating scene: {str(e)}")
 
 
 @register_tool(
@@ -362,7 +365,7 @@ async def update_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         )
         return {"content": [{"type": "text", "text": f"Successfully updated scene{suffix}"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error updating scene: {str(e)}"}]}
+        return error_result(f"Error updating scene: {str(e)}")
 
 
 @register_tool(
@@ -388,7 +391,7 @@ async def delete_scene(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         await delete_list_entry(hass, "scenes.yaml", arguments["scene_id"], "scene")
         return {"content": [{"type": "text", "text": "Successfully deleted scene"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error deleting scene: {str(e)}"}]}
+        return error_result(f"Error deleting scene: {str(e)}")
 
 
 @register_tool(
@@ -408,7 +411,7 @@ async def list_scenes(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         entries = await read_list_entries(hass, "scenes.yaml")
         return {"content": [{"type": "text", "text": dumps(entries)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error listing scenes: {str(e)}"}]}
+        return error_result(f"Error listing scenes: {str(e)}")
 
 
 @register_tool(
@@ -434,7 +437,7 @@ async def get_scene_config(hass: HomeAssistant, arguments: dict[str, Any]) -> di
         entry = await read_list_entry(hass, "scenes.yaml", arguments["scene_id"])
         return {"content": [{"type": "text", "text": dumps(entry)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error getting scene config: {str(e)}"}]}
+        return error_result(f"Error getting scene config: {str(e)}")
 
 
 # --- Script Tools ---
@@ -477,7 +480,7 @@ async def create_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             ]
         }
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error creating script: {str(e)}"}]}
+        return error_result(f"Error creating script: {str(e)}")
 
 
 @register_tool(
@@ -511,7 +514,7 @@ async def update_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         suffix = await async_icon_suffix(hass, arguments, "script", "script", arguments["key"])
         return {"content": [{"type": "text", "text": f"Successfully updated script{suffix}"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error updating script: {str(e)}"}]}
+        return error_result(f"Error updating script: {str(e)}")
 
 
 @register_tool(
@@ -537,7 +540,7 @@ async def delete_script(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         await delete_dict_entry(hass, "scripts.yaml", arguments["key"], "script")
         return {"content": [{"type": "text", "text": "Successfully deleted script"}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error deleting script: {str(e)}"}]}
+        return error_result(f"Error deleting script: {str(e)}")
 
 
 @register_tool(
@@ -557,7 +560,7 @@ async def list_scripts(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
         entries = await read_dict_entries(hass, "scripts.yaml")
         return {"content": [{"type": "text", "text": dumps(entries)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error listing scripts: {str(e)}"}]}
+        return error_result(f"Error listing scripts: {str(e)}")
 
 
 @register_tool(
@@ -583,4 +586,4 @@ async def get_script_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         entry = await read_dict_entry(hass, "scripts.yaml", arguments["key"])
         return {"content": [{"type": "text", "text": dumps(entry)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error getting script config: {str(e)}"}]}
+        return error_result(f"Error getting script config: {str(e)}")

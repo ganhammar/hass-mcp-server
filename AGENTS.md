@@ -77,6 +77,14 @@ property's schema `description`, which the `-32602` message quotes back. And
 `isError` is currently set only by that wrapper, so a handler-caught failure still
 returns a success-shaped result whose text happens to describe an error.
 
+`call_tool` and `get_tool_schemas` also apply the two options that limit the tool
+set: read-only mode and the list of disabled tools. Read-only mode goes by the
+`readOnlyHint` annotation and nothing else, which makes the annotation a security
+boundary. Give every tool an annotation, and use `ANNOTATION_READ_ONLY` only for a
+tool that cannot change anything. A tool that previews by default but can apply
+the change is not read-only. A withheld tool raises `ToolNotAvailable`, an
+`InvalidToolRequest`, so it never reaches the handler.
+
 `get_prompt` does the same for `prompts/get`: an unknown name, non-object
 `arguments`, or a `required` argument that is absent or null raises
 `InvalidPromptRequest` and never reaches a handler. Some clients call

@@ -6,15 +6,18 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_APPDAEMON_APPS_ROOT,
     CONF_APPDAEMON_FILE_ACCESS,
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_CONFIG_FILE_ACCESS,
+    CONF_DISABLED_TOOLS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
+    CONF_READ_ONLY,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
     CONF_TEMPLATE_RENDERING,
@@ -24,13 +27,24 @@ from .const import (
     validate_appdaemon_apps_root,
     validate_server_name,
 )
+from .tools import TOOLS
 
 _LOGGER = logging.getLogger(__name__)
+
+_TOOL_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=sorted(TOOLS),
+        multiple=True,
+        mode=selector.SelectSelectorMode.DROPDOWN,
+    )
+)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_NATIVE_AUTH, default=False): bool,
         vol.Optional(CONF_REQUIRE_ADMIN, default=True): bool,
+        vol.Optional(CONF_READ_ONLY, default=False): bool,
+        vol.Optional(CONF_DISABLED_TOOLS, default=list): _TOOL_SELECTOR,
         vol.Optional(CONF_CONFIG_FILE_ACCESS, default=False): bool,
         vol.Optional(CONF_CAMERA_IMAGE_ACCESS, default=False): bool,
         vol.Optional(CONF_IMAGE_FILE_ACCESS, default=False): bool,
@@ -119,6 +133,11 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
 
         current_native_auth = self.config_entry.data.get(CONF_NATIVE_AUTH, False)
         current_require_admin = self.config_entry.data.get(CONF_REQUIRE_ADMIN, True)
+        current_read_only = self.config_entry.data.get(CONF_READ_ONLY, False)
+        # A name stored for a tool that no longer exists is not offered back.
+        current_disabled_tools = [
+            name for name in self.config_entry.data.get(CONF_DISABLED_TOOLS, ()) if name in TOOLS
+        ]
         current_config_file_access = self.config_entry.data.get(CONF_CONFIG_FILE_ACCESS, False)
         current_camera_image_access = self.config_entry.data.get(CONF_CAMERA_IMAGE_ACCESS, False)
         current_image_file_access = self.config_entry.data.get(CONF_IMAGE_FILE_ACCESS, False)
@@ -176,6 +195,8 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
         values = user_input or {}
         current_native_auth = values.get(CONF_NATIVE_AUTH, current_native_auth)
         current_require_admin = values.get(CONF_REQUIRE_ADMIN, current_require_admin)
+        current_read_only = values.get(CONF_READ_ONLY, current_read_only)
+        current_disabled_tools = values.get(CONF_DISABLED_TOOLS, current_disabled_tools)
         current_config_file_access = values.get(CONF_CONFIG_FILE_ACCESS, current_config_file_access)
         current_camera_image_access = values.get(
             CONF_CAMERA_IMAGE_ACCESS, current_camera_image_access
@@ -199,6 +220,10 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                 {
                     vol.Optional(CONF_NATIVE_AUTH, default=current_native_auth): bool,
                     vol.Optional(CONF_REQUIRE_ADMIN, default=current_require_admin): bool,
+                    vol.Optional(CONF_READ_ONLY, default=current_read_only): bool,
+                    vol.Optional(
+                        CONF_DISABLED_TOOLS, default=current_disabled_tools
+                    ): _TOOL_SELECTOR,
                     vol.Optional(CONF_CONFIG_FILE_ACCESS, default=current_config_file_access): bool,
                     vol.Optional(
                         CONF_CAMERA_IMAGE_ACCESS, default=current_camera_image_access

@@ -31,6 +31,12 @@ CONF_IMAGE_FILE_ACCESS = "image_file_access_enabled"
 CONF_TEMPLATE_RENDERING = "template_rendering_enabled"
 CONF_APPDAEMON_FILE_ACCESS = "appdaemon_file_access_enabled"
 CONF_INTEGRATION_MANAGEMENT = "integration_management_enabled"
+
+# Limits on which tools a client is offered at all, on top of the feature flags.
+# Read-only mode keeps the tools annotated readOnlyHint; disabled tools are
+# listed by name.
+CONF_READ_ONLY = "read_only_enabled"
+CONF_DISABLED_TOOLS = "disabled_tools"
 CONF_APPDAEMON_APPS_ROOT = "appdaemon_apps_root"
 
 DEFAULT_APPDAEMON_APPS_ROOT = "/addon_configs/a0d7b954_appdaemon/apps"

@@ -28,7 +28,7 @@ from .const import (
 from .json_utils import dumps
 from .prompts import InvalidPromptRequest, get_prompt, get_prompts
 from .resources import get_resources, read_resource
-from .tools import TOOLS, InvalidToolRequest, call_tool, get_tool_schemas
+from .tools import TOOLS, InvalidToolRequest, call_tool, get_tool_schemas, tool_is_read_only
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -181,18 +181,6 @@ def truncate_arguments(value: Any, limit: int = ARGUMENTS_PREVIEW_CHARS) -> Any:
         return item
 
     return shorten(value)
-
-
-def _tool_is_read_only(name: Any) -> bool:
-    """Return True when a registered tool declares itself read-only.
-
-    An unknown name, or a tool registered without annotations, is treated as one
-    that may change something.
-    """
-    tool = TOOLS.get(name) if isinstance(name, str) else None
-    if tool is None:
-        return False
-    return tool["schema"].get("annotations", {}).get("readOnlyHint") is True
 
 
 def _resource_path(request_path: str) -> str:
@@ -793,7 +781,7 @@ class MCPEndpointView(HomeAssistantView):
 
     async def _get_tools(self) -> list[dict[str, Any]]:
         """Get available tools."""
-        return get_tool_schemas()
+        return get_tool_schemas(self.hass)
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call a tool by name."""
@@ -808,7 +796,7 @@ class MCPEndpointView(HomeAssistantView):
         Secret-named argument values are masked and the arguments shortened in
         both.
         """
-        read_only = _tool_is_read_only(name)
+        read_only = tool_is_read_only(name)
         level = logging.DEBUG if read_only else logging.INFO
         if read_only and not _LOGGER.isEnabledFor(level):
             return

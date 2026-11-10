@@ -5,6 +5,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ..const import DOMAIN
 from ..json_utils import dumps  # noqa: F401
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,6 +24,10 @@ class UnknownTool(InvalidToolRequest):
 
 class InvalidToolArguments(InvalidToolRequest):
     """Arguments do not satisfy the tool's declared input schema."""
+
+
+class ToolNotAvailable(InvalidToolRequest):
+    """The tool exists but the server's options keep it from being used."""
 
 
 # Reusable MCP ToolAnnotations (see spec §ToolAnnotations).
@@ -78,9 +83,42 @@ def register_tool(
     return decorator
 
 
-def get_tool_schemas() -> list[dict[str, Any]]:
-    """Return all tool schemas."""
-    return [tool["schema"] for tool in TOOLS.values()]
+def tool_is_read_only(name: Any) -> bool:
+    """Return True when a registered tool declares itself read-only.
+
+    An unknown name, or a tool registered without annotations, is treated as one
+    that may change something.
+    """
+    tool = TOOLS.get(name) if isinstance(name, str) else None
+    if tool is None:
+        return False
+    return tool["schema"].get("annotations", {}).get("readOnlyHint") is True
+
+
+def _unavailable_reason(hass: HomeAssistant, name: str) -> str | None:
+    """Return why the server's options withhold a registered tool, or None.
+
+    Read-only mode goes by the readOnlyHint annotation alone, so that annotation
+    is a security boundary: a tool that can change anything must not carry it.
+    """
+    options = hass.data.get(DOMAIN)
+    if not isinstance(options, dict):
+        return None
+    if name in options.get("disabled_tools", ()):
+        return f"Tool '{name}' is turned off in the MCP Server integration options"
+    if options.get("read_only", False) and not tool_is_read_only(name):
+        return (
+            f"Tool '{name}' can change things and the MCP Server is in read-only mode, "
+            "set in the integration options"
+        )
+    return None
+
+
+def get_tool_schemas(hass: HomeAssistant) -> list[dict[str, Any]]:
+    """Return the schemas of the tools the server's options make available."""
+    return [
+        tool["schema"] for name, tool in TOOLS.items() if _unavailable_reason(hass, name) is None
+    ]
 
 
 def _missing_required(schema: dict[str, Any], arguments: dict[str, Any]) -> list[str]:
@@ -118,13 +156,17 @@ async def call_tool(hass: HomeAssistant, name: str, arguments: dict[str, Any]) -
     tool result, which keeps one failing call from turning the whole JSON-RPC
     response into a transport-level failure.
 
-    Anything the caller got wrong — an unknown name, a non-object arguments, a
-    missing required property — raises InvalidToolRequest rather than reaching a
-    handler, so a malformed call can never run a tool's default behavior.
+    Anything the caller got wrong — an unknown name, a tool the options withhold,
+    a non-object arguments, a missing required property — raises
+    InvalidToolRequest rather than reaching a handler, so a malformed call can
+    never run a tool's default behavior.
     """
     tool = TOOLS.get(name)
     if tool is None:
         raise UnknownTool(f"Unknown tool: {name}")
+
+    if reason := _unavailable_reason(hass, name):
+        raise ToolNotAvailable(reason)
 
     if not isinstance(arguments, dict):
         got = type(arguments).__name__

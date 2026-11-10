@@ -60,6 +60,15 @@ You can change this setting later via Settings > Devices & Services > MCP Server
 
 `render_template` is off by default. A template can read every state, attribute, device and area on the instance in one call, and can call functions such as `states`, `state_attr`, `device_attr` and `integration_entities`, which is why Home Assistant limits its own template developer tool to administrators. Turn on **Enable template rendering** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that access.
 
+### Limiting the tools
+
+Two options decide which tools a client is offered at all (Settings > Devices & Services > MCP Server > Configure). A tool they withhold is left out of the tool list and refused if a client calls it anyway.
+
+- **Read-only mode** keeps only the tools that read: listing, searching, and fetching state, history, configuration and logs. Everything that can change something is withheld, including `call_service`.
+- **Disabled tools** switches off individual tools by name, for example `restart_ha`.
+
+Both apply on top of the feature options below, which still decide whether tools such as `render_template` or `get_camera_image` do anything.
+
 ### Integration management
 
 `start_config_flow`, `continue_config_flow`, `abort_config_flow`, `reload_integration` and `delete_integration` are off by default. They run the same config flows as the "Add integration" dialog and act on existing config entries, so a client can add an integration or remove one along with its devices and entities. Turn on **Enable integration management** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that.

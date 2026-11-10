@@ -47,8 +47,10 @@ from pytest_homeassistant_custom_component.common import (
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.mcp_server_http_transport.const import (
+    CONF_DISABLED_TOOLS,
     CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
+    CONF_READ_ONLY,
     DOMAIN,
     EVENT_TOOL_CALLED,
     ISSUE_ENDPOINT_CONFLICT,
@@ -785,3 +787,51 @@ async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
         removed = await call("delete_integration", {"entry_id": entry.entry_id, "confirm": True})
         assert removed["require_restart"] is False
         assert hass.config_entries.async_entries("mcp_demo") == []
+
+
+async def test_read_only_mode_and_disabled_tools_limit_what_a_client_can_reach(
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """The limits set on the entry hold over HTTP, for listing and for calling."""
+    assert await async_setup_component(hass, "http", {})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_NATIVE_AUTH: True, CONF_READ_ONLY: True, CONF_DISABLED_TOOLS: ["get_error_log"]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    events = async_capture_events(hass, "mcp_e2e")
+    audit = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client()
+
+    async def rpc(method: str, params: dict | None = None) -> dict:
+        resp = await client.post(
+            MCP_HTTP_PATH,
+            json={"jsonrpc": "2.0", "method": method, "params": params or {}, "id": 1},
+        )
+        assert resp.status == 200
+        return await resp.json()
+
+    names = {tool["name"] for tool in (await rpc("tools/list"))["result"]["tools"]}
+    assert "get_state" in names
+    assert not names & {"fire_event", "call_service", "get_error_log"}
+
+    refused = await rpc(
+        "tools/call", {"name": "fire_event", "arguments": {"event_type": "mcp_e2e"}}
+    )
+    assert refused["error"]["code"] == -32602
+    assert "read-only mode" in refused["error"]["message"]
+    disabled = await rpc("tools/call", {"name": "get_error_log", "arguments": {}})
+    assert disabled["error"]["code"] == -32602
+    assert "turned off" in disabled["error"]["message"]
+    allowed = await rpc("tools/call", {"name": "get_config", "arguments": {}})
+    assert "error" not in allowed
+
+    await hass.async_block_till_done()
+    assert events == []
+    # The refused write is still on the audit trail, marked as never having run.
+    (refusal,) = audit
+    assert refusal.data["tool"] == "fire_event"
+    assert refusal.data["outcome"] == "invalid"

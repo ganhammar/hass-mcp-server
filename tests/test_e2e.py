@@ -926,6 +926,50 @@ async def test_areas_devices_and_entities_are_managed_over_http(
     )
 
 
+async def test_diagnostics_are_read_over_http(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """Repairs, system health and backups come from this core's own components."""
+    assert await async_setup_component(hass, "system_health", {})
+    assert await async_setup_component(hass, "backup", {})
+    await hass.async_block_till_done()
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "endpoint_conflict",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="endpoint_conflict",
+        translation_placeholders={"path": "/api/mcp", "dedicated_path": "/api/mcp_http"},
+    )
+    client = await hass_client()
+
+    async def call(name: str) -> dict | list:
+        resp = await client.post(
+            MCP_HTTP_PATH,
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": name, "arguments": {}},
+                "id": 1,
+            },
+        )
+        result = (await resp.json())["result"]
+        assert "isError" not in result, result
+        return json.loads(result["content"][0]["text"])
+
+    issues = {issue["issue_id"]: issue for issue in await call("list_repairs")}
+    assert issues["endpoint_conflict"]["title"] == "Another integration also serves /api/mcp"
+    assert issues["endpoint_conflict"]["severity"] == "warning"
+
+    assert isinstance(await call("get_system_health"), dict)
+
+    backups = await call("list_backups")
+    assert (backups["backups"], backups["total"], backups["state"]) == ([], 0, "idle")
+
+
 async def test_read_only_mode_and_disabled_tools_limit_what_a_client_can_reach(
     enable_custom_integrations: None,
     hass: HomeAssistant,

@@ -37,7 +37,10 @@ FAILING_CALLS = {
     "knx": ("knx_get_base_data", {}),
     "labels": ("update_label", {"label_id": "nope", "name": "Kitchen"}),
     "registries": ("delete_area", {"area_id": "nope"}),
-    "statistics": ("get_statistics", {"entity_id": "sensor.energy", "start_time": "nope"}),
+    "statistics": (
+        "adjust_statistics",
+        {"statistic_id": "sensor.energy", "start_time": "nope", "adjustment": 1},
+    ),
     "system": ("render_template", {"template": "{{ 1 }}"}),
     "system_admin": ("restart_ha", {"confirm": False}),
     "traces": ("list_traces", {}),
@@ -107,8 +110,20 @@ async def test_a_no_op_is_not_an_error(hass: HomeAssistant, options: dict):
 
 async def test_a_trace_that_has_not_run_yet_is_not_an_error(hass: HomeAssistant, options: dict):
     assert await async_setup_component(hass, "trace", {})
+    hass.states.async_set("automation.porch", "on")
 
     result = await call_tool(hass, "get_trace", {"entity_id": "automation.porch"})
 
     assert "isError" not in result, result
     assert result["content"][0]["text"].startswith("No traces found")
+
+
+async def test_a_trace_of_something_that_does_not_exist_is_an_error(
+    hass: HomeAssistant, options: dict
+):
+    assert await async_setup_component(hass, "trace", {})
+
+    result = await call_tool(hass, "get_trace", {"entity_id": "automation.porch"})
+
+    assert result["isError"] is True
+    assert result["content"][0]["text"].startswith("No automation or script with entity_id")

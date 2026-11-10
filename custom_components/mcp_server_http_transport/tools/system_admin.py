@@ -101,11 +101,14 @@ async def get_error_log(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
         return {"content": [{"type": "text", "text": log_text}]}
     except FileNotFoundError:
         fallback = _read_system_log_buffer(hass, lines)
-        if fallback is not None:
+        if fallback:
             return {"content": [{"type": "text", "text": fallback}]}
+        if fallback is not None:
+            nothing = "No warnings or errors have been logged since Home Assistant started."
+            return {"content": [{"type": "text", "text": nothing}]}
         return error_result(
             f"Log file not found at {log_path}, and Home Assistant's in-memory "
-            "system log buffer is empty or unavailable. Home Assistant may not be "
+            "system log buffer is unavailable. Home Assistant may not be "
             "configured to write logs to disk; enable file logging via the "
             "'logger:' integration in configuration.yaml."
         )
@@ -120,7 +123,8 @@ def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
     The system_log component keeps a deduplicated buffer of recent warning and
     error records in memory regardless of whether on-disk file logging is
     enabled, so it gives useful output on installs where home-assistant.log is
-    absent. Returns None when the component is unavailable or the buffer is empty.
+    absent. Returns None when the component is unavailable, and an empty string
+    when it is there and has recorded nothing.
     """
     handler = hass.data.get("system_log")
     to_list = getattr(getattr(handler, "records", None), "to_list", None)
@@ -132,8 +136,10 @@ def _read_system_log_buffer(hass: HomeAssistant, limit: int) -> str | None:
     # rather than escaping as an internal error.
     try:
         entries = to_list()
-        if not isinstance(entries, list) or not entries:
+        if not isinstance(entries, list):
             return None
+        if not entries:
+            return ""
         shown = entries[: max(1, limit)]
         formatted = redact_log_text("\n".join(_format_system_log_entry(entry) for entry in shown))
     except Exception as e:

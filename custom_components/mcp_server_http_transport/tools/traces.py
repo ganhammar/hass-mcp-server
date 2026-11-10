@@ -307,6 +307,13 @@ async def get_trace(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
         # surface as an error rather than being mistaken for "no traces".
         summaries = await async_list_traces(hass, domain, key)
         if not summaries:
+            # Nothing traced yet is an answer. Nothing by that name is a failed lookup.
+            known = hass.states.get(entity_id) or er.async_get(hass).async_get(entity_id)
+            if known is None:
+                return error_result(
+                    f"No automation or script with entity_id '{entity_id}'. "
+                    "Use list_automations or list_scripts to find it."
+                )
             return {"content": [{"type": "text", "text": _no_traces}]}
 
         if run_id:

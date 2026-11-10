@@ -445,6 +445,17 @@ class TestReloadIntegration:
 
         assert "No config entry with ID 'gone'" in text
 
+    async def test_an_entry_that_fails_to_set_up_again_is_an_error(
+        self, hass: HomeAssistant, demo_entry: MockConfigEntry
+    ):
+        with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=False)):
+            result = await call_tool(hass, "reload_integration", {"entry_id": demo_entry.entry_id})
+
+        assert result["isError"] is True
+        assert result["content"][0]["text"].startswith(
+            "The config entry was reloaded but did not set up again: "
+        )
+
     async def test_an_entry_that_may_not_be_reloaded_is_reported(
         self, hass: HomeAssistant, demo_entry: MockConfigEntry
     ):

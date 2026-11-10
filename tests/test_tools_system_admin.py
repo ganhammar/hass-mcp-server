@@ -772,8 +772,8 @@ class TestToolsSystemAdmin:
         assert "(3x)" in text
         assert "ValueError: boom" in text
 
-    async def test_get_error_log_empty_buffer_returns_not_found(self, view, mock_hass):
-        """An empty system_log buffer falls through to the not-found message."""
+    async def test_get_error_log_empty_buffer_says_nothing_was_logged(self, view, mock_hass):
+        """A buffer that is there and empty is an answer, not a failure."""
         mock_hass.config.path.return_value = "/nonexistent/home-assistant.log"
         handler = Mock()
         handler.records.to_list.return_value = []
@@ -796,10 +796,8 @@ class TestToolsSystemAdmin:
 
         assert response.status == 200
         body = json.loads(response.body)
-        assert body["result"]["isError"] is True
-        text = body["result"]["content"][0]["text"]
-        assert "Log file not found" in text
-        assert "logger:" in text
+        assert "isError" not in body["result"]
+        assert body["result"]["content"][0]["text"].startswith("No warnings or errors have been")
 
     async def test_get_error_log_buffer_read_failure_degrades_to_not_found(self, view, mock_hass):
         """If the system_log buffer raises, degrade to the not-found message, not a 500."""

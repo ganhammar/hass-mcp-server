@@ -527,11 +527,15 @@ async def reload_integration(hass: HomeAssistant, arguments: dict[str, Any]) -> 
         return _own_entry("reload")
 
     try:
-        await hass.config_entries.async_reload(entry_id)
+        loaded = await hass.config_entries.async_reload(entry_id)
     except config_entries.OperationNotAllowed as err:
         return error_result(f"Config entry '{entry_id}' cannot be reloaded: {err}")
 
-    return _text(dumps({**_entry_json(entry), "require_restart": not entry.state.recoverable}))
+    result = dumps({**_entry_json(entry), "require_restart": not entry.state.recoverable})
+    # A disabled entry is unloaded and left that way, which is what a reload of it does.
+    if not loaded and not entry.disabled_by:
+        return error_result(f"The config entry was reloaded but did not set up again: {result}")
+    return _text(result)
 
 
 @register_tool(

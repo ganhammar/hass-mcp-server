@@ -165,11 +165,12 @@ class TestCalendarContracts:
         reports rrule/recurrence_id; delete_calendar_events matches on uid and
         passes it to async_delete_event, so it cannot work without one.
 
-        If this test fails because the set grew, the swap in issue #78 has
+        The set grows between releases (2026.10 added status). If this test
+        fails because it took in the three fields, the swap in issue #78 has
         become possible: move both tools onto the service and delete the
         DATA_COMPONENT lookup above.
         """
-        assert LIST_EVENT_FIELDS == {"start", "end", "summary", "description", "location"}
+        assert {"start", "end", "summary", "description", "location"} <= LIST_EVENT_FIELDS
         assert not {"uid", "rrule", "recurrence_id"} & LIST_EVENT_FIELDS
 
 

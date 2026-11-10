@@ -90,6 +90,11 @@ def device(hass: HomeAssistant) -> dr.DeviceEntry:
     )
 
 
+def _config_entry_id(device: dr.DeviceEntry) -> str:
+    """Return a device's config entry, by the attribute this core has for it."""
+    return getattr(device, "config_entry_id", None) or device.primary_config_entry
+
+
 @pytest.fixture
 def entity(hass: HomeAssistant, device: dr.DeviceEntry) -> str:
     return (
@@ -99,7 +104,11 @@ def entity(hass: HomeAssistant, device: dr.DeviceEntry) -> str:
             "demo",
             "lamp-1",
             device_id=device.id,
-            config_entry=hass.config_entries.async_get_entry(device.primary_config_entry),
+            config_entry=hass.config_entries.async_get_entry(_config_entry_id(device)),
+            # An entity that takes its name from its device cannot have an area of
+            # its own on newer cores.
+            has_entity_name=True,
+            original_name="Bulb",
         )
         .entity_id
     )
@@ -612,7 +621,7 @@ class TestDeleteDevice:
         _, device = await _owned_device(hass, hook=AsyncMock(return_value=True))
         registry = dr.async_get(hass)
         child = registry.async_get_or_create(
-            config_entry_id=device.primary_config_entry, identifiers={("gadget", "socket-1")}
+            config_entry_id=_config_entry_id(device), identifiers={("gadget", "socket-1")}
         )
         er.async_get(hass).async_get_or_create("switch", "gadget", "s1", device_id=child.id)
         children = [

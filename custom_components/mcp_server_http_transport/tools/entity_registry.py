@@ -3,6 +3,7 @@
 from typing import Any
 
 from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
+from homeassistant.const import ATTR_RESTORED
 from homeassistant.core import HomeAssistant, valid_domain, valid_entity_id
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -296,3 +297,52 @@ async def update_entity_registry(hass: HomeAssistant, arguments: dict[str, Any])
             "warning": _WARNING,
         }
     )
+
+
+@register_tool(
+    name="delete_entity",
+    description=(
+        "Delete an entity's registry entry, for a leftover entity that no integration "
+        "provides any more (it shows as unavailable or restored). The entry's name, area, "
+        "labels and other settings are lost. An entity that is still provided is refused, "
+        "because Home Assistant would add it straight back: disable it with "
+        "update_entity_registry instead, or use delete_helper, delete_automation and the "
+        "like for what those tools manage. Requires explicit confirmation."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_id": _ENTITY_ID,
+            "confirm": {
+                "type": "boolean",
+                "description": "Must be true to confirm deleting the registry entry.",
+            },
+        },
+        "required": ["entity_id", "confirm"],
+        "additionalProperties": False,
+    },
+    annotations=ANNOTATION_DESTRUCTIVE,
+)
+async def delete_entity(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Remove a registry entry nothing provides, as the frontend allows."""
+    entity_id = arguments["entity_id"]
+    if not _valid_id(entity_id):
+        return _error("Invalid entity_id; expected domain.object_id.")
+    if arguments["confirm"] is not True:
+        return _error("Deleting an entity's registry entry requires confirm=true.")
+
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    if entry is None:
+        return _error(f"Entity is not in the registry: {entity_id}")
+
+    state = hass.states.get(entity_id)
+    if state is not None and not state.attributes.get(ATTR_RESTORED):
+        return _error(
+            f"{entity_id} is still provided by '{entry.platform}', so Home Assistant would "
+            "add it back. Disable it with update_entity_registry (disabled=true), or delete "
+            "what provides it."
+        )
+
+    registry.async_remove(entity_id)
+    return _result({"deleted": _entry(entry)})

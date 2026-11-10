@@ -32,6 +32,7 @@ from homeassistant.config_entries import ConfigEntryState, ConfigFlow
 from homeassistant.const import EVENT_COMPONENT_LOADED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import category_registry as cr
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import ATTR_COMPONENT, async_setup_component
@@ -787,6 +788,91 @@ async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
         removed = await call("delete_integration", {"entry_id": entry.entry_id, "confirm": True})
         assert removed["require_restart"] is False
         assert hass.config_entries.async_entries("mcp_demo") == []
+
+
+async def test_areas_devices_and_entities_are_managed_over_http(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """The registry tools run against this core's own registries, start to finish."""
+    mock_integration(
+        hass,
+        MockModule(
+            "mcp_gadget",
+            async_setup_entry=AsyncMock(return_value=True),
+            async_remove_config_entry_device=AsyncMock(return_value=True),
+        ),
+    )
+    mock_platform(hass, "mcp_gadget.config_flow", None)
+    owner = MockConfigEntry(domain="mcp_gadget")
+    owner.add_to_hass(hass)
+    with mock_config_flow("mcp_gadget", _OneFormFlow):
+        assert await hass.config_entries.async_setup(owner.entry_id)
+    devices = dr.async_get(hass)
+    entities = er.async_get(hass)
+    device = devices.async_get_or_create(
+        config_entry_id=owner.entry_id, identifiers={("mcp_gadget", "plug")}, name="Plug"
+    )
+    entity_id = entities.async_get_or_create(
+        "switch", "mcp_gadget", "plug", device_id=device.id, config_entry=owner
+    ).entity_id
+    leftover = entities.async_get_or_create("sensor", "mcp_gadget", "gone").entity_id
+    client = await hass_client()
+
+    async def call(name: str, arguments: dict) -> str:
+        resp = await client.post(
+            MCP_HTTP_PATH,
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+                "id": 1,
+            },
+        )
+        result = (await resp.json())["result"]
+        assert "isError" not in result, result
+        return result["content"][0]["text"]
+
+    def created(text: str) -> dict:
+        return json.loads(text[text.index("{") :])
+
+    floor = created(await call("create_floor", {"name": "Upstairs", "level": 1}))
+    area = created(await call("create_area", {"name": "Study", "floor_id": floor["floor_id"]}))
+    assert json.loads(await call("list_floors", {})) == [floor]
+    assert json.loads(await call("list_areas", {})) == [area]
+
+    moved = created(await call("update_device", {"device_id": device.id, "area_id": area["id"]}))
+    assert moved["area_id"] == area["id"]
+    hidden = json.loads(
+        await call(
+            "update_entity_registry", {"entity_id": entity_id, "hidden": True, "apply": True}
+        )
+    )
+    assert hidden["after"]["hidden_by"] == "user"
+
+    hass.states.async_set(entity_id, "on")
+    refused = await call("delete_entity", {"entity_id": entity_id, "confirm": True})
+    assert "still provided" in refused
+    assert (
+        json.loads(await call("delete_entity", {"entity_id": leftover, "confirm": True}))[
+            "deleted"
+        ]["entity_id"]
+        == leftover
+    )
+
+    deleted = await call("delete_device", {"device_id": device.id, "confirm": True})
+    assert deleted == f"Deleted device 'Plug' ({device.id}) and its 1 entity"
+    await hass.async_block_till_done()
+    assert devices.async_get(device.id) is None
+    assert entities.async_get(entity_id) is None
+
+    assert await call("delete_area", {"area_id": area["id"]}) == (
+        f"Deleted area 'Study' ({area['id']})"
+    )
+    assert await call("delete_floor", {"floor_id": floor["floor_id"]}) == (
+        f"Deleted floor 'Upstairs' ({floor['floor_id']})"
+    )
 
 
 async def test_read_only_mode_and_disabled_tools_limit_what_a_client_can_reach(

@@ -12,6 +12,7 @@ area or label exists before assigning it.
 from typing import Any
 
 import voluptuous as vol
+from homeassistant import loader
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import config_validation as cv
@@ -540,3 +541,99 @@ async def update_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
     except Exception as e:
         return _error("updating device", e)
     return _text(f"Updated device {dumps(device_json(device))}")
+
+
+def _config_entry_ids(device: Any) -> list[str]:
+    """Return the config entries a device belongs to: one, or several on older cores."""
+    if (entry_id := getattr(device, "config_entry_id", None)) is not None:
+        return [entry_id]
+    return sorted(device.config_entries)
+
+
+async def _integration_lets_go(hass: HomeAssistant, config_entry: Any, device: Any) -> bool:
+    """Ask the integration behind a config entry whether its device may be removed."""
+    try:
+        integration = await loader.async_get_integration(hass, config_entry.domain)
+        component = await integration.async_get_component()
+    except (ImportError, loader.IntegrationNotFound):
+        raise ValueError(f"The integration '{config_entry.domain}' could not be loaded") from None
+    return await component.async_remove_config_entry_device(hass, config_entry, device)
+
+
+@register_tool(
+    name="delete_device",
+    description=(
+        "Delete a device and its entities from Home Assistant, for a device that is gone "
+        "or was replaced. Only integrations that support removing a device allow it, and "
+        "an integration may refuse while the device is still connected. A device the "
+        "integration still finds is added again. This cannot be undone. Requires explicit "
+        "confirmation"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "device_id": {
+                "type": "string",
+                "description": "ID of the device to delete (see list_devices)",
+            },
+            "confirm": {
+                "type": "boolean",
+                "description": "Must be true to confirm deleting the device and its entities",
+            },
+        },
+        "required": ["device_id", "confirm"],
+    },
+    annotations=ANNOTATION_DESTRUCTIVE,
+)
+async def delete_device(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Delete a device the way the frontend does, with its integrations' consent."""
+    if arguments["confirm"] is not True:
+        return _text(
+            "Deleting a device requires confirm=true. It removes the device together with "
+            "its entities."
+        )
+    try:
+        registry = dr.async_get(hass)
+        device_id = arguments["device_id"]
+        device, _ = _device(registry, device_id)
+
+        config_entries = []
+        for entry_id in _config_entry_ids(device):
+            config_entry = hass.config_entries.async_get_entry(entry_id)
+            if config_entry is None:
+                raise ValueError(f"The device's config entry '{entry_id}' no longer exists")
+            if not config_entry.supports_remove_device:
+                raise ValueError(
+                    f"The integration '{config_entry.domain}' does not support deleting a "
+                    "device. Remove it in the integration itself, or delete the whole "
+                    "config entry with delete_integration"
+                )
+            config_entries.append(config_entry)
+
+        entities = len(
+            er.async_entries_for_device(
+                er.async_get(hass), device_id, include_disabled_entities=True
+            )
+        )
+        # A device several integrations share is let go of one at a time, and is
+        # gone once the last has. Each may have removed it already.
+        for position, config_entry in enumerate(config_entries, start=1):
+            if not await _integration_lets_go(hass, config_entry, device):
+                raise ValueError(
+                    f"The integration '{config_entry.domain}' refused to remove the device, "
+                    "usually because it is still connected"
+                )
+            if registry.async_get(device_id) is None:
+                break
+            if position < len(config_entries):
+                registry.async_update_device(
+                    device_id, remove_config_entry_id=config_entry.entry_id
+                )
+            else:
+                registry.async_remove_device(device_id)
+    except Exception as e:
+        return _error("deleting device", e)
+
+    name = device.name_by_user or device.name
+    suffix = f" and its {_count(entities, 'entity', 'entities')}" if entities else ""
+    return _text(f"Deleted device '{name}' ({device_id}){suffix}")

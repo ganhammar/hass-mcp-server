@@ -209,6 +209,7 @@ from . import (  # noqa: E402
     config,  # noqa: F401
     config_files,  # noqa: F401
     dashboards,  # noqa: F401
+    diagnostics,  # noqa: F401
     entities,  # noqa: F401
     entity_registry,  # noqa: F401
     helpers,  # noqa: F401

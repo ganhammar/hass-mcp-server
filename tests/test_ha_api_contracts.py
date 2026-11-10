@@ -45,6 +45,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import floor_registry as fr
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.category_registry import CategoryEntry, CategoryRegistry
 from homeassistant.helpers.data_entry_flow import FlowManagerResourceView
@@ -491,6 +492,81 @@ class TestRegistryWriteContracts:
         assert dr.DeviceEntryDisabler.USER.value == "user"
         assert er.RegistryEntryDisabler.USER.value == "user"
         assert er.RegistryEntryHider.USER.value == "user"
+
+
+class TestDiagnosticsContracts:
+    """Contracts for tools/diagnostics.py.
+
+    System health and backups have no service. The tools read them the way core's
+    websocket commands do: get_info from the system_health component, and the
+    backup manager kept in hass.data.
+    """
+
+    def test_system_health_reports_through_get_info(self):
+        from homeassistant.components import system_health
+
+        assert _params(system_health.get_info) == ["hass"]
+        assert inspect.iscoroutinefunction(system_health.get_info)
+        assert system_health.DOMAIN == "system_health"
+
+    async def test_the_backup_manager_lists_backups_and_knows_the_schedule(
+        self, hass: HomeAssistant, backup_manager
+    ):
+        from homeassistant.components.backup.manager import AgentBackupStatus, ManagerBackup
+
+        manager = backup_manager
+
+        backups, agent_errors = await manager.async_get_backups()
+        assert (backups, agent_errors) == ({}, {})
+        assert str(manager.state) == "idle"
+        config = manager.config.data
+        assert hasattr(config, "last_attempted_automatic_backup")
+        assert hasattr(config, "last_completed_automatic_backup")
+        assert hasattr(config.schedule, "next_automatic_backup")
+        assert {
+            "backup_id",
+            "name",
+            "date",
+            "homeassistant_version",
+            "database_included",
+            "addons",
+            "folders",
+            "agents",
+            "failed_agent_ids",
+            "with_automatic_settings",
+        } <= {f.name for f in dataclasses.fields(ManagerBackup)}
+        assert {f.name for f in dataclasses.fields(AgentBackupStatus)} == {"protected", "size"}
+
+    async def test_an_issues_text_is_keyed_by_the_integration_that_raised_it(
+        self, hass: HomeAssistant
+    ):
+        """list_repairs builds the translation key the frontend does.
+
+        Core raises its reauth issue as homeassistant with the integration it is
+        about in issue_domain, and the text is under homeassistant.
+        """
+        from homeassistant.helpers import translation
+
+        texts = await translation.async_get_translations(hass, "en", "issues", {"homeassistant"})
+
+        assert "{name}" in texts["component.homeassistant.issues.config_entry_reauth.title"]
+        assert "component.homeassistant.issues.config_entry_reauth.description" in texts
+
+    def test_an_issue_carries_the_listed_fields(self):
+        assert {
+            "active",
+            "breaks_in_ha_version",
+            "created",
+            "dismissed_version",
+            "domain",
+            "is_fixable",
+            "issue_domain",
+            "issue_id",
+            "learn_more_url",
+            "severity",
+            "translation_key",
+            "translation_placeholders",
+        } <= {f.name for f in dataclasses.fields(ir.IssueEntry)}
 
 
 class TestCategoryContracts:

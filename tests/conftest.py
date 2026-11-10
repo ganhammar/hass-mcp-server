@@ -64,3 +64,25 @@ def mock_config_entry():
     entry.add_update_listener = Mock()
     entry.entry_id = "test_entry_id"
     return entry
+
+
+@pytest.fixture
+async def backup_manager(hass):
+    """Set up the backup integration and return its manager.
+
+    Some Home Assistant versions create the backup data during startup, through
+    a helper the test environment never calls, and set up fails without it.
+    """
+    from homeassistant.components.backup.const import DATA_MANAGER
+    from homeassistant.setup import async_setup_component
+
+    try:
+        from homeassistant.helpers.backup import async_initialize_backup
+    except ImportError:
+        pass
+    else:
+        async_initialize_backup(hass)
+
+    assert await async_setup_component(hass, "backup", {})
+    await hass.async_block_till_done()
+    return hass.data[DATA_MANAGER]

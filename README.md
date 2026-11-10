@@ -328,6 +328,9 @@ been copied and source identity/metadata checked for changes during copying.
 | `check_config` | Validate Home Assistant configuration without restarting |
 | `restart_ha` | Restart Home Assistant (requires explicit confirmation) |
 | `get_error_log` | Fetch the Home Assistant error log (last N lines); tokens, API keys, and URL credentials are redacted |
+| `list_repairs` | List the repair issues Home Assistant raises, with severity, title and description |
+| `get_system_health` | System health report: what each integration says about itself (versions, reachability, database size) |
+| `list_backups` | List backups, newest first, with where each is stored, and when automatic backups last ran and run next |
 | `list_areas` | List all areas |
 | `list_devices` | List devices, optionally filtered by area |
 | `update_device` | Rename a device, move it to an area, set its labels, or disable or enable it |

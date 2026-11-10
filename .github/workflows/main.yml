@@ -29,10 +29,13 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Set up Python 3.13
+    # The lock follows the newest pytest-homeassistant-custom-component, which
+    # needs Python 3.14. The code itself stays compatible with 3.13 (Black and
+    # Ruff target py313), which the two oldest integration legs run on.
+    - name: Set up Python 3.14
       uses: actions/setup-python@v7
       with:
-        python-version: "3.13"
+        python-version: "3.14"
 
     - name: Install Poetry
       uses: snok/install-poetry@v1

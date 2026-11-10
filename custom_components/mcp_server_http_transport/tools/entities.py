@@ -300,6 +300,8 @@ async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
                 "model": device.model,
                 "area_id": device.area_id,
                 "name_by_user": device.name_by_user,
+                "labels": sorted(device.labels),
+                "disabled_by": device.disabled_by,
             }
         )
 

@@ -583,12 +583,18 @@ class TestToolsSystemAdmin:
         mock_entry1.title = "Philips Hue"
         mock_entry1.state = "loaded"
         mock_entry1.entry_id = "entry1"
+        mock_entry1.disabled_by = None
+        mock_entry1.supports_options = False
+        mock_entry1.supports_reconfigure = False
 
         mock_entry2 = Mock()
         mock_entry2.domain = "zwave"
         mock_entry2.title = "Z-Wave"
         mock_entry2.state = "loaded"
         mock_entry2.entry_id = "entry2"
+        mock_entry2.disabled_by = None
+        mock_entry2.supports_options = False
+        mock_entry2.supports_reconfigure = False
 
         mock_hass.config_entries.async_entries.return_value = [mock_entry1, mock_entry2]
 

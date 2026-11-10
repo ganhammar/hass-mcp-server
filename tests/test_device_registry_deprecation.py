@@ -17,7 +17,10 @@ from homeassistant.helpers import label_registry as lr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mcp_server_http_transport.resources import read_resource
-from custom_components.mcp_server_http_transport.tools.entities import list_devices
+from custom_components.mcp_server_http_transport.tools.entities import (
+    get_device_details,
+    list_devices,
+)
 from custom_components.mcp_server_http_transport.tools.labels import delete_label
 
 
@@ -83,4 +86,54 @@ async def test_deleting_a_label_counts_its_devices_without_using_the_registry_as
     result = await delete_label(hass, {"label_id": label.label_id})
 
     assert "1 device" in result["content"][0]["text"]
+    _assert_nothing_reported(reported, caplog)
+
+
+@pytest.fixture
+def child_device(hass: HomeAssistant, devices) -> dr.DeviceEntry:
+    """A child of the first device, on a core that has child devices."""
+    registry = dr.async_get(hass)
+    create_child = getattr(registry, "async_get_or_create_child", None)
+    if create_child is None:
+        pytest.skip("this core has no child devices")
+    return create_child(
+        config_entry_id=devices[0].config_entry_id,
+        identifiers={("demo", "socket-1")},
+        name="Socket 1",
+        parent_device_id=devices[0].id,
+    )
+
+
+async def test_a_child_device_is_described_without_the_details_it_does_not_have(
+    hass, devices, child_device, reported, caplog
+):
+    """A child device has no manufacturer or model, and reading them is reported."""
+    result = await get_device_details(hass, {"device_id": child_device.id})
+
+    described = json.loads(result["content"][0]["text"])["device"]
+    assert described == {
+        "id": child_device.id,
+        "name": "Socket 1",
+        "manufacturer": None,
+        "model": None,
+        "area_id": None,
+        "name_by_user": None,
+        "parent_device_id": devices[0].id,
+    }
+    _assert_nothing_reported(reported, caplog)
+
+
+async def test_deleting_a_label_counts_the_child_devices_that_carry_it(
+    hass, devices, child_device, reported, caplog
+):
+    """Home Assistant clears the label from child devices too."""
+    registry = dr.async_get(hass)
+    label = lr.async_get(hass).async_create("Doomed")
+    registry.async_update_device(devices[0].id, labels={label.label_id})
+    registry.async_update_child_device(child_device.id, labels={label.label_id})
+
+    result = await delete_label(hass, {"label_id": label.label_id})
+
+    assert "2 devices" in result["content"][0]["text"]
+    assert registry.async_get(child_device.id).labels == set()
     _assert_nothing_reported(reported, caplog)

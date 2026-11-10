@@ -210,7 +210,17 @@ def _floor_changes(arguments: dict[str, Any]) -> dict[str, Any]:
     return changes
 
 
-def device_entries(registry: dr.DeviceRegistry) -> list[Any]:
+def is_child_device(device: Any) -> bool:
+    """Return True for a child device, on cores that have them.
+
+    A child device carries no manufacturer, model or other hardware details of its
+    own. Reading one of those off it is reported as deprecated.
+    """
+    child_class = getattr(dr, "ChildDeviceEntry", None)
+    return child_class is not None and isinstance(device, child_class)
+
+
+def device_entries(registry: dr.DeviceRegistry) -> list[dr.DeviceEntry]:
     """Return every device in the registry.
 
     `registry.devices` is a mapping of device ID to entry on older cores, where iterating

@@ -449,6 +449,9 @@ class TestRegistryWriteContracts:
         )
 
         devices = registry.devices
+        # The view arrived with the deprecation. Were it to become a mapping, the
+        # helper would go back to the access the view reports.
+        assert isinstance(devices, Mapping) is not hasattr(dr, "_DeprecatedDeviceRegistryItemsView")
         if isinstance(devices, Mapping):
             assert list(devices) == [device.id]
             assert list(devices.values()) == [device]

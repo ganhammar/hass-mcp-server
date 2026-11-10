@@ -42,6 +42,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.category_registry import CategoryEntry, CategoryRegistry
+from homeassistant.helpers.data_entry_flow import FlowManagerResourceView
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.entity_registry import EntityRegistry, RegistryEntry
 from homeassistant.helpers.json import json_encoder_default
@@ -664,3 +665,32 @@ class TestProcessSuccessLoginContract:
     def test_is_a_plain_function_taking_only_the_request(self):
         assert not inspect.iscoroutinefunction(process_success_login)
         assert _params(process_success_login) == ["request"]
+
+
+class TestFlowResultSerializationContract:
+    """tools/integrations.py serializes a step's schema through core's flow view.
+
+    ``_prepare_result_json`` is private, but it is the only place that knows
+    which library turns a voluptuous schema into the field list on a given Home
+    Assistant version: voluptuous_serialize up to 2026.4, probatio after. If it
+    is renamed or stops returning ``data_schema`` as a list, serialize the schema
+    in the tool the way the view then does. test_e2e.py drives the same call
+    through a real flow on every version in the matrix.
+    """
+
+    def test_view_is_built_from_a_flow_manager_alone(self):
+        assert _params(FlowManagerResourceView.__init__) == ["self", "flow_mgr"]
+
+    def test_prepare_result_json_takes_only_the_result(self):
+        assert _params(FlowManagerResourceView._prepare_result_json) == ["self", "result"]
+
+    def test_schema_becomes_a_field_list_and_none_an_empty_one(self):
+        view = FlowManagerResourceView(Mock())
+        result = {"type": "form", "flow_id": "f", "handler": "demo", "step_id": "user"}
+
+        fields = view._prepare_result_json(
+            {**result, "data_schema": vol.Schema({vol.Required("host"): str})}
+        )["data_schema"]
+
+        assert fields == [{"name": "host", "required": True, "type": "string"}]
+        assert view._prepare_result_json({**result, "data_schema": None})["data_schema"] == []

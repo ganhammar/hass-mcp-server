@@ -3,12 +3,11 @@
 import logging
 from typing import Any
 
-import voluptuous_serialize
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import DependencyError
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.data_entry_flow import FlowManagerResourceView
 
 from ..const import DOMAIN
 from . import (
@@ -87,7 +86,7 @@ def _entry_json(entry: config_entries.ConfigEntry) -> dict[str, Any]:
     }
 
 
-def _flow_result_json(result: data_entry_flow.FlowResult) -> dict[str, Any]:
+def _flow_result_json(hass: HomeAssistant, result: data_entry_flow.FlowResult) -> dict[str, Any]:
     """Reduce a flow result to what a caller needs to take the next step.
 
     The data a finished flow collected is left out: it is what the caller just
@@ -111,12 +110,11 @@ def _flow_result_json(result: data_entry_flow.FlowResult) -> dict[str, Any]:
         options = result["menu_options"]
         data["menu_options"] = options if isinstance(options, dict) else list(options)
     if "data_schema" in result:
-        schema = result["data_schema"]
-        data["data_schema"] = (
-            []
-            if schema is None
-            else voluptuous_serialize.convert(schema, custom_serializer=cv.custom_serializer)
-        )
+        # Core's own view turns the voluptuous schema into the field list the
+        # frontend renders. The library behind it differs between Home Assistant
+        # versions, so the view is the one stable way to get the same list.
+        view = FlowManagerResourceView(hass.config_entries.flow)
+        data["data_schema"] = view._prepare_result_json(result)["data_schema"]
     for key in ("errors", "description_placeholders"):
         if result.get(key):
             data[key] = result[key]
@@ -170,7 +168,7 @@ async def start_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             f"({', '.join(err.failed_dependencies)})."
         )
 
-    return _text(dumps(_flow_result_json(result)))
+    return _text(dumps(_flow_result_json(hass, result)))
 
 
 @register_tool(
@@ -223,7 +221,7 @@ async def continue_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -
             f"the flow is still on the same step: {dumps(err.schema_errors)}"
         )
 
-    return _text(dumps(_flow_result_json(result)))
+    return _text(dumps(_flow_result_json(hass, result)))
 
 
 @register_tool(

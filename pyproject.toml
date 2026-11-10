@@ -7,15 +7,15 @@ readme = "README.md"
 package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.13.2"
+python = "^3.14.2"
 python-dateutil = "^2.9.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-black = "^25.9.0"
-ruff = "^0.13.3"
-pre-commit = "^4.2.0"
-pytest-homeassistant-custom-component = "^0.13.286"
+pytest = "^9.0.0"
+black = "^26.10.1"
+ruff = "^0.17.4"
+pre-commit = "^4.7.0"
+pytest-homeassistant-custom-component = "^0.13.375"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

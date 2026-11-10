@@ -187,7 +187,9 @@ async def get_entity_registry(hass: HomeAssistant, arguments: dict[str, Any]) ->
             "area_id": {
                 **AREA_ID_PROPERTY,
                 "description": (
-                    f"{AREA_ID_PROPERTY['description']}, so the entity follows its device's area"
+                    f"{AREA_ID_PROPERTY['description']}, so the entity follows its device's "
+                    "area. Home Assistant 2026.10 and later refuse an area on an entity that "
+                    "takes its name from its device: set the area on the device instead"
                 ),
             },
             "labels": LABELS_PROPERTY,

@@ -6,8 +6,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from homeassistant import data_entry_flow
-from homeassistant.helpers import config_validation as cv
-from voluptuous_serialize import convert
+from homeassistant.helpers.data_entry_flow import FlowManagerResourceView
 
 from custom_components.mcp_server_http_transport import const
 from custom_components.mcp_server_http_transport.config_flow import (
@@ -32,6 +31,15 @@ from custom_components.mcp_server_http_transport.const import (
     DOMAIN,
     validate_appdaemon_apps_root,
 )
+
+
+def _serialized_schema(result) -> list:
+    """Serialize a form's schema the way Home Assistant's own flow view does.
+
+    The library behind it differs between Home Assistant versions, so the view is
+    the one way to ask the question on all of them.
+    """
+    return FlowManagerResourceView(Mock())._prepare_result_json(result)["data_schema"]
 
 
 class TestMCPServerConfigFlow:
@@ -177,7 +185,7 @@ class TestMCPServerConfigFlow:
 
         result = await flow.async_step_user(user_input=None)
 
-        assert convert(result["data_schema"], custom_serializer=cv.custom_serializer)
+        assert _serialized_schema(result)
 
     @pytest.mark.parametrize("root", ["/share/appdaemon/apps", "/media/appdaemon/apps"])
     async def test_user_flow_accepts_shared_appdaemon_root(self, root):
@@ -397,7 +405,7 @@ class TestMCPServerOptionsFlow:
 
         result = await flow.async_step_init(user_input=None)
 
-        assert convert(result["data_schema"], custom_serializer=cv.custom_serializer)
+        assert _serialized_schema(result)
 
     async def test_init_step_shows_current_value(self):
         """Test init step shows current native_auth_enabled value."""

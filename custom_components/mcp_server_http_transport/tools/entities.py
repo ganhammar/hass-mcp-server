@@ -17,7 +17,7 @@ from . import (
     register_tool,
 )
 from .labels import label_json
-from .registries import area_json
+from .registries import area_json, device_entries, is_child_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     area_filter = arguments.get("area_id")
 
     devices = []
-    for device in registry.devices.values():
+    for device in device_entries(registry):
         if area_filter and device.area_id != area_filter:
             continue
         devices.append(
@@ -359,16 +359,19 @@ async def get_device_details(hass: HomeAssistant, arguments: dict[str, Any]) -> 
     if device is None:
         return {"content": [{"type": "text", "text": f"Device {device_id} not found"}]}
 
+    child = is_child_device(device)
     result: dict[str, Any] = {
         "device": {
             "id": device.id,
             "name": device.name,
-            "manufacturer": device.manufacturer,
-            "model": device.model,
+            "manufacturer": None if child else device.manufacturer,
+            "model": None if child else device.model,
             "area_id": device.area_id,
             "name_by_user": device.name_by_user,
         }
     }
+    if child:
+        result["device"]["parent_device_id"] = device.parent_device_id
 
     if include_entities:
         entity_registry = er.async_get(hass)

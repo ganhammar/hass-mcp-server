@@ -17,7 +17,7 @@ from . import (
     register_tool,
 )
 from .labels import label_json
-from .registries import area_json
+from .registries import area_json, device_entries
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -289,7 +289,7 @@ async def list_devices(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     area_filter = arguments.get("area_id")
 
     devices = []
-    for device in registry.devices.values():
+    for device in device_entries(registry):
         if area_filter and device.area_id != area_filter:
             continue
         devices.append(

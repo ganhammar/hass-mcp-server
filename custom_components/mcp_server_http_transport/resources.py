@@ -11,7 +11,7 @@ from homeassistant.helpers import label_registry as lr
 
 from .json_utils import dumps
 from .tools.labels import label_json
-from .tools.registries import area_json, floor_json
+from .tools.registries import area_json, device_entries, floor_json
 
 RESOURCES = [
     {
@@ -198,7 +198,7 @@ def _read_devices(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
             "area_id": device.area_id,
             "name_by_user": device.name_by_user,
         }
-        for device in registry.devices.values()
+        for device in device_entries(registry)
     ]
     return [
         {

@@ -9,6 +9,7 @@ The registries store whatever ID they are handed, so the tools check that a floo
 area or label exists before assigning it.
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -206,6 +207,19 @@ def _floor_changes(arguments: dict[str, Any]) -> dict[str, Any]:
     if (aliases := string_set_argument(arguments, "aliases")) is not None:
         changes["aliases"] = aliases
     return changes
+
+
+def device_entries(registry: dr.DeviceRegistry) -> list[Any]:
+    """Return every device in the registry.
+
+    `registry.devices` is a mapping of device ID to entry on older cores, where iterating
+    yields the IDs. Newer cores expose a view that yields the entries when iterated and
+    reports any use as a mapping as deprecated.
+    """
+    devices = registry.devices
+    if isinstance(devices, Mapping):
+        return list(devices.values())
+    return list(devices)
 
 
 def _device(registry: dr.DeviceRegistry, device_id: str) -> tuple[Any, Any]:

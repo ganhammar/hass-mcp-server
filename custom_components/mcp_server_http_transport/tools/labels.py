@@ -247,9 +247,7 @@ async def delete_label(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             ("entity", "entities"): sum(
                 label_id in e.labels for e in er.async_get(hass).entities.values()
             ),
-            ("device", "devices"): sum(
-                label_id in d.labels for d in dr.async_get(hass).devices.values()
-            ),
+            ("device", "devices"): len(dr.async_entries_for_label(dr.async_get(hass), label_id)),
             ("area", "areas"): sum(label_id in a.labels for a in ar.async_get(hass).areas.values()),
         }
         registry.async_delete(label_id)

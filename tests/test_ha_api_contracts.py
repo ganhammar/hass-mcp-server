@@ -65,6 +65,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.mcp_server_http_transport.const import MCP_PATH
 from custom_components.mcp_server_http_transport.tools.labels import THEME_COLORS
+from custom_components.mcp_server_http_transport.tools.registries import device_entries
 
 # Core's built-in MCP server is what claims /api/mcp (#81). Importing it needs
 # aiohttp_sse, which only its own manifest pulls in, and the streamable endpoint
@@ -426,6 +427,34 @@ class TestRegistryWriteContracts:
 
     def test_devices_in_an_area_are_counted_through_the_helper(self):
         assert _params(dr.async_entries_for_area) == ["registry", "area_id"]
+
+    def test_devices_with_a_label_are_counted_through_the_helper(self):
+        assert _params(dr.async_entries_for_label) == ["registry", "label_id"]
+
+    def test_the_devices_of_a_registry_are_enumerated_by_what_iterating_yields(
+        self, hass: HomeAssistant
+    ):
+        """device_entries reads a mapping through values() and anything else by iterating.
+
+        Older cores hand out a mapping of device ID to entry, whose iteration yields the
+        IDs. Newer cores hand out a view that is not a mapping and yields the entries.
+        """
+        from collections.abc import Mapping
+
+        entry = MockConfigEntry(domain="demo")
+        entry.add_to_hass(hass)
+        registry = dr.async_get(hass)
+        device = registry.async_get_or_create(
+            config_entry_id=entry.entry_id, identifiers={("demo", "lamp")}
+        )
+
+        devices = registry.devices
+        if isinstance(devices, Mapping):
+            assert list(devices) == [device.id]
+            assert list(devices.values()) == [device]
+        else:
+            assert list(devices) == [device]
+        assert device_entries(registry) == [device]
 
     def test_enabling_an_entity_reloads_its_entry_after_a_delay(self):
         from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY

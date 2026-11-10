@@ -14,6 +14,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.resources import _read_labels
 from custom_components.mcp_server_http_transport.tools import (
     TOOLS,
@@ -339,6 +340,11 @@ class TestLabelShape:
 
 class TestDispatch:
     """The tools reach callers through call_tool, which owns required-argument checks."""
+
+    @pytest.fixture(autouse=True)
+    def loaded(self, hass: HomeAssistant) -> None:
+        """Stand in for the set-up entry, without which no tool is dispatched."""
+        hass.data[DOMAIN] = {"read_only": False}
 
     @pytest.mark.parametrize(
         ("tool", "arguments"),

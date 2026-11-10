@@ -169,6 +169,28 @@ class TestAsyncSetupEntry:
 
         assert mock_hass.data[DOMAIN]["template_rendering"] is True
 
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_tool_limits_default_to_none(
+        self, mock_register_views, mock_hass, mock_config_entry
+    ):
+        """Test read-only mode is off and no tool is disabled unless configured."""
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["read_only"] is False
+        assert mock_hass.data[DOMAIN]["disabled_tools"] == frozenset()
+
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_wires_tool_limits(
+        self, mock_register_views, mock_hass, mock_config_entry
+    ):
+        """Test read-only mode and the disabled tools are read into hass.data."""
+        mock_config_entry.data = {"read_only_enabled": True, "disabled_tools": ["restart_ha"]}
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["read_only"] is True
+        assert mock_hass.data[DOMAIN]["disabled_tools"] == frozenset({"restart_ha"})
+
     @pytest.mark.parametrize(
         "data, expected", [({}, False), ({"integration_management_enabled": True}, True)]
     )

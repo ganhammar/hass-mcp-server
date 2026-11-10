@@ -14,9 +14,11 @@ from .const import (
     CONF_APPDAEMON_FILE_ACCESS,
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_CONFIG_FILE_ACCESS,
+    CONF_DISABLED_TOOLS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
+    CONF_READ_ONLY,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
     CONF_TEMPLATE_RENDERING,
@@ -59,6 +61,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN]["template_rendering"] = template_rendering_enabled
     hass.data[DOMAIN]["appdaemon_file_access"] = appdaemon_file_access_enabled
     hass.data[DOMAIN]["integration_management"] = entry.data.get(CONF_INTEGRATION_MANAGEMENT, False)
+    hass.data[DOMAIN]["read_only"] = entry.data.get(CONF_READ_ONLY, False)
+    hass.data[DOMAIN]["disabled_tools"] = frozenset(entry.data.get(CONF_DISABLED_TOOLS, ()))
     hass.data[DOMAIN]["appdaemon_apps_root"] = entry.data.get(
         CONF_APPDAEMON_APPS_ROOT, DEFAULT_APPDAEMON_APPS_ROOT
     )

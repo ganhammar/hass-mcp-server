@@ -19,9 +19,11 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_APPDAEMON_APPS_ROOT,
     CONF_APPDAEMON_FILE_ACCESS,
     CONF_CAMERA_IMAGE_ACCESS,
+    CONF_DISABLED_TOOLS,
     CONF_IMAGE_FILE_ACCESS,
     CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
+    CONF_READ_ONLY,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
     CONF_TEMPLATE_RENDERING,
@@ -289,6 +291,34 @@ class TestMCPServerConfigFlow:
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
         assert result["data"][CONF_INTEGRATION_MANAGEMENT] is True
 
+    async def test_user_flow_form_tool_limits_default_to_none(self):
+        """Test user flow form offers read-only mode off and no tool preselected."""
+        flow = MCPServerConfigFlow()
+        flow.hass = Mock()
+
+        result = await flow.async_step_user(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_READ_ONLY].default() is False
+        assert schema_keys[CONF_DISABLED_TOOLS].default() == []
+
+    async def test_user_flow_persists_tool_limits(self):
+        """Test read-only mode and the disabled tools are stored on the created entry."""
+        flow = MCPServerConfigFlow()
+        flow.hass = Mock()
+
+        result = await flow.async_step_user(
+            user_input={
+                CONF_NATIVE_AUTH: True,
+                CONF_READ_ONLY: True,
+                CONF_DISABLED_TOOLS: ["restart_ha"],
+            }
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_READ_ONLY] is True
+        assert result["data"][CONF_DISABLED_TOOLS] == ["restart_ha"]
+
     async def test_version_is_set(self):
         """Test config flow version is set."""
         flow = MCPServerConfigFlow()
@@ -464,6 +494,46 @@ class TestMCPServerOptionsFlow:
 
         schema_keys = {str(k): k for k in result["data_schema"].schema}
         assert schema_keys[CONF_INTEGRATION_MANAGEMENT].default() is bool(stored)
+
+    async def test_init_step_tool_limits_default_to_none(self):
+        """Test read-only mode is off and no tool is preselected for a fresh entry."""
+        flow = self._create_flow(data={})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_READ_ONLY].default() is False
+        assert schema_keys[CONF_DISABLED_TOOLS].default() == []
+
+    async def test_init_step_shows_current_tool_limits_without_stale_names(self):
+        """Test a stored tool name that no longer exists is not offered back.
+
+        The selector rejects a value outside its options, so a stale name left
+        in would make the form impossible to submit.
+        """
+        flow = self._create_flow(
+            data={CONF_READ_ONLY: True, CONF_DISABLED_TOOLS: ["restart_ha", "removed_tool"]}
+        )
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_READ_ONLY].default() is True
+        assert schema_keys[CONF_DISABLED_TOOLS].default() == ["restart_ha"]
+
+    async def test_init_step_persists_tool_limits(self):
+        """Test init step merges read-only mode and the disabled tools into entry data."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+        user_input = {
+            CONF_NATIVE_AUTH: True,
+            CONF_READ_ONLY: True,
+            CONF_DISABLED_TOOLS: ["restart_ha"],
+        }
+
+        result = await flow.async_step_init(user_input=user_input)
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        data = flow.hass.config_entries.async_update_entry.call_args[1]["data"]
+        assert data[CONF_READ_ONLY] is True
+        assert data[CONF_DISABLED_TOOLS] == ["restart_ha"]
 
     async def test_init_step_persists_integration_management(self):
         """Test init step merges integration management into entry data."""

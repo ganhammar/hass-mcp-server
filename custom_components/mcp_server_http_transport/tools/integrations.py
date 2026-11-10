@@ -111,6 +111,24 @@ def _own_flow() -> dict[str, Any]:
     )
 
 
+def _blocked(hass: HomeAssistant, domain: str) -> dict[str, Any] | None:
+    """Return the refusal for a domain no flow may touch, or None.
+
+    Besides the protected integrations, a template helper renders whatever
+    template it is given into its state, which would get around template
+    rendering being switched off.
+    """
+    if domain in _PROTECTED_DOMAINS:
+        return _own_flow()
+    if domain == "template" and not hass.data.get(DOMAIN, {}).get("template_rendering", False):
+        return _text(
+            "Template helpers render templates, and template rendering is disabled. Enable "
+            "it in the MCP Server integration settings: Settings → Devices & Services → "
+            "MCP Server → Configure → Enable template rendering."
+        )
+    return None
+
+
 def _is_stored_secret(field: dict[str, Any], value: Any) -> bool:
     """Return True when a value a form is filled in with must not be shown."""
     if value in (None, ""):
@@ -348,8 +366,8 @@ async def start_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return _disabled()
 
     domain = arguments["domain"]
-    if domain in _PROTECTED_DOMAINS:
-        return _own_flow()
+    if refusal := _blocked(hass, domain):
+        return refusal
     return await _start(
         hass, hass.config_entries.flow, domain, domain, {"source": config_entries.SOURCE_USER}
     )
@@ -403,8 +421,8 @@ async def continue_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -
     if found is None:
         return _unknown_flow(flow_id)
     manager, domain = found
-    if domain in _PROTECTED_DOMAINS:
-        return _own_flow()
+    if blocked := _blocked(hass, domain):
+        return blocked
 
     if user_input and (refusal := _menu_refusal(manager, flow_id, user_input)):
         return _text(refusal)
@@ -581,8 +599,8 @@ def _editable_entry(
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return None, _unknown_entry(entry_id)
-    if entry.domain in _PROTECTED_DOMAINS:
-        return None, _own_flow()
+    if blocked := _blocked(hass, entry.domain):
+        return None, blocked
     return entry, None
 
 

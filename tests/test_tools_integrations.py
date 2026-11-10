@@ -554,6 +554,34 @@ class TestOwnIntegrationIsOffLimits:
         assert entry.data == {}
 
 
+class TestTemplateHelpers:
+    """A template helper renders a template into its state, like render_template."""
+
+    async def test_are_refused_while_template_rendering_is_off(
+        self, hass: HomeAssistant, demo: None
+    ):
+        text = await _call(hass, "start_config_flow", domain="template")
+
+        assert text.startswith("Template helpers render templates, and template rendering is")
+        assert hass.config_entries.flow.async_progress() == []
+
+    async def test_an_existing_one_cannot_be_edited_either(self, hass: HomeAssistant, demo: None):
+        entry = MockConfigEntry(domain="template")
+        entry.add_to_hass(hass)
+
+        for tool in ("start_options_flow", "start_reconfigure_flow"):
+            text = await _call(hass, tool, entry_id=entry.entry_id)
+            assert text.startswith("Template helpers render templates"), tool
+
+    async def test_are_set_up_once_template_rendering_is_on(self, hass: HomeAssistant, demo: None):
+        hass.data[DOMAIN]["template_rendering"] = True
+
+        result = json.loads(await _call(hass, "start_config_flow", domain="template"))
+
+        assert (result["type"], result["domain"]) == ("menu", "template")
+        await _call(hass, "abort_config_flow", flow_id=result["flow_id"])
+
+
 class TestOptionsFlow:
     async def test_options_are_changed_through_the_shared_steps(
         self, hass: HomeAssistant, demo_entry: MockConfigEntry

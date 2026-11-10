@@ -7,6 +7,7 @@ what get_automation_config, get_dashboard_config and their siblings return.
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -186,6 +187,70 @@ async def test_the_item_limit_is_reported_as_truncated(hass: HomeAssistant):
     assert result["truncated"] is True
 
 
+async def test_keys_and_ids_read_as_the_read_tools_return_them(
+    hass: HomeAssistant, config_dir: Path
+):
+    """An unquoted YAML id is a number and an unquoted on is true; JSON has neither as is."""
+    (config_dir / "automations.yaml").write_text(
+        "- id: 42\n  alias: Odd keys\n  variables:\n"
+        "    on: porch\n    off: porch\n    7: porch\n    ~: porch\n"
+    )
+
+    (item,) = _json(await search_config(hass, {"query": "porch", "types": ["automation"]}))["items"]
+
+    assert item["id"] == "42"
+    assert [match["path"] for match in item["matches"]] == [
+        "/variables/true",
+        "/variables/false",
+        "/variables/7",
+        "/variables/null",
+    ]
+
+
+async def test_a_long_value_is_cut_around_a_match_that_spans_a_line_break(
+    hass: HomeAssistant, config_dir: Path
+):
+    padding = "x" * 200
+    (config_dir / "scripts.yaml").write_text(
+        f'wrapped:\n  description: "{padding} turn on\\n  the porch {padding}"\n'
+    )
+
+    (item,) = _json(await search_config(hass, {"query": "on\n  the porch", "types": ["script"]}))[
+        "items"
+    ]
+
+    assert "turn on the porch" in item["matches"][0]["value"]
+
+
+async def test_a_value_that_is_long_only_for_its_whitespace_is_shown_whole(
+    hass: HomeAssistant, config_dir: Path
+):
+    spaced = "turn on" + " " * 120 + "the porch"
+    (config_dir / "scripts.yaml").write_text(f'spaced:\n  description: "{spaced}"\n')
+
+    (item,) = _json(await search_config(hass, {"query": "porch", "types": ["script"]}))["items"]
+
+    assert item["matches"][0]["value"] == "turn on the porch"
+
+
+@pytest.mark.usefixtures("lovelace")
+async def test_a_dashboard_that_cannot_be_loaded_is_named_and_the_rest_searched(
+    hass: HomeAssistant,
+):
+    from homeassistant.components.lovelace.const import LOVELACE_DATA
+
+    await create_dashboard(hass, url_path="broken-dash", title="Broken")
+    broken = hass.data[LOVELACE_DATA].dashboards["broken-dash"]
+
+    with patch.object(broken, "async_load", side_effect=OSError("disk gone")):
+        result = _json(
+            await search_config(hass, {"query": "light.kitchen", "types": ["dashboard"]})
+        )
+
+    assert [item["id"] for item in result["items"]] == ["default"]
+    assert result["skipped"] == {"dashboard broken-dash": "disk gone"}
+
+
 async def test_matches_beyond_the_per_item_cap_are_counted_not_listed(
     hass: HomeAssistant, config_dir: Path
 ):
@@ -250,7 +315,8 @@ async def test_a_dashboard_without_stored_config_is_left_out(hass: HomeAssistant
     assert [(i["id"], i["name"]) for i in result["items"]] == [("cards-dash", "Cards")]
 
 
-async def test_a_yaml_mode_dashboard_is_left_out(hass: HomeAssistant, config_dir: Path):
+async def test_a_yaml_mode_dashboard_is_searched_and_marked(hass: HomeAssistant, config_dir: Path):
+    """get_dashboard_config reads it too, and its references break just the same."""
     (config_dir / "yaml-dash.yaml").write_text(
         "views:\n  - cards:\n      - type: entity\n        entity: light.kitchen\n"
     )
@@ -268,7 +334,16 @@ async def test_a_yaml_mode_dashboard_is_left_out(hass: HomeAssistant, config_dir
 
     result = _json(await search_config(hass, {"query": "light.kitchen", "types": ["dashboard"]}))
 
-    assert result["items"] == []
+    assert result["items"] == [
+        {
+            "type": "dashboard",
+            "id": "yaml-dash",
+            "mode": "yaml",
+            "name": "Y",
+            "match_count": 1,
+            "matches": [{"path": "/views/0/cards/0/entity", "value": "light.kitchen"}],
+        }
+    ]
 
 
 async def test_without_lovelace_the_other_kinds_are_still_searched(hass: HomeAssistant):
@@ -293,16 +368,16 @@ class TestToolLimits:
     """A kind is searched only while every tool that returns its config is available."""
 
     @pytest.mark.usefixtures("lovelace")
-    async def test_a_disabled_read_tool_withholds_its_kind(self, hass: HomeAssistant):
-        hass.data[DOMAIN] = {"disabled_tools": frozenset({"get_dashboard_config"})}
+    @pytest.mark.parametrize("tool", ["list_dashboards", "get_dashboard_config"])
+    async def test_a_disabled_read_tool_withholds_its_kind(self, hass: HomeAssistant, tool: str):
+        """A search both names the dashboards and returns from their config."""
+        hass.data[DOMAIN] = {"disabled_tools": frozenset({tool})}
 
         result = _json(await call_tool(hass, "search_config", {"query": "light.kitchen"}))
 
         assert result["counts"] == {"automation": 1, "script": 1, "scene": 1}
         assert result["skipped"] == {
-            "dashboard": (
-                "Tool 'get_dashboard_config' is turned off in the MCP Server integration options"
-            )
+            "dashboard": f"Tool '{tool}' is turned off in the MCP Server integration options"
         }
 
     @pytest.mark.parametrize("tool", ["list_automations", "get_automation_config"])

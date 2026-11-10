@@ -2,8 +2,9 @@
 
 Each kind is read the way its own read tools read it: automations.yaml, scripts.yaml
 and scenes.yaml through config_manager, dashboards through dashboard_manager. A kind
-is searched only while every tool that returns its config is available, so a search
-never shows what read-only mode or the disabled tools withhold from those tools.
+is searched only while every tool that lists it or returns its config is available,
+so a search never shows what read-only mode or the disabled tools withhold from
+those tools.
 """
 
 from collections.abc import Awaitable, Callable
@@ -19,7 +20,7 @@ KIND_TOOLS: dict[str, tuple[str, ...]] = {
     "automation": ("list_automations", "get_automation_config"),
     "script": ("list_scripts", "get_script_config"),
     "scene": ("list_scenes", "get_scene_config"),
-    "dashboard": ("get_dashboard_config",),
+    "dashboard": ("list_dashboards", "get_dashboard_config"),
 }
 
 DEFAULT_LIMIT = 20
@@ -30,8 +31,9 @@ MAX_MATCHES_PER_ITEM = 100
 # A matched value longer than this is cut to a window around the match.
 SNIPPET_LENGTH = 80
 
-# (id, name, config) of one automation, script, scene or dashboard.
-_Item = tuple[Any, Any, Any]
+# (id, name, config, extra) of one automation, script, scene or dashboard, where
+# extra is what else its result carries.
+_Item = tuple[Any, Any, Any, dict[str, Any]]
 # The items of one kind, and the ones among them that could not be read with the error.
 _Read = tuple[list[_Item], dict[str, str]]
 
@@ -44,7 +46,7 @@ async def _automations(hass: HomeAssistant) -> _Read:
     from ..config_manager import read_list_entries
 
     entries = await read_list_entries(hass, "automations.yaml")
-    return [(e.get("id"), e.get("alias"), e) for e in entries if isinstance(e, dict)], {}
+    return [(e.get("id"), e.get("alias"), e, {}) for e in entries if isinstance(e, dict)], {}
 
 
 async def _scripts(hass: HomeAssistant) -> _Read:
@@ -52,7 +54,7 @@ async def _scripts(hass: HomeAssistant) -> _Read:
 
     entries = await read_dict_entries(hass, "scripts.yaml")
     return [
-        (key, config.get("alias") if isinstance(config, dict) else None, config)
+        (key, config.get("alias") if isinstance(config, dict) else None, config, {})
         for key, config in entries.items()
     ], {}
 
@@ -61,14 +63,19 @@ async def _scenes(hass: HomeAssistant) -> _Read:
     from ..config_manager import read_list_entries
 
     entries = await read_list_entries(hass, "scenes.yaml")
-    return [(e.get("id"), e.get("name"), e) for e in entries if isinstance(e, dict)], {}
+    return [(e.get("id"), e.get("name"), e, {}) for e in entries if isinstance(e, dict)], {}
 
 
 async def _dashboards(hass: HomeAssistant) -> _Read:
-    from ..dashboard_manager import read_storage_dashboards
+    from ..dashboard_manager import read_dashboards
 
-    dashboards, failed = await read_storage_dashboards(hass)
-    return dashboards, {f"dashboard {url_path}": error for url_path, error in failed.items()}
+    dashboards, failed = await read_dashboards(hass)
+    # A YAML-mode dashboard is edited in its file: patch_dashboard_config cannot.
+    items = [
+        (url_path, title, config, {"mode": "yaml"} if mode == "yaml" else {})
+        for url_path, title, config, mode in dashboards
+    ]
+    return items, {f"dashboard {url_path}": error for url_path, error in failed.items()}
 
 
 _READERS: dict[str, Callable[[HomeAssistant], Awaitable[_Read]]] = {
@@ -101,11 +108,25 @@ def _snippet(value: str, needle: str) -> str:
     text = " ".join(value.split())
     if len(text) <= SNIPPET_LENGTH:
         return text
-    at = max(text.lower().find(needle), 0)
+    # The needle is looked for as it reads once whitespace is collapsed too.
+    at = max(text.lower().find(" ".join(needle.split())), 0)
     lead = max(0, (SNIPPET_LENGTH - len(needle)) // 2)
     start = max(0, min(at - lead, len(text) - SNIPPET_LENGTH))
     end = start + SNIPPET_LENGTH
     return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
+
+
+def _key_token(key: Any) -> str:
+    """Return a mapping key as it reads in the JSON the read tools return.
+
+    YAML allows keys that are not strings, and a pointer has to name the key the
+    way that JSON spells it.
+    """
+    if key is True:
+        return "true"
+    if key is False:
+        return "false"
+    return "null" if key is None else str(key)
 
 
 def _walk(node: Any, tokens: list[str], ancestors: set[int], matches: _Matches) -> None:
@@ -128,9 +149,10 @@ def _walk(node: Any, tokens: list[str], ancestors: set[int], matches: _Matches) 
         return
     ancestors.add(id(node))
     for key, child in children:
-        path = [*tokens, str(key)]
-        if isinstance(node, dict) and matches.needle in str(key).lower():
-            matches.add(path, "key", str(key))
+        token = _key_token(key) if isinstance(node, dict) else str(key)
+        path = [*tokens, token]
+        if isinstance(node, dict) and matches.needle in token.lower():
+            matches.add(path, "key", token)
         _walk(child, path, ancestors, matches)
     ancestors.discard(id(node))
 
@@ -162,11 +184,12 @@ def _kinds(arguments: dict[str, Any]) -> list[str]:
     description=(
         "Find where something is referenced before changing it: searches the stored config "
         "of automations, scripts and scenes (automations.yaml, scripts.yaml, scenes.yaml) and "
-        "storage-mode dashboards for an entity ID, service, device or area ID, label, helper "
-        "or any other text. Case-insensitive substring match on every string value and key at "
+        "dashboards for an entity ID, service, device or area ID, label, helper or any other "
+        "text. Case-insensitive substring match on every string value and key at "
         "any depth. Each matching item comes with its type, ID (url_path for a dashboard) and "
         "name, and each match with a JSON Pointer into that item's config and a snippet; a "
-        "dashboard pointer is the one get_dashboard_config and patch_dashboard_config take. "
+        "dashboard pointer is the one get_dashboard_config and patch_dashboard_config take, "
+        "though a dashboard marked mode yaml is edited in its file. "
         "Items are listed automations first, then scripts, scenes and dashboards. A truncated "
         "item has more matches than it lists and a truncated result more items; 'counts' says "
         "how many items of each type matched, and 'skipped' names what was not searched and why"
@@ -234,7 +257,7 @@ async def search_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             skipped[kind] = f"could not be read: {e}"
             continue
         skipped.update(failed)
-        for item_id, name, config in entries:
+        for item_id, name, config, extra in entries:
             matches = _Matches(needle, per_item)
             _walk(config, [], set(), matches)
             if not matches.count:
@@ -242,7 +265,12 @@ async def search_config(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
             counts[kind] = counts.get(kind, 0) + 1
             if len(items) >= limit:
                 continue
-            item: dict[str, Any] = {"type": kind, "id": item_id}
+            # An ID is given as the read tools take it, which is as a string.
+            item: dict[str, Any] = {
+                "type": kind,
+                "id": item_id if item_id is None else str(item_id),
+                **extra,
+            }
             if isinstance(name, str) and name:
                 item["name"] = name
             item["match_count"] = matches.count

@@ -36,6 +36,9 @@ from homeassistant.components.recorder.statistics import (
     list_statistic_ids,
     validate_statistics,
 )
+from homeassistant.config_entries import ConfigFlow
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
@@ -49,7 +52,13 @@ from homeassistant.helpers.json import json_encoder_default
 from homeassistant.helpers.label_registry import LabelEntry, LabelRegistry
 from homeassistant.helpers.recorder import DATA_INSTANCE
 from homeassistant.loader import Integration, async_get_integration
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    MockModule,
+    mock_config_flow,
+    mock_integration,
+    mock_platform,
+)
 
 from custom_components.mcp_server_http_transport.const import MCP_PATH
 from custom_components.mcp_server_http_transport.tools.labels import THEME_COLORS
@@ -694,3 +703,34 @@ class TestFlowResultSerializationContract:
 
         assert fields == [{"name": "host", "required": True, "type": "string"}]
         assert view._prepare_result_json({**result, "data_schema": None})["data_schema"] == []
+
+
+class TestFlowProgressContract:
+    """continue_config_flow reads a flow's current step to vet a menu answer.
+
+    ``async_get`` and ``async_progress`` return a partial result without the
+    step's type or menu options, so the tool reads ``cur_step`` off the flow
+    object in the manager's private ``_progress`` mapping. The lookup is guarded
+    and skips the check when it finds nothing, which means a rename here would
+    silently bring back the behavior it prevents: Home Assistant dropping a flow
+    over a mistyped menu option.
+    """
+
+    async def test_progress_maps_flow_id_to_a_flow_carrying_its_current_step(
+        self, hass: HomeAssistant
+    ):
+        class _MenuFlow(ConfigFlow):
+            async def async_step_user(self, user_input=None):
+                return self.async_show_menu(step_id="user", menu_options=["a", "b"])
+
+        mock_integration(hass, MockModule("mcp_contract"))
+        mock_platform(hass, "mcp_contract.config_flow", None)
+        with mock_config_flow("mcp_contract", _MenuFlow):
+            result = await hass.config_entries.flow.async_init(
+                "mcp_contract", context={"source": "user"}
+            )
+
+            step = hass.config_entries.flow._progress[result["flow_id"]].cur_step
+
+        assert step["type"] == FlowResultType.MENU
+        assert list(step["menu_options"]) == ["a", "b"]

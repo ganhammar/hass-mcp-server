@@ -6,12 +6,14 @@ integration whose flow walks through every result type the tools report.
 
 import json
 from collections.abc import Iterator
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntryState, ConfigFlow
+from homeassistant.config_entries import ConfigEntryState, ConfigFlow, OperationNotAllowed
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import UnknownStep
+from homeassistant.exceptions import DependencyError
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     MockModule,
@@ -24,6 +26,7 @@ from custom_components.mcp_server_http_transport.const import DOMAIN
 from custom_components.mcp_server_http_transport.tools import call_tool
 
 DEMO = "mcp_demo"
+_TOOLS = "custom_components.mcp_server_http_transport.tools.integrations"
 
 _FORM = vol.Schema({vol.Required("host"): str, vol.Optional("port", default=80): int})
 
@@ -38,7 +41,7 @@ class _DemoFlow(ConfigFlow):
 
     async def async_step_manual(self, user_input=None):
         if user_input is None:
-            return self.async_show_form(step_id="manual", data_schema=_FORM)
+            return self.async_show_form(step_id="manual", data_schema=_FORM, last_step=True)
         if user_input["host"] == "unreachable":
             return self.async_show_form(
                 step_id="manual", data_schema=_FORM, errors={"base": "cannot_connect"}
@@ -126,6 +129,23 @@ class TestStartConfigFlow:
 
         assert "No integration with a config flow found for domain 'no_such_integration'" in text
 
+    async def test_failed_dependencies_are_reported(self, hass: HomeAssistant, demo: None):
+        with patch.object(
+            hass.config_entries.flow, "async_init", side_effect=DependencyError(["http", "usb"])
+        ):
+            text = await _call(hass, "start_config_flow", domain=DEMO)
+
+        assert "its dependencies failed to set up (http, usb)" in text
+
+    async def test_a_flow_whose_first_step_cannot_be_reported_is_not_left_behind(
+        self, hass: HomeAssistant, demo: None
+    ):
+        with patch(f"{_TOOLS}._flow_result_json", side_effect=ValueError("no serializer")):
+            result = await call_tool(hass, "start_config_flow", {"domain": DEMO})
+
+        assert result["isError"] is True
+        assert hass.config_entries.flow.async_progress() == []
+
     async def test_single_instance_integration_already_set_up_aborts(self, hass: HomeAssistant):
         hass.data[DOMAIN] = {"integration_management": True}
         MockConfigEntry(domain="sun").add_to_hass(hass)
@@ -158,6 +178,7 @@ class TestContinueConfigFlow:
             {"name": "host", "required": True, "type": "string"},
             {"name": "port", "required": False, "optional": True, "default": 80, "type": "integer"},
         ]
+        assert result["last_step"] is True
         assert "errors" not in result
 
     async def test_submitting_the_form_creates_the_entry_without_echoing_its_data(
@@ -248,6 +269,32 @@ class TestContinueConfigFlow:
         }
         assert hass.config_entries.flow.async_progress() == []
 
+    @pytest.mark.parametrize("user_input", [{"next_step_id": "nowhere"}, {"host": "example"}])
+    async def test_a_wrong_menu_answer_is_turned_away_and_keeps_the_flow(
+        self, hass: HomeAssistant, demo: None, user_input
+    ):
+        flow_id = json.loads(await _call(hass, "start_config_flow", domain=DEMO))["flow_id"]
+
+        text = await _call(hass, "continue_config_flow", flow_id=flow_id, user_input=user_input)
+
+        assert text.startswith("This step is a menu")
+        assert '["manual","oauth","taken"]' in text
+        (flow,) = hass.config_entries.flow.async_progress()
+        assert flow["step_id"] == "user"
+
+    async def test_a_flow_dropped_for_an_unknown_step_is_reported(
+        self, hass: HomeAssistant, demo: None
+    ):
+        flow_id = await _manual_step(hass)
+
+        with patch.object(
+            hass.config_entries.flow, "async_configure", side_effect=UnknownStep("no step 'x'")
+        ):
+            text = await _call(hass, "continue_config_flow", flow_id=flow_id, user_input={})
+
+        assert "Home Assistant dropped it" in text
+        assert "no step 'x'" in text
+
     async def test_unknown_flow_is_reported(self, hass: HomeAssistant, demo: None):
         text = await _call(hass, "continue_config_flow", flow_id="gone", user_input={})
 
@@ -314,6 +361,18 @@ class TestReloadIntegration:
         text = await _call(hass, "reload_integration", entry_id="gone")
 
         assert "No config entry with ID 'gone'" in text
+
+    async def test_an_entry_that_may_not_be_reloaded_is_reported(
+        self, hass: HomeAssistant, demo_entry: MockConfigEntry
+    ):
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            side_effect=OperationNotAllowed("setup in progress"),
+        ):
+            text = await _call(hass, "reload_integration", entry_id=demo_entry.entry_id)
+
+        assert text == f"Config entry '{demo_entry.entry_id}' cannot be reloaded: setup in progress"
 
     async def test_own_entry_is_refused(self, hass: HomeAssistant, own_entry: MockConfigEntry):
         text = await _call(hass, "reload_integration", entry_id=own_entry.entry_id)

@@ -745,6 +745,24 @@ async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
         assert form["type"] == "form"
         assert form["data_schema"] == [{"name": "url", "required": True, "type": "string"}]
 
+        # A value the schema rejects is reported per field and leaves the flow open.
+        resp = await client.post(
+            MCP_HTTP_PATH,
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "continue_config_flow",
+                    "arguments": {"flow_id": form["flow_id"], "user_input": {"url": 5}},
+                },
+                "id": 1,
+            },
+        )
+        rejected = (await resp.json())["result"]
+        assert "isError" not in rejected, rejected
+        assert "still on the same step" in rejected["content"][0]["text"]
+        assert '"url"' in rejected["content"][0]["text"]
+
         created = await call(
             "continue_config_flow",
             {"flow_id": form["flow_id"], "user_input": {"url": "https://example.com/?key=k"}},

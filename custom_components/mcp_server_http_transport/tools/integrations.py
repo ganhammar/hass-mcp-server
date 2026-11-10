@@ -1,6 +1,7 @@
 """Tools that set up, reload and remove integrations through their config flows."""
 
 import logging
+from contextlib import suppress
 from typing import Any
 
 from homeassistant import config_entries, data_entry_flow
@@ -28,7 +29,9 @@ _DISABLED_NOTE = (
 # What the caller does next for each result type that leaves the flow open.
 _NEXT_STEP = {
     FlowResultType.FORM: (
-        "Call continue_config_flow with user_input holding a value for each field in data_schema."
+        "Call continue_config_flow with user_input holding a value for each field in "
+        "data_schema. When data_schema is empty the step only asks for confirmation: send an "
+        "empty object as user_input."
     ),
     FlowResultType.MENU: (
         'Call continue_config_flow with user_input {"next_step_id": <one of menu_options>}.'
@@ -125,6 +128,28 @@ def _flow_result_json(hass: HomeAssistant, result: data_entry_flow.FlowResult) -
     return data
 
 
+def _menu_refusal(hass: HomeAssistant, flow_id: str, user_input: dict[str, Any]) -> str | None:
+    """Return why the flow's current menu step cannot take this input, or None.
+
+    Home Assistant drops the whole flow when a menu is answered with a step the
+    flow does not have, so a wrong choice is turned away before it gets there.
+    The flow manager only gives out a step's type and options on the flow object
+    it keeps in ``_progress``; where that cannot be read the input goes through
+    unchecked.
+    """
+    flow = getattr(hass.config_entries.flow, "_progress", {}).get(flow_id)
+    step = getattr(flow, "cur_step", None)
+    if not step or step.get("type") != FlowResultType.MENU:
+        return None
+    options = list(step.get("menu_options", ()))
+    if user_input.get("next_step_id") in options:
+        return None
+    return (
+        'This step is a menu: user_input must be {"next_step_id": <option>} with one of '
+        f"{dumps(options)}. The flow is still on the same step."
+    )
+
+
 @register_tool(
     name="start_config_flow",
     description=(
@@ -168,7 +193,13 @@ async def start_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             f"({', '.join(err.failed_dependencies)})."
         )
 
-    return _text(dumps(_flow_result_json(hass, result)))
+    try:
+        return _text(dumps(_flow_result_json(hass, result)))
+    except Exception:
+        # The caller never learns this flow's ID, so nothing else could abort it.
+        with suppress(data_entry_flow.UnknownFlow):
+            hass.config_entries.flow.async_abort(result["flow_id"])
+        raise
 
 
 @register_tool(
@@ -211,10 +242,18 @@ async def continue_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -
     if user_input is not None and not isinstance(user_input, dict):
         return _text("user_input must be an object keyed by field name.")
 
+    if user_input and (refusal := _menu_refusal(hass, flow_id, user_input)):
+        return _text(refusal)
+
     try:
         result = await hass.config_entries.flow.async_configure(flow_id, user_input)
     except data_entry_flow.UnknownFlow:
         return _unknown_flow(flow_id)
+    except data_entry_flow.UnknownStep as err:
+        return _text(
+            f"The flow tried to move to a step it does not have ({err}) and Home Assistant "
+            "dropped it. Start again with start_config_flow."
+        )
     except data_entry_flow.InvalidData as err:
         return _text(
             "The input does not match the step's data_schema, so nothing was submitted and "

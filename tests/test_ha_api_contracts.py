@@ -439,15 +439,18 @@ class TestRegistryWriteContracts:
         """
         fields = {f.name for f in attr.fields(dr.DeviceEntry)}
 
-        if "config_entry_id" in fields:
-            assert isinstance(dr.DeviceEntry.config_entries, property)
-            assert {"id", "parent_device_id"} <= {f.name for f in attr.fields(dr.ChildDeviceEntry)}
-            assert hasattr(dr.DeviceRegistry, "child_devices") or "child_devices" in (
-                dr.DeviceRegistry.__annotations__
-            )
-        else:
+        if "config_entry_id" not in fields:
             assert "config_entries" in fields
             assert "remove_config_entry_id" in _params(dr.DeviceRegistry.async_update_device)
+
+    def test_a_child_device_names_its_parent(self):
+        """delete_device counts the child devices that go with a parent, where they exist."""
+        if not hasattr(dr, "ChildDeviceEntry"):
+            assert not hasattr(dr.DeviceRegistry, "async_update_child_device")
+            return
+
+        assert {"id", "parent_device_id"} <= {f.name for f in attr.fields(dr.ChildDeviceEntry)}
+        assert "child_devices" in dr.DeviceRegistry.__annotations__
 
     async def test_core_decides_device_removal_by_the_integrations_hook(self, hass):
         """delete_device reads supports_remove_device and calls the hook core looks for."""

@@ -18,15 +18,17 @@ token validator returns ``None``, so requests fall through to the native-auth
 path under test.
 """
 
+import json
 from ipaddress import ip_address
 from socket import herror
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
+import voluptuous as vol
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.ban import KEY_BAN_MANAGER, KEY_FAILED_LOGIN_ATTEMPTS
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState, ConfigFlow
 from homeassistant.const import EVENT_COMPONENT_LOADED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import category_registry as cr
@@ -35,12 +37,17 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import ATTR_COMPONENT, async_setup_component
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    MockModule,
     MockUser,
     async_capture_events,
+    mock_config_flow,
+    mock_integration,
+    mock_platform,
 )
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.mcp_server_http_transport.const import (
+    CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
     DOMAIN,
     EVENT_TOOL_CALLED,
@@ -674,3 +681,89 @@ async def test_create_tools_categorize_and_set_icon_on_what_the_real_load_regist
         if entry.categories == {scope: category.category_id} and entry.icon == "mdi:star"
     ]
     assert len(categorized) == 1
+
+
+class _OneFormFlow(ConfigFlow):
+    """A config flow with a single form, the shape of most simple integrations."""
+
+    VERSION = 1
+
+    async def async_step_user(self, user_input=None):
+        if user_input is None:
+            return self.async_show_form(
+                step_id="user", data_schema=vol.Schema({vol.Required("url"): str})
+            )
+        return self.async_create_entry(title="Demo", data=user_input)
+
+
+async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """The config flow tools drive the real flow manager from first step to removal.
+
+    The flow manager, its result dicts and the schema serializer all belong to
+    core, so this runs on every Home Assistant version in the matrix. It also
+    shows the option reaching the tools through a real setup, and the audit
+    event carrying the submitted field names without their values.
+    """
+    assert await async_setup_component(hass, "http", {})
+    own = MockConfigEntry(
+        domain=DOMAIN, data={CONF_NATIVE_AUTH: True, CONF_INTEGRATION_MANAGEMENT: True}
+    )
+    own.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(own.entry_id)
+    mock_integration(
+        hass,
+        MockModule(
+            "mcp_demo",
+            async_setup_entry=AsyncMock(return_value=True),
+            async_unload_entry=AsyncMock(return_value=True),
+        ),
+    )
+    mock_platform(hass, "mcp_demo.config_flow", None)
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client()
+
+    async def call(name: str, arguments: dict) -> dict:
+        resp = await client.post(
+            MCP_HTTP_PATH,
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+                "id": 1,
+            },
+        )
+        result = (await resp.json())["result"]
+        assert "isError" not in result, result
+        return json.loads(result["content"][0]["text"])
+
+    with mock_config_flow("mcp_demo", _OneFormFlow):
+        form = await call("start_config_flow", {"domain": "mcp_demo"})
+        assert form["type"] == "form"
+        assert form["data_schema"] == [{"name": "url", "required": True, "type": "string"}]
+
+        created = await call(
+            "continue_config_flow",
+            {"flow_id": form["flow_id"], "user_input": {"url": "https://example.com/?key=k"}},
+        )
+
+        (entry,) = hass.config_entries.async_entries("mcp_demo")
+        assert created["type"] == "create_entry"
+        assert created["entry"]["entry_id"] == entry.entry_id
+        assert entry.state is ConfigEntryState.LOADED
+        await hass.async_block_till_done()
+        assert events[-1].data["arguments"] == {
+            "flow_id": form["flow_id"],
+            "user_input": {"url": "***"},
+        }
+
+        reloaded = await call("reload_integration", {"entry_id": entry.entry_id})
+        assert reloaded["state"] == str(ConfigEntryState.LOADED)
+        assert reloaded["require_restart"] is False
+
+        removed = await call("delete_integration", {"entry_id": entry.entry_id, "confirm": True})
+        assert removed["require_restart"] is False
+        assert hass.config_entries.async_entries("mcp_demo") == []

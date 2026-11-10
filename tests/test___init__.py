@@ -2,6 +2,8 @@
 
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
 from custom_components.mcp_server_http_transport import (
     DOMAIN,
     _async_report_endpoint_conflict,
@@ -166,6 +168,25 @@ class TestAsyncSetupEntry:
         await async_setup_entry(mock_hass, mock_config_entry)
 
         assert mock_hass.data[DOMAIN]["template_rendering"] is True
+
+    @pytest.mark.parametrize(
+        "data, expected", [({}, False), ({"integration_management_enabled": True}, True)]
+    )
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_wires_integration_management_flag(
+        self,
+        mock_register_views,
+        mock_hass,
+        mock_config_entry,
+        data,
+        expected,
+    ):
+        """Test the integration management flag is read into hass.data, off by default."""
+        mock_config_entry.data = data
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        assert mock_hass.data[DOMAIN]["integration_management"] is expected
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
     async def test_async_setup_entry_wires_image_access_flags(

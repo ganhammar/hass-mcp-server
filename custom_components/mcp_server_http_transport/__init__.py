@@ -15,6 +15,7 @@ from .const import (
     CONF_CAMERA_IMAGE_ACCESS,
     CONF_CONFIG_FILE_ACCESS,
     CONF_IMAGE_FILE_ACCESS,
+    CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
@@ -57,6 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN]["image_file_access"] = image_file_access_enabled
     hass.data[DOMAIN]["template_rendering"] = template_rendering_enabled
     hass.data[DOMAIN]["appdaemon_file_access"] = appdaemon_file_access_enabled
+    hass.data[DOMAIN]["integration_management"] = entry.data.get(CONF_INTEGRATION_MANAGEMENT, False)
     hass.data[DOMAIN]["appdaemon_apps_root"] = entry.data.get(
         CONF_APPDAEMON_APPS_ROOT, DEFAULT_APPDAEMON_APPS_ROOT
     )

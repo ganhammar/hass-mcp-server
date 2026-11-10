@@ -68,6 +68,11 @@ _SECRET_KEY_FRAGMENTS = (
 _SECRET_KEY_NAMES = frozenset({"code", "pin"})
 SECRET_MASK = "***"
 
+# Tool arguments audited by key only. A config flow step names its fields freely,
+# and any of them may carry a credential (a calendar URL with a token in it), so
+# no key name can be trusted to mark the ones that do.
+_VALUE_MASKED_ARGUMENTS = {"continue_config_flow": "user_input"}
+
 # Roughly how many characters of a call's arguments the audit log and event carry.
 ARGUMENTS_PREVIEW_CHARS = 500
 # The tool name comes straight from the request, so it is cut to this before it is
@@ -119,6 +124,14 @@ def mask_secrets(value: Any) -> Any:
     if isinstance(value, list):
         return [mask_secrets(item) for item in value]
     return value
+
+
+def mask_tool_arguments(tool: Any, arguments: Any) -> Any:
+    """Return ``arguments`` as the audit trail may carry them for ``tool``."""
+    masked_key = _VALUE_MASKED_ARGUMENTS.get(tool) if isinstance(tool, str) else None
+    if masked_key and isinstance(arguments, dict) and isinstance(arguments.get(masked_key), dict):
+        arguments = {**arguments, masked_key: dict.fromkeys(arguments[masked_key], SECRET_MASK)}
+    return mask_secrets(arguments)
 
 
 def truncate_arguments(value: Any, limit: int = ARGUMENTS_PREVIEW_CHARS) -> Any:
@@ -805,7 +818,7 @@ class MCPEndpointView(HomeAssistantView):
         # text and is logged as a JSON string so a newline in it cannot forge a
         # log line.
         logged_tool = tool if tool in TOOLS else dumps(tool)
-        summary = truncate_arguments(mask_secrets(arguments))
+        summary = truncate_arguments(mask_tool_arguments(name, arguments))
         _LOGGER.log(
             level,
             "MCP tool call by user %s (%s auth): %s -> %s, arguments %s",

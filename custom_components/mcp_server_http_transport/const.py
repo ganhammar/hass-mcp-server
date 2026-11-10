@@ -30,6 +30,7 @@ CONF_CAMERA_IMAGE_ACCESS = "camera_image_access_enabled"
 CONF_IMAGE_FILE_ACCESS = "image_file_access_enabled"
 CONF_TEMPLATE_RENDERING = "template_rendering_enabled"
 CONF_APPDAEMON_FILE_ACCESS = "appdaemon_file_access_enabled"
+CONF_INTEGRATION_MANAGEMENT = "integration_management_enabled"
 CONF_APPDAEMON_APPS_ROOT = "appdaemon_apps_root"
 
 DEFAULT_APPDAEMON_APPS_ROOT = "/addon_configs/a0d7b954_appdaemon/apps"

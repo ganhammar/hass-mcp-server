@@ -1,4 +1,9 @@
-"""Tools that set up, reload and remove integrations through their config flows."""
+"""Tools that set up, reconfigure, reload, disable and remove integrations.
+
+Config, reconfigure and options flows all run through the same three steps: a
+start tool for each, then continue_config_flow and abort_config_flow, which find
+the flow in whichever of Home Assistant's two flow managers holds it.
+"""
 
 import logging
 from contextlib import suppress
@@ -71,9 +76,41 @@ def _disabled() -> dict[str, Any]:
 
 def _unknown_flow(flow_id: str) -> dict[str, Any]:
     return _text(
-        f"No config flow in progress with ID '{flow_id}'. It may have finished, been aborted, "
-        "or been dropped by a Home Assistant restart. Start again with start_config_flow."
+        f"No flow in progress with ID '{flow_id}'. It may have finished, been aborted, or "
+        "been dropped by a Home Assistant restart. Start it again."
     )
+
+
+def _own_flow() -> dict[str, Any]:
+    """Refuse a flow that would change the MCP Server's own configuration.
+
+    Its options decide which tools a client may use, so a client that could run
+    these flows could lift its own limits. A second entry would do the same, since
+    setting one up replaces the limits of the first.
+    """
+    return _text(
+        "Refusing to configure the MCP Server itself: its options decide what this "
+        "connection may do. Do it from Settings → Devices & Services instead."
+    )
+
+
+def _find_flow(hass: HomeAssistant, flow_id: str) -> tuple[Any, str] | None:
+    """Return the manager holding a flow and the domain it configures, or None.
+
+    A config or reconfigure flow is keyed by its domain, an options flow by the
+    config entry it belongs to.
+    """
+    entries = hass.config_entries
+    for manager in (entries.flow, entries.options):
+        try:
+            handler = manager.async_get(flow_id)["handler"]
+        except data_entry_flow.UnknownFlow:
+            continue
+        if manager is entries.flow:
+            return manager, handler
+        entry = entries.async_get_entry(handler)
+        return manager, entry.domain if entry else handler
+    return None
 
 
 def _unknown_entry(entry_id: str) -> dict[str, Any]:
@@ -89,21 +126,32 @@ def _entry_json(entry: config_entries.ConfigEntry) -> dict[str, Any]:
     }
 
 
-def _flow_result_json(hass: HomeAssistant, result: data_entry_flow.FlowResult) -> dict[str, Any]:
+def _flow_result_json(
+    hass: HomeAssistant, manager: Any, result: data_entry_flow.FlowResult
+) -> dict[str, Any]:
     """Reduce a flow result to what a caller needs to take the next step.
 
     The data a finished flow collected is left out: it is what the caller just
-    sent, and it routinely holds credentials.
+    sent, and it routinely holds credentials. An options flow finishes with the
+    same result type as a config flow, and reports the entry whose options it saved.
     """
     result_type = result["type"]
-    data: dict[str, Any] = {
-        "type": str(result_type),
-        "flow_id": result["flow_id"],
-        "domain": result["handler"],
-    }
+    data: dict[str, Any] = {"type": str(result_type), "flow_id": result["flow_id"]}
+    entry = None
+    if manager is hass.config_entries.options:
+        entry = hass.config_entries.async_get_entry(result["handler"])
+        data["domain"] = entry.domain if entry else None
+        data["entry_id"] = result["handler"]
+    else:
+        data["domain"] = result["handler"]
 
     if result_type == FlowResultType.CREATE_ENTRY:
-        data["entry"] = _entry_json(result["result"])
+        if manager is hass.config_entries.options:
+            data["options_saved"] = True
+            if entry is not None:
+                data["entry"] = _entry_json(entry)
+        else:
+            data["entry"] = _entry_json(result["result"])
         return data
 
     for key in ("step_id", "reason", "url", "progress_action"):
@@ -116,7 +164,7 @@ def _flow_result_json(hass: HomeAssistant, result: data_entry_flow.FlowResult) -
         # Core's own view turns the voluptuous schema into the field list the
         # frontend renders. The library behind it differs between Home Assistant
         # versions, so the view is the one stable way to get the same list.
-        view = FlowManagerResourceView(hass.config_entries.flow)
+        view = FlowManagerResourceView(manager)
         data["data_schema"] = view._prepare_result_json(result)["data_schema"]
     for key in ("errors", "description_placeholders"):
         if result.get(key):
@@ -128,7 +176,7 @@ def _flow_result_json(hass: HomeAssistant, result: data_entry_flow.FlowResult) -
     return data
 
 
-def _menu_refusal(hass: HomeAssistant, flow_id: str, user_input: dict[str, Any]) -> str | None:
+def _menu_refusal(manager: Any, flow_id: str, user_input: dict[str, Any]) -> str | None:
     """Return why the flow's current menu step cannot take this input, or None.
 
     Home Assistant drops the whole flow when a menu is answered with a step the
@@ -137,7 +185,7 @@ def _menu_refusal(hass: HomeAssistant, flow_id: str, user_input: dict[str, Any])
     it keeps in ``_progress``; where that cannot be read the input goes through
     unchecked.
     """
-    flow = getattr(hass.config_entries.flow, "_progress", {}).get(flow_id)
+    flow = getattr(manager, "_progress", {}).get(flow_id)
     step = getattr(flow, "cur_step", None)
     if not step or step.get("type") != FlowResultType.MENU:
         return None
@@ -148,6 +196,19 @@ def _menu_refusal(hass: HomeAssistant, flow_id: str, user_input: dict[str, Any])
         'This step is a menu: user_input must be {"next_step_id": <option>} with one of '
         f"{dumps(options)}. The flow is still on the same step."
     )
+
+
+def _first_step(
+    hass: HomeAssistant, manager: Any, result: data_entry_flow.FlowResult
+) -> dict[str, Any]:
+    """Report the first step of a flow, aborting the flow if it cannot be reported."""
+    try:
+        return _text(dumps(_flow_result_json(hass, manager, result)))
+    except Exception:
+        # The caller never learns this flow's ID, so nothing else could abort it.
+        with suppress(data_entry_flow.UnknownFlow):
+            manager.async_abort(result["flow_id"])
+        raise
 
 
 @register_tool(
@@ -178,6 +239,8 @@ async def start_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return _disabled()
 
     domain = arguments["domain"]
+    if domain == DOMAIN:
+        return _own_flow()
     try:
         result = await hass.config_entries.flow.async_init(
             domain, context={"source": config_entries.SOURCE_USER}
@@ -193,23 +256,18 @@ async def start_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
             f"({', '.join(err.failed_dependencies)})."
         )
 
-    try:
-        return _text(dumps(_flow_result_json(hass, result)))
-    except Exception:
-        # The caller never learns this flow's ID, so nothing else could abort it.
-        with suppress(data_entry_flow.UnknownFlow):
-            hass.config_entries.flow.async_abort(result["flow_id"])
-        raise
+    return _first_step(hass, hass.config_entries.flow, result)
 
 
 @register_tool(
     name="continue_config_flow",
     description=(
-        "Submit input to the current step of a config flow and return what comes next: "
-        "another form or menu, validation errors on the same step, an abort reason, or the "
-        "created config entry. For a form, user_input maps each data_schema field name to its "
-        'value; for a menu it is {"next_step_id": "<option>"}; omit it to re-read a step that '
-        "is waiting on a browser or on Home Assistant. Anything sent in user_input, passwords "
+        "Submit input to the current step of a config, reconfigure or options flow and "
+        "return what comes next: another form or menu, validation errors on the same step, "
+        "an abort reason, or the created or updated config entry. For a form, user_input "
+        "maps each data_schema field name to its value; for a menu it is "
+        '{"next_step_id": "<option>"}; omit it to re-read a step that is waiting on a '
+        "browser or on Home Assistant. Anything sent in user_input, passwords "
         "and API keys included, passes through this conversation and the client's transcript, "
         f"so leave flows that take long-lived credentials to the user. {_DISABLED_NOTE}"
     ),
@@ -218,7 +276,10 @@ async def start_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         "properties": {
             "flow_id": {
                 "type": "string",
-                "description": "The flow_id returned by start_config_flow",
+                "description": (
+                    "The flow_id returned by start_config_flow, start_reconfigure_flow or "
+                    "start_options_flow"
+                ),
             },
             "user_input": {
                 "type": "object",
@@ -242,17 +303,22 @@ async def continue_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -
     if user_input is not None and not isinstance(user_input, dict):
         return _text("user_input must be an object keyed by field name.")
 
-    if user_input and (refusal := _menu_refusal(hass, flow_id, user_input)):
+    found = _find_flow(hass, flow_id)
+    if found is None:
+        return _unknown_flow(flow_id)
+    manager, domain = found
+    if domain == DOMAIN:
+        return _own_flow()
+
+    if user_input and (refusal := _menu_refusal(manager, flow_id, user_input)):
         return _text(refusal)
 
     try:
-        result = await hass.config_entries.flow.async_configure(flow_id, user_input)
-    except data_entry_flow.UnknownFlow:
-        return _unknown_flow(flow_id)
+        result = await manager.async_configure(flow_id, user_input)
     except data_entry_flow.UnknownStep as err:
         return _text(
             f"The flow tried to move to a step it does not have ({err}) and Home Assistant "
-            "dropped it. Start again with start_config_flow."
+            "dropped it. Start it again."
         )
     except data_entry_flow.InvalidData as err:
         return _text(
@@ -260,21 +326,21 @@ async def continue_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -
             f"the flow is still on the same step: {dumps(err.schema_errors)}"
         )
 
-    return _text(dumps(_flow_result_json(hass, result)))
+    return _text(dumps(_flow_result_json(hass, manager, result)))
 
 
 @register_tool(
     name="abort_config_flow",
     description=(
-        "Abort a config flow that is still in progress, discarding what was entered. Use it "
-        f"for any flow started with start_config_flow that will not be finished. {_DISABLED_NOTE}"
+        "Abort a config, reconfigure or options flow that is still in progress, discarding "
+        f"what was entered. Use it for any flow you started and will not finish. {_DISABLED_NOTE}"
     ),
     input_schema={
         "type": "object",
         "properties": {
             "flow_id": {
                 "type": "string",
-                "description": "The flow_id returned by start_config_flow",
+                "description": "The flow_id the start tool returned",
             }
         },
         "required": ["flow_id"],
@@ -287,12 +353,12 @@ async def abort_config_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> d
         return _disabled()
 
     flow_id = arguments["flow_id"]
-    try:
-        hass.config_entries.flow.async_abort(flow_id)
-    except data_entry_flow.UnknownFlow:
+    found = _find_flow(hass, flow_id)
+    if found is None:
         return _unknown_flow(flow_id)
+    found[0].async_abort(flow_id)
 
-    return _text(f"Aborted config flow '{flow_id}'")
+    return _text(f"Aborted flow '{flow_id}'")
 
 
 def _own_entry(action: str) -> dict[str, Any]:
@@ -389,6 +455,148 @@ async def delete_integration(hass: HomeAssistant, arguments: dict[str, Any]) -> 
             {
                 "removed": {"entry_id": entry_id, "domain": entry.domain, "title": entry.title},
                 "require_restart": result["require_restart"],
+            }
+        )
+    )
+
+
+_ENTRY_ID = {
+    "type": "string",
+    "description": "The config entry ID, as listed by list_integrations",
+}
+
+
+def _editable_entry(
+    hass: HomeAssistant, arguments: dict[str, Any]
+) -> tuple[config_entries.ConfigEntry | None, dict[str, Any] | None]:
+    """Return the entry a tool may reconfigure, or the response saying why not."""
+    if not _enabled(hass):
+        return None, _disabled()
+    entry_id = arguments["entry_id"]
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return None, _unknown_entry(entry_id)
+    if entry.domain == DOMAIN:
+        return None, _own_flow()
+    return entry, None
+
+
+@register_tool(
+    name="start_options_flow",
+    description=(
+        "Start the options flow of a config entry, the flow behind its Configure button, "
+        "to change settings of an integration that is already set up. Returns the flow_id "
+        "and the first step, whose form is filled in with the current values. Take the steps "
+        "with continue_config_flow and drop the flow with abort_config_flow. Helpers made "
+        "from a config entry, such as template, group and utility meter helpers, are edited "
+        f"this way. {_DISABLED_NOTE}"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"entry_id": _ENTRY_ID},
+        "required": ["entry_id"],
+    },
+    annotations=ANNOTATION_NON_IDEMPOTENT,
+)
+async def start_options_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Start the options flow of a config entry."""
+    entry, refusal = _editable_entry(hass, arguments)
+    if entry is None:
+        return refusal
+    if not entry.supports_options:
+        return _text(
+            f"The '{entry.domain}' entry '{entry.title}' has no options to configure. Try "
+            "start_reconfigure_flow for its connection settings."
+        )
+
+    manager = hass.config_entries.options
+    result = await manager.async_init(entry.entry_id, context={"show_advanced_options": False})
+    return _first_step(hass, manager, result)
+
+
+@register_tool(
+    name="start_reconfigure_flow",
+    description=(
+        "Start the reconfigure flow of a config entry, to change what was entered when the "
+        "integration was set up, such as a host or an API key, without removing it. Returns "
+        "the flow_id and the first step. Take the steps with continue_config_flow and drop "
+        "the flow with abort_config_flow. A flow that succeeds ends with an abort whose "
+        f"reason is reconfigure_successful. {_DISABLED_NOTE}"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"entry_id": _ENTRY_ID},
+        "required": ["entry_id"],
+    },
+    annotations=ANNOTATION_NON_IDEMPOTENT,
+)
+async def start_reconfigure_flow(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Start a reconfigure flow for a config entry."""
+    entry, refusal = _editable_entry(hass, arguments)
+    if entry is None:
+        return refusal
+    if not entry.supports_reconfigure:
+        return _text(
+            f"The '{entry.domain}' integration cannot be reconfigured. Try start_options_flow "
+            "for its settings, or remove the entry and set it up again."
+        )
+
+    manager = hass.config_entries.flow
+    result = await manager.async_init(
+        entry.domain,
+        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+    return _first_step(hass, manager, result)
+
+
+@register_tool(
+    name="set_integration_enabled",
+    description=(
+        "Disable or enable one config entry of an integration. Disabling unloads it and "
+        "disables its devices and entities while keeping its configuration; enabling loads "
+        f"it again. {_DISABLED_NOTE}"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entry_id": _ENTRY_ID,
+            "enabled": {
+                "type": "boolean",
+                "description": "False disables the config entry, true enables it",
+            },
+        },
+        "required": ["entry_id", "enabled"],
+    },
+    annotations=ANNOTATION_DESTRUCTIVE,
+)
+async def set_integration_enabled(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Disable or enable a config entry as the user."""
+    if not _enabled(hass):
+        return _disabled()
+
+    entry_id = arguments["entry_id"]
+    enabled = arguments["enabled"]
+    if not isinstance(enabled, bool):
+        return _text("enabled must be true or false.")
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return _unknown_entry(entry_id)
+    if entry.domain == DOMAIN:
+        return _own_entry("enable" if enabled else "disable")
+
+    disabled_by = None if enabled else config_entries.ConfigEntryDisabler.USER
+    try:
+        reloaded = await hass.config_entries.async_set_disabled_by(entry_id, disabled_by)
+    except config_entries.OperationNotAllowed:
+        # The change is stored, but the entry could not be unloaded or loaded now.
+        reloaded = False
+
+    return _text(
+        dumps(
+            {
+                **_entry_json(entry),
+                "disabled_by": entry.disabled_by,
+                "require_restart": not reloaded,
             }
         )
     )

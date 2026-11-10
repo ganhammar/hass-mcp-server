@@ -176,7 +176,9 @@ async def get_helper_config(hass: HomeAssistant, arguments: dict[str, Any]) -> d
     description=(
         "Create a new helper entity in Home Assistant. "
         "Supported domains: input_boolean, input_number, input_text, input_select, "
-        "input_datetime, input_button, counter, timer, schedule"
+        "input_datetime, input_button, counter, timer, schedule. Helpers that are set up "
+        "as integrations, such as template, group, utility_meter, derivative and "
+        "min_max, are created with start_config_flow and edited with start_options_flow"
     ),
     input_schema={
         "type": "object",

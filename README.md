@@ -73,7 +73,7 @@ The limits cover tools only. Resources such as `hass://entities` are still serve
 
 ### Integration management
 
-`start_config_flow`, `continue_config_flow`, `abort_config_flow`, `reload_integration` and `delete_integration` are off by default. They run the same config flows as the "Add integration" dialog and act on existing config entries, so a client can add an integration or remove one along with its devices and entities. Turn on **Enable integration management** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that.
+The tools that set up and manage integrations are off by default: `start_config_flow`, `start_options_flow`, `start_reconfigure_flow`, `continue_config_flow`, `abort_config_flow`, `reload_integration`, `set_integration_enabled` and `delete_integration`. They run the same flows as the "Add integration" dialog and an integration's Configure button, and act on existing config entries, so a client can add an integration, change its settings, or remove one along with its devices and entities. The MCP Server's own entry is off limits to all of them, because its options decide what a client may do. Turn on **Enable integration management** (Settings > Devices & Services > MCP Server > Configure) only for clients you trust with that.
 
 Two limits are worth knowing. Whatever a flow asks for is typed by the model, so a password or API key entered this way passes through the conversation and the client's transcript; the audit log records only the field names. And a flow that needs a browser, such as an OAuth sign-in, cannot be finished over MCP: the tool reports the step and its URL so you can complete it yourself or abort the flow.
 
@@ -347,6 +347,9 @@ been copied and source identity/metadata checked for changes during copying.
 | `abort_config_flow` | Abort a config flow in progress (requires "Enable integration management") |
 | `reload_integration` | Reload a config entry by ID (requires "Enable integration management") |
 | `delete_integration` | Remove a config entry with its devices and entities; requires `confirm=true` (requires "Enable integration management") |
+| `start_options_flow` | Start a config entry's options flow, the one behind its Configure button; continue with `continue_config_flow` (requires "Enable integration management") |
+| `start_reconfigure_flow` | Start a config entry's reconfigure flow to change what was entered at setup (requires "Enable integration management") |
+| `set_integration_enabled` | Disable or enable a config entry, keeping its configuration (requires "Enable integration management") |
 
 **KNX**
 

@@ -28,7 +28,7 @@ import voluptuous as vol
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.ban import KEY_BAN_MANAGER, KEY_FAILED_LOGIN_ATTEMPTS
-from homeassistant.config_entries import ConfigEntryState, ConfigFlow
+from homeassistant.config_entries import ConfigEntryState, ConfigFlow, OptionsFlow
 from homeassistant.const import EVENT_COMPONENT_LOADED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import category_registry as cr
@@ -698,6 +698,19 @@ class _OneFormFlow(ConfigFlow):
             )
         return self.async_create_entry(title="Demo", data=user_input)
 
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        return _OneFormOptionsFlow()
+
+
+class _OneFormOptionsFlow(OptionsFlow):
+    async def async_step_init(self, user_input=None):
+        if user_input is None:
+            return self.async_show_form(
+                step_id="init", data_schema=vol.Schema({vol.Required("interval"): int})
+            )
+        return self.async_create_entry(data=user_input)
+
 
 async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
     enable_custom_integrations: None,
@@ -780,6 +793,38 @@ async def test_an_integration_is_set_up_reloaded_and_removed_through_the_tools(
             "flow_id": form["flow_id"],
             "user_input": {"url": "***"},
         }
+
+        options = await call("start_options_flow", {"entry_id": entry.entry_id})
+        assert options["data_schema"] == [{"name": "interval", "required": True, "type": "integer"}]
+        saved = await call(
+            "continue_config_flow", {"flow_id": options["flow_id"], "user_input": {"interval": 5}}
+        )
+        assert saved["options_saved"] is True
+        assert entry.options == {"interval": 5}
+
+        disabled = await call(
+            "set_integration_enabled", {"entry_id": entry.entry_id, "enabled": False}
+        )
+        assert disabled["disabled_by"] == "user"
+        enabled = await call(
+            "set_integration_enabled", {"entry_id": entry.entry_id, "enabled": True}
+        )
+        assert (enabled["disabled_by"], enabled["state"]) == (None, str(ConfigEntryState.LOADED))
+
+        refused = await client.post(
+            MCP_HTTP_PATH,
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "start_config_flow", "arguments": {"domain": DOMAIN}},
+                "id": 1,
+            },
+        )
+        assert (
+            "Refusing to configure the MCP Server itself"
+            in (await refused.json())["result"]["content"][0]["text"]
+        )
+        assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
         reloaded = await call("reload_integration", {"entry_id": entry.entry_id})
         assert reloaded["state"] == str(ConfigEntryState.LOADED)

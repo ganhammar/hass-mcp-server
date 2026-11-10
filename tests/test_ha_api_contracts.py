@@ -37,9 +37,9 @@ from homeassistant.components.recorder.statistics import (
     list_statistic_ids,
     validate_statistics,
 )
-from homeassistant.config_entries import ConfigFlow
+from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
@@ -873,3 +873,42 @@ class TestFlowProgressContract:
 
         assert step["type"] == FlowResultType.MENU
         assert list(step["menu_options"]) == ["a", "b"]
+
+    async def test_a_flow_is_found_by_id_and_names_what_it_configures(self, hass: HomeAssistant):
+        """continue_config_flow looks a flow up in the config and the options manager.
+
+        ``async_get`` raises UnknownFlow in the one that does not hold it, and its
+        result's ``handler`` is the domain for a config flow and the config entry
+        ID for an options flow. Both managers keep flows in ``_progress``.
+        """
+
+        class _Options(OptionsFlow):
+            async def async_step_init(self, user_input=None):
+                return self.async_show_menu(step_id="init", menu_options=["a"])
+
+        class _Flow(ConfigFlow):
+            async def async_step_user(self, user_input=None):
+                return self.async_show_menu(step_id="user", menu_options=["a"])
+
+            @staticmethod
+            def async_get_options_flow(config_entry):
+                return _Options()
+
+        mock_integration(hass, MockModule("mcp_contract"))
+        mock_platform(hass, "mcp_contract.config_flow", None)
+        entry = MockConfigEntry(domain="mcp_contract")
+        entry.add_to_hass(hass)
+        flows, options = hass.config_entries.flow, hass.config_entries.options
+        with mock_config_flow("mcp_contract", _Flow):
+            config_id = (await flows.async_init("mcp_contract", context={"source": "user"}))[
+                "flow_id"
+            ]
+            options_id = (await options.async_init(entry.entry_id))["flow_id"]
+
+            assert flows.async_get(config_id)["handler"] == "mcp_contract"
+            assert options.async_get(options_id)["handler"] == entry.entry_id
+            assert options._progress[options_id].cur_step["type"] == FlowResultType.MENU
+            with pytest.raises(UnknownFlow):
+                flows.async_get(options_id)
+            with pytest.raises(UnknownFlow):
+                options.async_get(config_id)

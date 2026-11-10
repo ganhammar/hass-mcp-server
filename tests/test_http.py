@@ -373,7 +373,7 @@ class TestMCPEndpointView:
         body = json.loads(response.body)
         assert body["jsonrpc"] == "2.0"
         assert "tools" in body["result"]
-        assert len(body["result"]["tools"]) == 110
+        assert len(body["result"]["tools"]) == 113
         tool_names = [t["name"] for t in body["result"]["tools"]]
         assert "get_state" in tool_names
         assert "call_service" in tool_names

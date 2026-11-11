@@ -141,15 +141,16 @@ jobs:
     - name: Run unit and contract tests
       run: .venv/bin/pytest tests/ -v -rs --ignore=tests/test_integration.py --ignore=tests/test_e2e.py --ignore=tests/test_e2e_oidc.py
 
-    # Vendor the paired OIDC provider so the audience-contract tests in
-    # test_e2e_oidc.py run against the real validate_access_token. Pinned to a
-    # provider commit for reproducibility; bump deliberately to test newer
-    # provider versions. These two steps run after a unit test failure as well,
-    # so a leg reports both results.
+    # Vendor the paired OIDC provider so test_e2e_oidc.py runs against the real
+    # provider, from token validation to the consent screen's choice of access,
+    # and test_oidc_provider.py checks the description with the provider's own
+    # validator. Pinned to a provider commit for reproducibility; bump
+    # deliberately to test newer provider versions. These two steps run after a
+    # unit test failure as well, so a leg reports both results.
     - name: Vendor paired OIDC provider
       if: ${{ !cancelled() }}
       env:
-        OIDC_PROVIDER_REF: e1b6b18ed7d4a3155541a900281ba05db170c365
+        OIDC_PROVIDER_REF: 5866851bd4c314822510f8796e19f57ea3538a2d
       run: |
         git clone --filter=blob:none https://github.com/ganhammar/hass-oidc-server.git /tmp/oidc-provider
         git -C /tmp/oidc-provider checkout "$OIDC_PROVIDER_REF"
@@ -157,4 +158,4 @@ jobs:
 
     - name: Run integration and end-to-end tests
       if: ${{ !cancelled() }}
-      run: .venv/bin/pytest tests/test_integration.py tests/test_e2e.py tests/test_e2e_oidc.py -v -rs
+      run: .venv/bin/pytest tests/test_integration.py tests/test_e2e.py tests/test_e2e_oidc.py tests/test_oidc_provider.py -v -rs

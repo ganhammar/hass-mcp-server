@@ -2170,6 +2170,7 @@ class TestTokenClaims:
             auth_method="oidc",
             client_id="https://claude.ai/x",
             scopes=frozenset({"openid", "mcp:read"}),
+            limited_by_scopes=True,
         )
 
     async def test_azp_names_the_client_when_client_id_is_absent(self, claims_hass, validator):
@@ -2316,3 +2317,366 @@ class TestCallerDuringToolCall:
 
         assert seen == {"anna": (anna, "anna"), "bob": (bob, "bob")}
         assert current_caller() is None
+
+
+class TestScopeLimits:
+    """An OAuth token limited by its scopes sees and calls only what it was granted.
+
+    A Long-Lived Access Token and an OAuth token that is not limited behave as before.
+    """
+
+    @pytest.fixture
+    def scope_hass(self, list_every_tool):
+        scope_hass = Mock()
+        scope_hass.data = {DOMAIN: {"entry_id": Mock()}}
+        scope_hass.auth.async_get_user = AsyncMock(return_value=_user())
+        scope_hass.auth.async_validate_access_token = Mock(return_value=None)
+        list_every_tool(scope_hass)
+        return scope_hass
+
+    @pytest.fixture
+    def validator(self):
+        import sys
+
+        validator = sys.modules["custom_components.oidc_provider.token_validator"]
+        original = validator.validate_access_token.return_value
+        yield validator
+        validator.validate_access_token.return_value = original
+
+    @staticmethod
+    def _oidc(*scopes: str, limited: bool = True) -> ValidatedToken:
+        return ValidatedToken(
+            sub="user123",
+            auth_method="oidc",
+            client_id="app",
+            scopes=frozenset(scopes),
+            limited_by_scopes=limited,
+        )
+
+    async def _post(self, view, token, method, params=None):
+        request = _jsonrpc_request(method, params)
+        request.url.origin.return_value = "https://homeassistant.local"
+        with (
+            patch.object(view, "_validate_token", return_value=token),
+            patch(_PROCESS_SUCCESS_LOGIN) as success,
+            patch(_PROCESS_WRONG_LOGIN, new_callable=AsyncMock) as wrong,
+            patch(
+                "custom_components.mcp_server_http_transport.http._get_issuer",
+                return_value="https://ha.example.com",
+            ),
+        ):
+            response = await view.post(request)
+        return response, success, wrong
+
+    async def _validate(self, hass, claims, validator, *, described: bool = False):
+        validator.validate_access_token.return_value = claims
+        request = Mock(path=MCP_PATH)
+        request.headers = {"Authorization": "Bearer oidc_token"}
+        request.url.origin.return_value = "https://homeassistant.local"
+        with patch(
+            "custom_components.mcp_server_http_transport.http._provider_describes",
+            return_value=described,
+        ) as describes:
+            token = await MCPEndpointView(hass, native_auth_enabled=True)._validate_token(request)
+        return token, describes
+
+    async def test_a_token_carrying_a_scope_of_this_server_is_limited(self, scope_hass, validator):
+        token, _ = await self._validate(
+            scope_hass, {"sub": "u", "scope": "openid mcp:read"}, validator
+        )
+
+        assert token.limited_by_scopes is True
+
+    async def test_a_token_carrying_only_an_unknown_scope_of_this_server_is_limited(
+        self, scope_hass, validator
+    ):
+        token, _ = await self._validate(
+            scope_hass, {"sub": "u", "scope": "openid mcp:future"}, validator
+        )
+
+        assert token.limited_by_scopes is True
+
+    async def test_once_the_provider_describes_this_server_every_token_is_limited(
+        self, scope_hass, validator
+    ):
+        token, describes = await self._validate(
+            scope_hass, {"sub": "u", "scope": "openid"}, validator, described=True
+        )
+
+        assert token.limited_by_scopes is True
+        describes.assert_called_once_with(scope_hass)
+
+    async def test_a_token_from_a_provider_that_does_not_describe_is_not_limited(
+        self, scope_hass, validator
+    ):
+        token, _ = await self._validate(scope_hass, {"sub": "u", "scope": "openid"}, validator)
+
+        assert token.limited_by_scopes is False
+
+    async def test_a_long_lived_access_token_is_never_limited(self, scope_hass, validator):
+        scope_hass.auth.async_validate_access_token = Mock(return_value=Mock(user=_user()))
+
+        token, describes = await self._validate(scope_hass, None, validator, described=True)
+
+        assert token == ValidatedToken(sub="user123", auth_method="native")
+        describes.assert_not_called()
+
+    async def test_a_limited_token_granting_nothing_gets_the_401_challenge(self, scope_hass):
+        view = MCPEndpointView(scope_hass)
+
+        response, success, wrong = await self._post(view, self._oidc("openid"), "initialize")
+
+        assert response.status == 401
+        assert json.loads(response.body)["error"] == "invalid_token"
+        challenge = response.headers["WWW-Authenticate"]
+        assert 'error="invalid_token"' in challenge
+        assert 'scope="openid"' in challenge
+        assert (
+            'resource_metadata="https://ha.example.com/.well-known/oauth-protected-resource'
+            '/api/mcp"' in challenge
+        )
+        # The token itself is valid: it is neither a failed login nor an authorized request.
+        wrong.assert_not_awaited()
+        success.assert_not_called()
+
+    async def test_a_token_granting_only_scopes_this_server_does_not_define_gets_the_401(
+        self, scope_hass
+    ):
+        view = MCPEndpointView(scope_hass)
+
+        response, _, _ = await self._post(
+            view, self._oidc("openid", "mcp:future", "mcp:entities:none"), "initialize"
+        )
+
+        assert response.status == 401
+
+    async def test_a_get_probe_with_such_a_token_gets_the_401_too(self, scope_hass):
+        view = MCPEndpointView(scope_hass)
+        request = Mock(path=MCP_PATH)
+        request.headers = {"Authorization": "Bearer t"}
+        with patch.object(view, "_validate_token", return_value=self._oidc("openid")):
+            response = await view.get(request)
+
+        assert response.status == 401
+
+    async def test_the_admin_requirement_is_checked_before_the_scopes(self, scope_hass):
+        scope_hass.auth.async_get_user = AsyncMock(return_value=_user(is_admin=False))
+        view = MCPEndpointView(scope_hass)
+
+        response, _, _ = await self._post(view, self._oidc("openid"), "initialize")
+
+        assert response.status == 403
+
+    async def test_an_unlimited_token_without_scopes_works_as_before(self, scope_hass):
+        view = MCPEndpointView(scope_hass)
+
+        response, success, _ = await self._post(
+            view, self._oidc("openid", limited=False), "tools/list"
+        )
+
+        assert response.status == 200
+        assert len(json.loads(response.body)["result"]["tools"]) == len(TOOLS)
+        success.assert_called_once()
+
+    async def test_a_long_lived_access_token_lists_every_tool(self, scope_hass):
+        view = MCPEndpointView(scope_hass, native_auth_enabled=True)
+
+        response, _, _ = await self._post(view, TOKEN, "tools/list")
+
+        assert len(json.loads(response.body)["result"]["tools"]) == len(TOOLS)
+
+    async def test_the_list_shows_only_what_the_scopes_allow(self, scope_hass):
+        view = MCPEndpointView(scope_hass)
+
+        response, success, _ = await self._post(
+            view, self._oidc("openid", "mcp:read"), "tools/list"
+        )
+
+        names = {tool["name"] for tool in json.loads(response.body)["result"]["tools"]}
+        assert response.status == 200
+        assert "get_state" in names and "call_service" not in names
+        success.assert_called_once()
+
+    async def test_a_call_outside_the_scopes_is_refused_and_audited(self, scope_hass):
+        view = MCPEndpointView(scope_hass)
+
+        with patch.object(view, "_audit_tool_call") as audit:
+            response, _, _ = await self._post(
+                view,
+                self._oidc("openid", "mcp:read"),
+                "tools/call",
+                {"name": "restart_ha", "arguments": {"confirm": True}},
+            )
+
+        body = json.loads(response.body)
+        assert body["error"]["code"] == -32602
+        assert "does not include tool 'restart_ha'" in body["error"]["message"]
+        assert "Diagnostics at Full" in body["error"]["message"]
+        assert audit.call_args.kwargs["withheld"] is True
+
+    async def test_control_devices_may_not_fire_events(self, scope_hass):
+        """Home Assistant lets only administrators fire events, so it needs Diagnostics at Full."""
+        view = MCPEndpointView(scope_hass)
+        token = self._oidc("openid", "mcp:control")
+
+        listed, _, _ = await self._post(view, token, "tools/list")
+        with patch.object(view, "_audit_tool_call") as audit:
+            response, _, _ = await self._post(
+                view,
+                token,
+                "tools/call",
+                {"name": "fire_event", "arguments": {"event_type": "custom"}},
+            )
+
+        names = {tool["name"] for tool in json.loads(listed.body)["result"]["tools"]}
+        assert "call_service" in names and "fire_event" not in names
+        body = json.loads(response.body)
+        assert body["error"]["code"] == -32602
+        assert "does not include tool 'fire_event'" in body["error"]["message"]
+        assert "Diagnostics at Full" in body["error"]["message"]
+        assert audit.call_args.kwargs["withheld"] is True
+        scope_hass.bus.async_fire.assert_not_called()
+
+    async def test_a_resource_outside_the_scopes_is_refused_and_logged(self, scope_hass, caplog):
+        view = MCPEndpointView(scope_hass)
+
+        with caplog.at_level(logging.INFO, logger="custom_components.mcp_server_http_transport"):
+            response, _, _ = await self._post(
+                view,
+                self._oidc("openid", "mcp:entities:read"),
+                "resources/read",
+                {"uri": "hass://areas"},
+            )
+
+        body = json.loads(response.body)
+        assert body["error"]["code"] == -32602
+        assert "resource hass://areas" in body["error"]["message"]
+        assert (
+            'MCP resources/read by user user123 (oidc auth, client "app"): "hass://areas" '
+            "-> invalid, not granted" in caplog.text
+        )
+        scope_hass.bus.async_fire.assert_not_called()
+
+    async def test_resources_and_prompts_are_listed_by_the_scopes(self, scope_hass):
+        view = MCPEndpointView(scope_hass)
+        token = self._oidc("openid", "mcp:automations:read")
+
+        resources, _, _ = await self._post(view, token, "resources/list")
+        prompts, _, _ = await self._post(view, token, "prompts/list")
+
+        assert json.loads(resources.body)["result"]["resources"] == []
+        assert [p["name"] for p in json.loads(prompts.body)["result"]["prompts"]] == [
+            "automation_review"
+        ]
+
+    async def test_a_prompt_outside_the_scopes_is_refused_and_logged(self, scope_hass, caplog):
+        view = MCPEndpointView(scope_hass)
+
+        with caplog.at_level(logging.INFO, logger="custom_components.mcp_server_http_transport"):
+            response, _, _ = await self._post(
+                view,
+                self._oidc("openid", "mcp:dashboards:read"),
+                "prompts/get",
+                {"name": "setup_guide"},
+            )
+
+        body = json.loads(response.body)
+        assert body["error"]["code"] == -32602
+        assert "prompt 'setup_guide'" in body["error"]["message"]
+        assert 'MCP prompts/get by user user123 (oidc auth, client "app"): "setup_guide"' in (
+            caplog.text
+        )
+        scope_hass.bus.async_fire.assert_not_called()
+
+    async def test_an_unknown_prompt_is_not_logged_as_refused(self, scope_hass, caplog):
+        view = MCPEndpointView(scope_hass)
+
+        with caplog.at_level(logging.INFO, logger="custom_components.mcp_server_http_transport"):
+            await self._post(view, self._oidc("openid", "mcp:admin"), "prompts/get", {"name": "x"})
+
+        assert "not granted" not in caplog.text
+
+
+class TestProviderDescribes:
+    """Whether the installed provider has collected this server's description."""
+
+    def test_without_the_provider_nothing_is_described(self):
+        from custom_components.mcp_server_http_transport.http import _provider_describes
+
+        # tests/conftest.py stands in for a provider without a resources module.
+        assert _provider_describes(Mock()) is False
+
+    @pytest.mark.parametrize(
+        ("collected", "expected"),
+        [
+            ([SimpleNamespace(domain="another_integration"), SimpleNamespace(domain=DOMAIN)], True),
+            ([SimpleNamespace(domain="another_integration")], False),
+            ([object()], False),
+            ([], False),
+        ],
+    )
+    def test_the_provider_is_asked_what_it_has_collected(self, collected, expected):
+        import sys
+
+        from custom_components.mcp_server_http_transport.http import _provider_describes
+
+        resources = Mock()
+        resources.described_resources = Mock(return_value=collected)
+        with patch.dict(sys.modules, {"custom_components.oidc_provider.resources": resources}):
+            assert _provider_describes("hass") is expected
+
+        resources.described_resources.assert_called_once_with("hass")
+
+    def test_a_provider_that_fails_to_answer_has_described_nothing(self):
+        import sys
+
+        from custom_components.mcp_server_http_transport.http import _provider_describes
+
+        resources = Mock()
+        resources.described_resources = Mock(side_effect=RuntimeError("broken"))
+        with patch.dict(sys.modules, {"custom_components.oidc_provider.resources": resources}):
+            assert _provider_describes("hass") is False
+
+    async def test_whether_a_token_is_limited_does_not_depend_on_the_request(self):
+        """A client that steers the audience with forwarded headers is limited all the same."""
+        import sys
+
+        validator = sys.modules["custom_components.oidc_provider.token_validator"]
+        original = validator.validate_access_token.return_value
+        validator.validate_access_token.return_value = {"sub": "u", "scope": "openid"}
+        resources = Mock()
+        resources.described_resources = Mock(return_value=[SimpleNamespace(domain=DOMAIN)])
+        resources.find_resource = Mock(return_value=None)
+        request = Mock(path=MCP_PATH)
+        request.headers = {
+            "Authorization": "Bearer oidc_token",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "ha.example.com/x",
+        }
+        try:
+            with patch.dict(sys.modules, {"custom_components.oidc_provider.resources": resources}):
+                token = await MCPEndpointView(Mock())._validate_token(request)
+        finally:
+            validator.validate_access_token.return_value = original
+
+        assert token.limited_by_scopes is True
+        resources.find_resource.assert_not_called()
+
+
+def test_every_401_challenge_names_openid_as_the_scope():
+    view = MCPEndpointView(Mock())
+    request = Mock(path=MCP_PATH)
+    with patch(
+        "custom_components.mcp_server_http_transport.http._get_issuer",
+        return_value="https://ha.example.com",
+    ):
+        challenge = view._unauthorized(request).headers["WWW-Authenticate"]
+
+    assert 'scope="openid"' in challenge
+    assert "error=" not in challenge
+
+
+def test_the_metadata_advertises_only_openid():
+    metadata = _get_protected_resource_metadata("https://ha.example.com", MCP_PATH)
+
+    assert metadata["scopes_supported"] == ["openid"]

@@ -12,6 +12,7 @@ from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.service import async_get_all_descriptions
 
+from ..access import ENTITIES, may_read, service_refusal
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
@@ -118,11 +119,20 @@ async def get_state(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str,
     annotations=ANNOTATION_DESTRUCTIVE,
 )
 async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Call a Home Assistant service, returning its response data when it has any."""
+    """Call a Home Assistant service, returning its response data when it has any.
+
+    A caller limited by its token's scopes calls a service that reaches the system,
+    such as homeassistant.restart or one Home Assistant reserves for administrators,
+    only when its access includes Diagnostics at Full. What another service an
+    integration offers does, or a script or automation it runs, is not looked into.
+    """
     domain = arguments["domain"]
     service = arguments["service"]
     entity_id = arguments.get("entity_id")
     data = arguments.get("data", {})
+
+    if refusal := service_refusal(hass, domain, service):
+        return error_result(refusal)
 
     service_data = {**data}
     if entity_id:
@@ -368,6 +378,10 @@ async def get_device_details(hass: HomeAssistant, arguments: dict[str, Any]) -> 
     include_entities = arguments.get("include_entities", True)
     include_states = arguments.get("include_states", True)
     include_disabled = arguments.get("include_disabled", False)
+    # States belong to Entities and their states, which the caller's access may leave out.
+    states_withheld = include_states and not may_read(ENTITIES)
+    if states_withheld:
+        include_states = False
 
     device_registry = dr.async_get(hass)
     device = device_registry.async_get(device_id)
@@ -411,6 +425,10 @@ async def get_device_details(hass: HomeAssistant, arguments: dict[str, Any]) -> 
                     entity["state"] = None
             entities.append(entity)
         result["entities"] = entities
+        if states_withheld:
+            result["states_omitted"] = (
+                "The access granted to this application does not include reading states"
+            )
 
     return {"content": [{"type": "text", "text": dumps(result)}]}
 

@@ -5,6 +5,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ..access import FULL, READ, TOOL_AREAS, current_grant, not_granted
 from ..caller import Caller, caller_context, current_caller  # noqa: F401
 from ..const import DOMAIN
 from ..json_utils import dumps  # noqa: F401
@@ -28,7 +29,7 @@ class InvalidToolArguments(InvalidToolRequest):
 
 
 class ToolNotAvailable(InvalidToolRequest):
-    """The tool exists but the server's options keep it from being used."""
+    """The tool exists but the server's options, or the caller's access, keep it from use."""
 
 
 def error_result(text: str) -> dict[str, Any]:
@@ -106,11 +107,27 @@ def tool_is_read_only(name: Any) -> bool:
     return tool["schema"].get("annotations", {}).get("readOnlyHint") is True
 
 
+def tool_access(name: str) -> tuple[str, str] | None:
+    """Return the area a tool belongs to and the setting it needs there, or None.
+
+    A tool needs Read when it is annotated read-only and Full otherwise. None for a
+    tool that has no area, which a caller limited by scopes is never given.
+    """
+    area = TOOL_AREAS.get(name)
+    if area is None:
+        return None
+    return area, READ if tool_is_read_only(name) else FULL
+
+
 def tool_unavailable_reason(hass: HomeAssistant, name: str) -> str | None:
-    """Return why the server's options withhold a registered tool, or None.
+    """Return why the server's options or the caller's access withhold a tool, or None.
 
     Read-only mode goes by the readOnlyHint annotation alone, so that annotation
-    is a security boundary: a tool that can change anything must not carry it.
+    is a security boundary: a tool that can change anything must not carry it. The
+    caller's access goes by it too, since it decides whether a tool needs Read or
+    Full in its area. The access is the one of the request being served, so a
+    caller limited by scopes is only offered, and only gets to call, what its token
+    grants; a scope never offers a tool the options withhold.
 
     The limits live in hass.data[DOMAIN], which is populated while the config
     entry is loaded and empty otherwise. With nothing there to say a tool is
@@ -119,15 +136,24 @@ def tool_unavailable_reason(hass: HomeAssistant, name: str) -> str | None:
     options = hass.data.get(DOMAIN)
     if not options:
         return "The MCP Server integration is not loaded, so no tool is available"
-    if not isinstance(options, dict):
-        return None
-    if name in options.get("disabled_tools", ()):
-        return f"Tool '{name}' is turned off in the MCP Server integration options"
-    if options.get("read_only", False) and not tool_is_read_only(name):
-        return (
-            f"Tool '{name}' can change things and the MCP Server is in read-only mode, "
-            "set in the integration options"
-        )
+    if isinstance(options, dict):
+        if name in options.get("disabled_tools", ()):
+            return f"Tool '{name}' is turned off in the MCP Server integration options"
+        if options.get("read_only", False) and not tool_is_read_only(name):
+            return (
+                f"Tool '{name}' can change things and the MCP Server is in read-only mode, "
+                "set in the integration options"
+            )
+    grant = current_grant()
+    if grant is not None:
+        needed = tool_access(name)
+        if needed is None:
+            return (
+                f"The access granted to this application does not include tool '{name}': "
+                "it belongs to no area an application can be given"
+            )
+        if not grant.allows(*needed):
+            return not_granted(f"tool '{name}'", *needed)
     return None
 
 
@@ -163,10 +189,10 @@ def _is_usable(hass: HomeAssistant, name: str) -> bool:
 
 
 def get_tool_schemas(hass: HomeAssistant) -> list[dict[str, Any]]:
-    """Return the schemas of the tools a client can use as the server is set up.
+    """Return the schemas of the tools the client making the request can use.
 
-    A tool the limits withhold is left out, and so is one whose own option is off
-    or whose integration is not loaded.
+    A tool the limits or the caller's access withhold is left out, and so is one
+    whose own option is off or whose integration is not loaded.
     """
     return [
         tool["schema"]
@@ -210,10 +236,10 @@ async def call_tool(hass: HomeAssistant, name: str, arguments: dict[str, Any]) -
     tool result, which keeps one failing call from turning the whole JSON-RPC
     response into a transport-level failure.
 
-    Anything the caller got wrong — an unknown name, a tool the options withhold,
-    a non-object arguments, a missing required property — raises
-    InvalidToolRequest rather than reaching a handler, so a malformed call can
-    never run a tool's default behavior.
+    Anything the caller got wrong raises InvalidToolRequest rather than reaching
+    a handler, so a malformed call can never run a tool's default behavior: an
+    unknown name, a tool the options or the caller's access withhold, a
+    non-object arguments, a missing required property.
     """
     tool = TOOLS.get(name)
     if tool is None:

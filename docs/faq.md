@@ -32,7 +32,15 @@ Out of the box: read states and history, call services, and manage automations, 
 
 ### Can I let it look but not touch?
 
-Yes. Turn on **Read-only mode** and only the tools that read are offered. You can also switch off single tools. See [Configuration](configuration.md#limiting-the-tools).
+Yes, two ways. When an application connects through the OIDC Provider, choose **Look only** on the consent screen and that connection can only read. To hold every connection to reading, long-lived access tokens included, turn on **Read-only mode**. You can also switch off single tools. See [Choosing what an application may do](security.md#choosing-what-an-application-may-do) and [Configuration](configuration.md#limiting-the-tools).
+
+### Can I give one application less than another?
+
+Yes. The consent screen asks each time an application connects, so one can control devices while another only looks. **Choose in detail** sets each area separately, such as dashboards read-only and no cameras. A level below Administer is not a sandbox, though: an application that may change automations and scripts can write one that does anything. [What the choice does not cover](security.md#what-the-choice-does-not-cover) lists the limits.
+
+### What changes for my existing connection when I update?
+
+Nothing you would notice: a connection made before keeps what it could do, which is Administer, still limited by the options. In read-only mode it is held at Read. To choose a level for it, open Connected applications (`https://your-home-assistant/oidc_login`) and use Change access. This needs the OIDC Provider release after 1.8.0.
 
 ### Can I see what it did?
 
@@ -55,6 +63,10 @@ Clients read the tool list when they connect. Disconnect and reconnect the clien
 ### The assistant says a tool is disabled.
 
 The tool belongs to a group that is off. The message names the option, and [Configuration](configuration.md) describes each one.
+
+### The assistant says the access granted to it does not include a tool.
+
+You chose a level or area settings without it when the application connected. The message names the area and setting the tool needs. To change it, open Connected applications (`https://your-home-assistant/oidc_login`) and use Change access. The change applies the next time the application renews its sign-in, which happens within the hour.
 
 ### Can it edit my YAML configuration?
 

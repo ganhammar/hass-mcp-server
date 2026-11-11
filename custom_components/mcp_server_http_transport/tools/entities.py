@@ -13,6 +13,7 @@ from homeassistant.helpers.service import async_get_all_descriptions
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
+    caller_context,
     dumps,
     error_result,
     register_tool,
@@ -147,6 +148,7 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
             service,
             service_data,
             blocking=True,
+            context=caller_context(),
             return_response=wants_response,
         )
 

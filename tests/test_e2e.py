@@ -41,6 +41,7 @@ from pytest_homeassistant_custom_component.common import (
     MockModule,
     MockUser,
     async_capture_events,
+    async_mock_service,
     mock_config_flow,
     mock_integration,
     mock_platform,
@@ -52,6 +53,7 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_INTEGRATION_MANAGEMENT,
     CONF_NATIVE_AUTH,
     CONF_READ_ONLY,
+    CONF_REQUIRE_ADMIN,
     DOMAIN,
     EVENT_TOOL_CALLED,
     ISSUE_ENDPOINT_CONFLICT,
@@ -187,10 +189,127 @@ async def test_a_write_tool_fires_the_audit_event_as_its_caller(
         "tool": "fire_event",
         "user_id": hass_admin_user.id,
         "auth_method": "native",
+        "client_id": None,
         "outcome": "ok",
         "arguments": {"event_type": "mcp_e2e", "event_data": {"api_key": "***"}},
     }
     assert event.context.user_id == hass_admin_user.id
+
+
+async def test_a_service_call_changes_state_as_the_caller(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_admin_user: MockUser,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """The state change is recorded under the caller, in the context the audit event shares."""
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"mcp_e2e": {}}})
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "call_service",
+                "arguments": {
+                    "domain": "input_boolean",
+                    "service": "turn_on",
+                    "entity_id": "input_boolean.mcp_e2e",
+                },
+            },
+            "id": 1,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    assert "isError" not in (await resp.json())["result"]
+    state = hass.states.get("input_boolean.mcp_e2e")
+    assert state.state == "on"
+    assert state.context.user_id == hass_admin_user.id
+    (event,) = events
+    assert event.context.id == state.context.id
+
+
+async def test_home_assistant_applies_the_callers_own_permissions(
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_read_only_access_token: str,
+) -> None:
+    """A user Home Assistant lets read but not control cannot change state through a tool."""
+    assert await async_setup_component(hass, "http", {})
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_NATIVE_AUTH: True, CONF_REQUIRE_ADMIN: False})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"mcp_e2e": {}}})
+    await hass.async_block_till_done()
+    client = await hass_client_no_auth()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "call_service",
+                "arguments": {
+                    "domain": "input_boolean",
+                    "service": "turn_on",
+                    "entity_id": "input_boolean.mcp_e2e",
+                },
+            },
+            "id": 1,
+        },
+        headers={"Authorization": f"Bearer {hass_read_only_access_token}"},
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    result = (await resp.json())["result"]
+    assert result["isError"] is True
+    assert "Unauthorized" in result["content"][0]["text"]
+    assert hass.states.get("input_boolean.mcp_e2e").state == "off"
+
+
+async def test_a_non_administrator_is_told_the_restart_was_refused(
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_read_only_access_token: str,
+) -> None:
+    """The restart is not awaited, so the tool refuses a non-administrator itself."""
+    assert await async_setup_component(hass, "http", {})
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_NATIVE_AUTH: True, CONF_REQUIRE_ADMIN: False})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    restarts = async_mock_service(hass, "homeassistant", "restart")
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client_no_auth()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "restart_ha", "arguments": {"confirm": True}},
+            "id": 1,
+        },
+        headers={"Authorization": f"Bearer {hass_read_only_access_token}"},
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    result = (await resp.json())["result"]
+    assert result["isError"] is True
+    assert "administrator" in result["content"][0]["text"]
+    assert restarts == []
+    (event,) = events
+    assert event.data["outcome"] == "error"
 
 
 async def test_a_read_only_tool_fires_no_audit_event(

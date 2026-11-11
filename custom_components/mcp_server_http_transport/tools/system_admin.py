@@ -12,6 +12,8 @@ from homeassistant.core import HomeAssistant
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
+    caller_context,
+    current_caller,
     dumps,
     error_result,
     register_tool,
@@ -216,8 +218,16 @@ async def restart_ha(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
             "This will restart Home Assistant and temporarily interrupt all operations."
         )
 
+    # The restart is not awaited, so Home Assistant's refusal of a
+    # non-administrator would only reach its log.
+    caller = current_caller()
+    if caller is not None and not caller.user.is_admin:
+        return error_result("Error: restarting Home Assistant requires an administrator account")
+
     try:
-        await hass.services.async_call("homeassistant", "restart", blocking=False)
+        await hass.services.async_call(
+            "homeassistant", "restart", blocking=False, context=caller_context()
+        )
         return {"content": [{"type": "text", "text": "Home Assistant restart has been initiated"}]}
     except Exception as e:
         _LOGGER.error("Error restarting Home Assistant: %s", e)

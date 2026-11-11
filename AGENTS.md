@@ -91,6 +91,23 @@ outcome `error`, so a refused call to a tool that can change something fires the
 audit event as one. `tests/test_tools_is_error.py` holds a failing call for every
 tool module and fails when a module is added without one.
 
+A handler learns who called it from `current_caller()` in `tools/__init__.py`: the
+`Caller` with the user, how they authenticated, the OAuth client and the token's
+scopes, or None outside a call. `caller_context()` is the Home Assistant `Context`
+for the call, one per call and carrying the user's ID. The transport sets both
+around each `tools/call` with a context variable, so no handler signature carries
+them; read them on the event loop, since a function passed to
+`async_add_executor_job` does not see them. Pass `context=caller_context()` to a
+service call or event that is the change the caller asked for, as `call_service`,
+`fire_event` and `restart_ha` do: Home Assistant then records the user against the
+change, and checks a service call against that user's permissions. An event is
+not checked. A refusal only reaches the handler when the call is awaited, so a
+tool that calls with `blocking=False`, as `restart_ha` does, checks the caller
+itself first. Leave the context off a service call that is the tool's own
+plumbing, such as the reload after a YAML write or the `recorder.get_statistics`
+read. Most of those are admin-only, so for a non-administrator the reload would be
+refused after the file has already changed.
+
 `call_tool` and `get_tool_schemas` also apply the two options that limit the tool
 set: read-only mode and the list of disabled tools. Read-only mode goes by the
 `readOnlyHint` annotation and nothing else, which makes the annotation a security

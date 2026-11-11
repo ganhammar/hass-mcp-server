@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import hdrs, web
-from homeassistant.auth.models import User
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.ban import process_success_login, process_wrong_login
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
+from .caller import Caller, acting_as
 from .completions import complete
 from .const import (
     DEFAULT_SERVER_NAME,
@@ -66,6 +66,9 @@ ARGUMENTS_PREVIEW_CHARS = 500
 # The tool name comes straight from the request, so it is cut to this before it is
 # logged or fired. Every registered name is far shorter.
 TOOL_NAME_PREVIEW_CHARS = 100
+# The client ID is cut the same way. A client that signs in with a Client ID
+# Metadata Document is named by that document's URL, which the client chooses.
+CLIENT_ID_PREVIEW_CHARS = 200
 
 
 @dataclass(frozen=True)
@@ -74,20 +77,43 @@ class ValidatedToken:
 
     ``sub`` is the Home Assistant user id the token was issued for, on both paths:
     the paired OIDC provider signs the authorizing user's id as the subject, and a
-    Long-Lived Access Token belongs to a user directly.
+    Long-Lived Access Token belongs to a user directly. ``client_id`` and
+    ``scopes`` come from an OAuth token's claims; a Long-Lived Access Token has
+    neither.
     """
 
     sub: str
     auth_method: str
+    client_id: str | None = None
+    scopes: frozenset[str] = frozenset()
 
 
-@dataclass(frozen=True)
-class Caller:
-    """The Home Assistant user an authorized request acts as."""
+def _token_client_id(claims: dict[str, Any]) -> str | None:
+    """Return the OAuth client an access token was issued to, or None.
 
-    user_id: str
-    auth_method: str
-    user: User
+    RFC 9068 names it in ``client_id``. Providers that predate that claim name it
+    in ``azp`` when the token is bound to a resource, and that is used when
+    ``client_id`` is absent.
+    """
+    for claim in ("client_id", "azp"):
+        value = claims.get(claim)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _token_scopes(claims: dict[str, Any]) -> frozenset[str]:
+    """Return the scopes an access token grants.
+
+    RFC 9068 carries them in ``scope`` as one space-separated string. A list of
+    strings is read as well. Anything else grants nothing.
+    """
+    scope = claims.get("scope")
+    if isinstance(scope, str):
+        return frozenset(scope.split())
+    if isinstance(scope, list):
+        return frozenset(item for item in scope if isinstance(item, str) and item)
+    return frozenset()
 
 
 def mask_secrets(value: Any) -> Any:
@@ -459,7 +485,12 @@ class MCPEndpointView(HomeAssistantView):
                 result = validate_access_token(self.hass, token, expected_issuer)
             sub = result.get("sub") if isinstance(result, dict) else None
             if isinstance(sub, str) and sub:
-                return ValidatedToken(sub=sub, auth_method=AUTH_METHOD_OIDC)
+                return ValidatedToken(
+                    sub=sub,
+                    auth_method=AUTH_METHOD_OIDC,
+                    client_id=_token_client_id(result),
+                    scopes=_token_scopes(result),
+                )
         except ImportError as e:
             _LOGGER.debug("OIDC provider not available: %s", e)
 
@@ -500,7 +531,13 @@ class MCPEndpointView(HomeAssistantView):
             description = "This MCP server requires a Home Assistant administrator account"
         else:
             self._record_successful_login(request)
-            return Caller(user_id=token.sub, auth_method=token.auth_method, user=user)
+            return Caller(
+                user_id=token.sub,
+                auth_method=token.auth_method,
+                user=user,
+                client_id=token.client_id,
+                scopes=token.scopes,
+            )
 
         first_time = (token.sub, reason) not in self._reported_refusals
         self._reported_refusals.add((token.sub, reason))
@@ -679,25 +716,33 @@ class MCPEndpointView(HomeAssistantView):
             name = params.get("name")
             arguments = params.get("arguments", {})
 
-            try:
-                result = await self._call_tool(name, arguments)
-            except InvalidToolRequest as err:
+            # The handler finds the caller through current_caller(), and what it
+            # does as the caller shares its context with the audit event.
+            with acting_as(caller) as context:
+                try:
+                    result = await self._call_tool(name, arguments)
+                except InvalidToolRequest as err:
+                    self._audit_tool_call(
+                        caller,
+                        name,
+                        arguments,
+                        OUTCOME_INVALID,
+                        withheld=isinstance(err, ToolNotAvailable),
+                        context=context,
+                    )
+                    return _jsonrpc_error(-32602, str(err), msg_id)
+                except Exception:
+                    self._audit_tool_call(caller, name, arguments, OUTCOME_ERROR, context=context)
+                    raise
+
+                is_error = isinstance(result, dict) and result.get("isError") is True
                 self._audit_tool_call(
                     caller,
                     name,
                     arguments,
-                    OUTCOME_INVALID,
-                    withheld=isinstance(err, ToolNotAvailable),
+                    OUTCOME_ERROR if is_error else OUTCOME_OK,
+                    context=context,
                 )
-                return _jsonrpc_error(-32602, str(err), msg_id)
-            except Exception:
-                self._audit_tool_call(caller, name, arguments, OUTCOME_ERROR)
-                raise
-
-            is_error = isinstance(result, dict) and result.get("isError") is True
-            self._audit_tool_call(
-                caller, name, arguments, OUTCOME_ERROR if is_error else OUTCOME_OK
-            )
             return {
                 "jsonrpc": "2.0",
                 "result": result,
@@ -774,12 +819,20 @@ class MCPEndpointView(HomeAssistantView):
         return await call_tool(self.hass, name, arguments)
 
     def _audit_tool_call(
-        self, caller: Caller, name: Any, arguments: Any, outcome: str, *, withheld: bool = False
+        self,
+        caller: Caller,
+        name: Any,
+        arguments: Any,
+        outcome: str,
+        *,
+        withheld: bool = False,
+        context: Context | None = None,
     ) -> None:
-        """Record who called a tool, with what, and how it ended.
+        """Record who called a tool, through which client, with what, and how it ended.
 
         A tool that can change something is logged at INFO and fired as
-        EVENT_TOOL_CALLED, with the caller as the event context's user. A read-only
+        EVENT_TOOL_CALLED under ``context``, the one the call's own changes were
+        recorded under, or a new one with the caller as its user. A read-only
         tool is logged at DEBUG only: an event per read would flood the recorder.
         A call to a tool the options withhold is recorded like a write whatever
         the tool does, since the client was never offered it. Secret-named
@@ -795,12 +848,19 @@ class MCPEndpointView(HomeAssistantView):
         # text and is logged as a JSON string so a newline in it cannot forge a
         # log line.
         logged_tool = tool if tool in TOOLS else dumps(tool)
+        # The client ID is the caller's text as well, so it is always logged as
+        # a JSON string. A Long-Lived Access Token has no client.
+        client_id = (
+            caller.client_id[:CLIENT_ID_PREVIEW_CHARS] if caller.client_id is not None else None
+        )
+        via = f", client {dumps(client_id)}" if client_id is not None else ""
         summary = truncate_arguments(mask_tool_arguments(name, arguments))
         _LOGGER.log(
             level,
-            "MCP tool call by user %s (%s auth): %s -> %s, arguments %s",
+            "MCP tool call by user %s (%s auth%s): %s -> %s, arguments %s",
             caller.user_id,
             caller.auth_method,
+            via,
             logged_tool,
             outcome,
             dumps(summary),
@@ -817,10 +877,11 @@ class MCPEndpointView(HomeAssistantView):
                     "tool": tool,
                     "user_id": caller.user_id,
                     "auth_method": caller.auth_method,
+                    "client_id": client_id,
                     "outcome": outcome,
                     "arguments": summary,
                 },
-                context=Context(user_id=caller.user_id),
+                context=context if context is not None else Context(user_id=caller.user_id),
             )
         except Exception:  # noqa: BLE001 - the audit event must not fail the call
             _LOGGER.exception("Could not fire %s for tool %s", EVENT_TOOL_CALLED, tool)

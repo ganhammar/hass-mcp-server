@@ -12,6 +12,7 @@ from ..const import DOMAIN
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
+    caller_context,
     dumps,
     error_result,
     register_tool,
@@ -213,7 +214,7 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         return error_result(f"Error: firing this integration's event '{event_type}' is not allowed")
 
     try:
-        hass.bus.async_fire(event_type, event_data)
+        hass.bus.async_fire(event_type, event_data, context=caller_context())
         return {"content": [{"type": "text", "text": f"Successfully fired event: {event_type}"}]}
     except Exception as e:
         _LOGGER.error("Error firing event: %s", e)

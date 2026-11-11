@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, call, patch
+from unittest.mock import ANY, AsyncMock, Mock, call, patch
 
 import pytest
 
@@ -334,7 +334,17 @@ class TestToolsSystem:
         body = json.loads(response.body)
         assert "isError" not in body["result"]
         assert "Successfully fired event" in body["result"]["content"][0]["text"]
-        assert _fired_by_tool(mock_hass.bus.async_fire) == [call("custom_event", {"key": "value"})]
+        assert _fired_by_tool(mock_hass.bus.async_fire) == [
+            call("custom_event", {"key": "value"}, context=ANY)
+        ]
+        # The event is fired as the calling user, under the context the audit event
+        # for the same call carries.
+        (fired,) = _fired_by_tool(mock_hass.bus.async_fire)
+        (audit,) = [
+            c for c in mock_hass.bus.async_fire.call_args_list if c.args[0] == EVENT_TOOL_CALLED
+        ]
+        assert fired.kwargs["context"].user_id == CALLER.user_id
+        assert fired.kwargs["context"] is audit.kwargs["context"]
 
     async def test_post_tools_call_fire_event_without_data(self, view, mock_hass):
         """Test fire_event without event_data defaults to empty dict."""
@@ -359,7 +369,7 @@ class TestToolsSystem:
             response = await view.post(request)
 
         assert response.status == 200
-        assert _fired_by_tool(mock_hass.bus.async_fire) == [call("simple_event", {})]
+        assert _fired_by_tool(mock_hass.bus.async_fire) == [call("simple_event", {}, context=ANY)]
 
     async def test_post_tools_call_fire_event_blocked_type(self, view, mock_hass):
         """Test fire_event rejects system event types."""

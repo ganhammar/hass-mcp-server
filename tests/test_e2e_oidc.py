@@ -688,6 +688,36 @@ class TestChosenAccess:
         assert allowed.get("isError") is not True
         assert len(calls) == 1
 
+    async def test_firing_an_event_needs_diagnostics_at_full(
+        self,
+        both: None,
+        hass: HomeAssistant,
+        hass_client: ClientSessionGenerator,
+        hass_client_no_auth: ClientSessionGenerator,
+    ) -> None:
+        events = async_capture_events(hass, "mcp_e2e_custom")
+        provider = await hass_client()
+        mcp = await hass_client_no_auth()
+        registration = await _register(provider)
+        fire = {"name": "fire_event", "arguments": {"event_type": "mcp_e2e_custom"}}
+
+        control = await _sign_in(provider, registration, {"options": _levels("control")})
+
+        assert "fire_event" not in await _tool_names(mcp, control["access_token"])
+        resp = await _rpc(mcp, control["access_token"], "tools/call", fire)
+        error = (await resp.json())["error"]
+        assert error["code"] == -32602
+        assert "Diagnostics at Full" in error["message"]
+        await hass.async_block_till_done()
+        assert events == []
+
+        admin = await _sign_in(provider, registration, {"options": _levels("admin")})
+
+        resp = await _rpc(mcp, admin["access_token"], "tools/call", fire)
+        assert (await resp.json())["result"].get("isError") is not True
+        await hass.async_block_till_done()
+        assert len(events) == 1
+
     async def test_a_token_granting_nothing_gets_401_and_its_refresh_still_does(
         self,
         both: None,

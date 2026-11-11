@@ -241,7 +241,6 @@ _TOOLS_BY_AREA: dict[str, tuple[str, ...]] = {
         "list_statistic_ids",
         "validate_statistics",
         "call_service",
-        "fire_event",
     ),
     CALENDARS: (
         "list_calendar_events",
@@ -322,7 +321,9 @@ _TOOLS_BY_AREA: dict[str, tuple[str, ...]] = {
     ),
     # Correcting and clearing statistics sit here rather than with the statistics they
     # change: they rewrite the recorder's history, as the recorder's own services do,
-    # and those need this area at Full.
+    # and those need this area at Full. Firing an event sits here too: Home Assistant
+    # lets only administrators fire events, since core and integrations act on events
+    # such as user_removed as if Home Assistant itself had fired them.
     DIAGNOSTICS: (
         "get_config",
         "get_system_status",
@@ -333,6 +334,7 @@ _TOOLS_BY_AREA: dict[str, tuple[str, ...]] = {
         "get_error_log",
         "adjust_statistics",
         "clear_statistics",
+        "fire_event",
         "restart_ha",
     ),
     # Removing a device sits with integrations, next to the option that switches it on.

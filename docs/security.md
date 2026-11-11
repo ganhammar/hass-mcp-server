@@ -17,15 +17,15 @@ When an application such as Claude connects through the [OIDC Provider](https://
 | Level | What it allows |
 |---|---|
 | Look only | See devices, history and settings, without changing anything. Config files and AppDaemon apps stay closed. This is preselected the first time. |
-| Control devices | Also perform actions, fire events, and add and delete calendar events. |
+| Control devices | Also perform actions, and add and delete calendar events. |
 | Edit the setup | Also change automations, scripts, scenes, dashboards, helpers and KNX entities, and organize areas, floors, devices, labels and entities. |
-| Administer | Also restart Home Assistant and perform system actions, correct or clear statistics, manage integrations and remove devices, and read and change config files and AppDaemon apps. |
+| Administer | Also restart Home Assistant and perform system actions, fire events, correct or clear statistics, manage integrations and remove devices, and read and change config files and AppDaemon apps. |
 
 Each level sets every area, and choosing in detail starts from a level:
 
 | Area | Read lets it | Full also lets it | Look only | Control devices | Edit the setup | Administer |
 |---|---|---|---|---|---|---|
-| Entities and their states | See states, history, the logbook and statistics | Perform actions and fire events | Read | Full | Full | Full |
+| Entities and their states | See states, history, the logbook and statistics | Perform actions | Read | Full | Full | Full |
 | Calendars | See calendar events | Add and delete events | Read | Full | Full | Full |
 | Cameras and images | See camera frames and saved images | (nothing more) | Read | Read | Read | Read |
 | Automations, scripts and scenes | See their configuration and traces | Create, change and delete them | Read | Read | Full | Full |
@@ -34,7 +34,7 @@ Each level sets every area, and choosing in detail starts from a level:
 | Areas, floors, devices and labels | See them, the entity registry and categories | Change them, rename and remove entities, set icons and categories | Read | Read | Full | Full |
 | Templates | Render templates | (nothing more) | Read | Read | Read | Read |
 | KNX | See telegrams and group addresses | Create and change KNX entities | Read | Read | Full | Full |
-| Diagnostics | See the version and location, system status and health, repairs, the list of backups and the error log, and check the configuration | Restart, perform system actions, correct or clear statistics | Read | Read | Read | Full |
+| Diagnostics | See the version and location, system status and health, repairs, the list of backups and the error log, and check the configuration | Restart, perform system actions, fire events, correct or clear statistics | Read | Read | Read | Full |
 | Integrations | See which integrations are set up | Add, configure, turn off and remove integrations, remove devices | Read | Read | Read | Full |
 | Config files | Read YAML files, never `secrets.yaml` | Change, delete and restore them | None | None | None | Full |
 | AppDaemon apps | Read the apps' code and settings | Change, delete and restore them | None | None | None | Full |

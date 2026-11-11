@@ -45,9 +45,7 @@ _OPTION_TEXT: dict[str, dict[str, str]] = {
     ENTITIES: {
         NONE: "{app} cannot see states or perform actions.",
         READ: "{app} can see states, history, the logbook and statistics.",
-        FULL: (
-            "{app} can also perform actions and fire events, such as turning lights on and off."
-        ),
+        FULL: "{app} can also perform actions, such as turning lights on and off.",
     },
     CALENDARS: {
         NONE: "{app} cannot see or change calendar events.",
@@ -96,8 +94,8 @@ _OPTION_TEXT: dict[str, dict[str, str]] = {
         NONE: "{app} cannot see system health, repairs or logs.",
         READ: ("{app} can see system health, repairs, the list of backups and the error log."),
         FULL: (
-            "{app} can also restart Home Assistant, correct or clear statistics, and "
-            "perform system actions such as making a backup."
+            "{app} can also restart Home Assistant, fire events, correct or clear "
+            "statistics, and perform system actions such as making a backup."
         ),
     },
     INTEGRATIONS: {
@@ -296,7 +294,7 @@ _PRESET_TEXT: dict[str, dict[str, Any]] = {
     "admin": {
         "description": (
             "Also add and remove integrations and devices, change configuration files and "
-            "AppDaemon apps, and restart Home Assistant."
+            "AppDaemon apps, fire events, and restart Home Assistant."
         ),
     },
 }

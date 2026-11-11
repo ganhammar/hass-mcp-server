@@ -136,7 +136,7 @@ class TestClassification:
             ("restart_ha", (DIAGNOSTICS, FULL)),
             ("search_config", (access.AUTOMATIONS, READ)),
             ("call_service", (ENTITIES, FULL)),
-            ("fire_event", (ENTITIES, FULL)),
+            ("fire_event", (DIAGNOSTICS, FULL)),
             ("clear_statistics", (DIAGNOSTICS, FULL)),
         ],
     )
@@ -176,7 +176,7 @@ class TestPresets:
 
     @pytest.mark.parametrize(
         ("scope", "count"),
-        [("mcp:read", 48), ("mcp:control", 53), ("mcp:configure", 88), ("mcp:admin", 117)],
+        [("mcp:read", 48), ("mcp:control", 52), ("mcp:configure", 87), ("mcp:admin", 117)],
     )
     def test_how_many_tools_each_level_offers(self, every_tool_hass, scope, count):
         assert len(_listed(every_tool_hass, _caller(scope))) == count

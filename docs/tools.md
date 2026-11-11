@@ -30,7 +30,7 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `create_recurring_calendar_event` | Calendars: Full | Create a recurring calendar series with RRULE (local calendars) |
 | `list_calendar_events` | Calendars: Read | List events in a time window (uid for deletes; descriptions omitted by default) |
 | `delete_calendar_events` | Calendars: Full | Delete events by uid or summary filter (supports dry_run preview) |
-| `fire_event` | Entities and their states: Full | Fire a custom event on the Home Assistant event bus |
+| `fire_event` | Diagnostics: Full | Fire a custom event on the Home Assistant event bus |
 | `get_history` | Entities and their states: Read | Get state history of an entity over a time range |
 | `get_logbook` | Entities and their states: Read | Fetch logbook entries for an entity or time range |
 | `get_statistics` | Entities and their states: Read | Fetch long-term statistics (energy, climate) with configurable period |

@@ -2475,6 +2475,29 @@ class TestScopeLimits:
         assert "Diagnostics at Full" in body["error"]["message"]
         assert audit.call_args.kwargs["withheld"] is True
 
+    async def test_control_devices_may_not_fire_events(self, scope_hass):
+        """Home Assistant lets only administrators fire events, so it needs Diagnostics at Full."""
+        view = MCPEndpointView(scope_hass)
+        token = self._oidc("openid", "mcp:control")
+
+        listed, _, _ = await self._post(view, token, "tools/list")
+        with patch.object(view, "_audit_tool_call") as audit:
+            response, _, _ = await self._post(
+                view,
+                token,
+                "tools/call",
+                {"name": "fire_event", "arguments": {"event_type": "custom"}},
+            )
+
+        names = {tool["name"] for tool in json.loads(listed.body)["result"]["tools"]}
+        assert "call_service" in names and "fire_event" not in names
+        body = json.loads(response.body)
+        assert body["error"]["code"] == -32602
+        assert "does not include tool 'fire_event'" in body["error"]["message"]
+        assert "Diagnostics at Full" in body["error"]["message"]
+        assert audit.call_args.kwargs["withheld"] is True
+        scope_hass.bus.async_fire.assert_not_called()
+
     async def test_a_resource_outside_the_scopes_is_refused(self, scope_hass):
         view = MCPEndpointView(scope_hass)
 

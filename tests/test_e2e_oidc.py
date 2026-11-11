@@ -15,12 +15,21 @@ integration. CI vendors that integration into ``custom_components/`` for this
 file; when it isn't present (a normal local checkout) ``conftest.py`` stubs the
 module instead and these tests skip.
 
-No browser and no issuance flow: a token is signed directly with a provider
-keypair seeded into ``hass.data`` and POSTed to the endpoint under test.
+Most tests need no issuance flow: a token is signed directly with a provider
+keypair seeded into ``hass.data`` and POSTed to the endpoint under test. The
+provider is not set up for those, so it has collected no description and the
+tokens are not limited by their scopes. ``TestChosenAccess`` sets the real
+provider up instead and drives its authorization flow, browser-free, from the
+consent screen's choice to the tools the resulting token is offered.
 """
 
+import base64
+import hashlib
+import re
+import secrets
 import time
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+from urllib.parse import parse_qs, urlparse
 
 import jwt
 import pytest
@@ -115,7 +124,8 @@ def _sign(
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    return jwt.encode(payload, pem, algorithm="RS256")
+    # The provider accepts only a token typed as an access token (RFC 9068).
+    return jwt.encode(payload, pem, algorithm="RS256", headers={"typ": "at+jwt"})
 
 
 async def _post_initialize(client: ClientSessionGenerator, token: str, path: str = MCP_PATH):
@@ -201,7 +211,8 @@ async def test_unauthenticated_get_advertises_resource_metadata(
     assert resp.status == 401
     assert resp.headers["WWW-Authenticate"] == (
         'Bearer realm="MCP Server",'
-        f' resource_metadata="{ISSUER_BASE}/.well-known/oauth-protected-resource/api/mcp"'
+        f' resource_metadata="{ISSUER_BASE}/.well-known/oauth-protected-resource/api/mcp",'
+        ' scope="openid"'
     )
 
 
@@ -249,7 +260,8 @@ async def test_dedicated_path_advertises_its_own_resource_metadata(
     assert resp.status == 401
     assert resp.headers["WWW-Authenticate"] == (
         'Bearer realm="MCP Server",'
-        f' resource_metadata="{ISSUER_BASE}/.well-known/oauth-protected-resource{MCP_HTTP_PATH}"'
+        f' resource_metadata="{ISSUER_BASE}/.well-known/oauth-protected-resource{MCP_HTTP_PATH}",'
+        ' scope="openid"'
     )
 
 
@@ -329,3 +341,413 @@ async def test_the_tokens_client_reaches_the_audit_event(
     assert event.data["auth_method"] == "oidc"
     assert event.data["user_id"] == hass_admin_user.id
     assert event.context.user_id == hass_admin_user.id
+
+
+# The real provider, set up through its config entry, for the tests below.
+
+REDIRECT_URI = "https://app.example.com/callback"
+ADMIN_ONLY_TOOL = "restart_ha"
+
+
+def _pkce_pair() -> tuple[str, str]:
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return verifier, base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+async def _setup_provider(hass: HomeAssistant) -> None:
+    from custom_components.oidc_provider.config_flow import OIDCProviderConfigFlow
+    from custom_components.oidc_provider.const import CONF_ALLOW_DYNAMIC_REGISTRATION
+
+    assert await async_setup_component(hass, "http", {})
+    entry = MockConfigEntry(
+        domain=OIDC_DOMAIN,
+        data={},
+        minor_version=OIDCProviderConfigFlow.MINOR_VERSION,
+        options={CONF_ALLOW_DYNAMIC_REGISTRATION: True},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def _setup_server(hass: HomeAssistant, **data) -> MockConfigEntry:
+    entry = MockConfigEntry(domain=DOMAIN, data=data)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    return entry
+
+
+async def _register(client) -> dict:
+    resp = await client.post(
+        "/oidc/register",
+        json={"client_name": "Assistant", "redirect_uris": [REDIRECT_URI]},
+        headers=FORWARDED,
+    )
+    assert resp.status == 201, await resp.text()
+    return await resp.json()
+
+
+async def _sign_in(client, registration: dict, access: dict | None) -> dict:
+    """Authorize as the signed-in user, approve with a choice of access, redeem the code.
+
+    Returns the token response. ``access`` is what the consent screen posts: None
+    for the plain approve screen, or {"options": {area: setting}}.
+    """
+    verifier, challenge = _pkce_pair()
+    resp = await client.get(
+        "/oidc/authorize",
+        params={
+            "response_type": "code",
+            "client_id": registration["client_id"],
+            "redirect_uri": REDIRECT_URI,
+            "scope": "openid",
+            "state": "s",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "resource": RESOURCE,
+        },
+        headers=FORWARDED,
+    )
+    assert resp.status == 200, await resp.text()
+    request_id = re.search(r"oidc_request_id', '([^']+)'", await resp.text()).group(1)
+
+    decision = {"request_id": request_id, "approve": True}
+    if access is not None:
+        decision["access"] = access
+    resp = await client.post("/oidc/continue", json=decision, headers=FORWARDED)
+    assert resp.status == 200, await resp.text()
+    code = parse_qs(urlparse((await resp.json())["redirect_url"]).query)["code"][0]
+
+    resp = await client.post(
+        "/oidc/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+            "client_id": registration["client_id"],
+            "client_secret": registration["client_secret"],
+            "code_verifier": verifier,
+        },
+        headers=FORWARDED,
+    )
+    assert resp.status == 200, await resp.text()
+    return await resp.json()
+
+
+async def _refresh(client, registration: dict, refresh_token: str) -> dict:
+    resp = await client.post(
+        "/oidc/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": registration["client_id"],
+            "client_secret": registration["client_secret"],
+        },
+        headers=FORWARDED,
+    )
+    assert resp.status == 200, await resp.text()
+    return await resp.json()
+
+
+async def _rpc(client, token: str, method: str, params: dict | None = None):
+    body = {"jsonrpc": "2.0", "method": method, "id": 1}
+    if params is not None:
+        body["params"] = params
+    return await client.post(
+        MCP_PATH, json=body, headers={**FORWARDED, "Authorization": f"Bearer {token}"}
+    )
+
+
+async def _tool_names(client, token: str) -> set[str]:
+    resp = await _rpc(client, token, "tools/list")
+    assert resp.status == 200, await resp.text()
+    return {tool["name"] for tool in (await resp.json())["result"]["tools"]}
+
+
+def _levels(preset_id: str) -> dict[str, str]:
+    from custom_components.mcp_server_http_transport.access import PRESETS
+
+    return dict(next(p for p in PRESETS if p.id == preset_id).levels)
+
+
+class TestProviderContract:
+    """What this server relies on in the provider, beyond validate_access_token."""
+
+    async def test_find_resource_names_the_integration_that_described_it(
+        self, enable_custom_integrations: None, hass: HomeAssistant
+    ) -> None:
+        """http._provider_describes asks find_resource(hass, indicator) for its domain."""
+        import inspect
+
+        from custom_components.oidc_provider.resources import find_resource
+
+        assert list(inspect.signature(find_resource).parameters) == ["hass", "indicator"]
+        assert find_resource(hass, RESOURCE) is None
+
+        await _setup_provider(hass)
+        assert find_resource(hass, RESOURCE) is None
+        await _setup_server(hass)
+
+        for indicator in (RESOURCE, RESOURCE_HTTP, "http://192.168.1.10:8123/api/mcp"):
+            assert find_resource(hass, indicator).domain == DOMAIN
+        assert find_resource(hass, "https://mcp.example.com/api/other") is None
+
+    async def test_the_validator_returns_the_scope_claim(
+        self, oidc_ready: rsa.RSAPrivateKey, hass: HomeAssistant, hass_admin_user: MockUser
+    ) -> None:
+        from custom_components.oidc_provider.token_validator import validate_access_token
+
+        token = _sign(
+            oidc_ready, aud=RESOURCE, sub=hass_admin_user.id, claims={"scope": "openid mcp:read"}
+        )
+
+        claims = validate_access_token(hass, token, ISSUER_BASE, expected_audience=RESOURCE)
+
+        assert claims["scope"] == "openid mcp:read"
+
+
+class TestChosenAccess:
+    """The whole path with the real provider: describe, choose, token, what is offered."""
+
+    @pytest.fixture
+    async def both(self, enable_custom_integrations: None, hass: HomeAssistant) -> None:
+        await _setup_provider(hass)
+        await _setup_server(hass)
+
+    async def test_the_provider_collects_and_advertises_the_description(
+        self, both: None, hass_client_no_auth: ClientSessionGenerator
+    ) -> None:
+        client = await hass_client_no_auth()
+
+        resp = await client.get("/oidc/.well-known/openid-configuration", headers=FORWARDED)
+
+        scopes = (await resp.json())["scopes_supported"]
+        assert {"openid", "mcp:read", "mcp:admin", "mcp:dashboards:full"} <= set(scopes)
+
+    async def test_the_consent_screen_offers_the_levels(
+        self, both: None, hass_client: ClientSessionGenerator
+    ) -> None:
+        client = await hass_client()
+        registration = await _register(client)
+        _, challenge = _pkce_pair()
+        resp = await client.get(
+            "/oidc/authorize",
+            params={
+                "response_type": "code",
+                "client_id": registration["client_id"],
+                "redirect_uri": REDIRECT_URI,
+                "scope": "openid",
+                "state": "s",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "resource": RESOURCE,
+            },
+            headers=FORWARDED,
+        )
+        request_id = re.search(r"oidc_request_id', '([^']+)'", await resp.text()).group(1)
+
+        resp = await client.get(
+            "/oidc/continue", params={"request_id": request_id}, headers=FORWARDED
+        )
+
+        assert resp.status == 200, await resp.text()
+        access = (await resp.json())["access"]
+        assert [p["title"] for p in access["presets"]] == [
+            "Look only",
+            "Control devices",
+            "Edit the setup",
+            "Administer",
+        ]
+        assert "files" in access["unavailable"]
+
+    async def test_a_level_reaches_the_token_and_limits_the_tools(
+        self,
+        both: None,
+        hass: HomeAssistant,
+        hass_client: ClientSessionGenerator,
+        hass_client_no_auth: ClientSessionGenerator,
+    ) -> None:
+        provider = await hass_client()
+        mcp = await hass_client_no_auth()
+        registration = await _register(provider)
+
+        tokens = await _sign_in(provider, registration, {"options": _levels("read")})
+
+        assert tokens["scope"].split() == ["openid", "mcp:read"]
+        names = await _tool_names(mcp, tokens["access_token"])
+        assert "get_state" in names
+        assert "call_service" not in names and ADMIN_ONLY_TOOL not in names
+
+        resp = await _rpc(
+            mcp,
+            tokens["access_token"],
+            "tools/call",
+            {"name": "call_service", "arguments": {"domain": "light", "service": "turn_on"}},
+        )
+        error = (await resp.json())["error"]
+        assert error["code"] == -32602
+        assert "access granted to this application does not include tool 'call_service'" in (
+            error["message"]
+        )
+
+    async def test_a_detailed_choice_reaches_the_token_area_by_area(
+        self,
+        both: None,
+        hass_client: ClientSessionGenerator,
+        hass_client_no_auth: ClientSessionGenerator,
+    ) -> None:
+        provider = await hass_client()
+        mcp = await hass_client_no_auth()
+        registration = await _register(provider)
+        choice = {**_levels("admin"), "cameras": "none", "dashboards": "read"}
+
+        tokens = await _sign_in(provider, registration, {"options": choice})
+
+        scopes = set(tokens["scope"].split())
+        assert {"mcp:dashboards:read", "mcp:entities:full"} <= scopes
+        assert not any(scope.startswith("mcp:cameras") for scope in scopes)
+        names = await _tool_names(mcp, tokens["access_token"])
+        assert "get_dashboard_config" in names and "save_dashboard_config" not in names
+        assert ADMIN_ONLY_TOOL in names
+
+    async def test_the_service_filter_holds_below_diagnostics_at_full(
+        self,
+        both: None,
+        hass: HomeAssistant,
+        hass_client: ClientSessionGenerator,
+        hass_client_no_auth: ClientSessionGenerator,
+    ) -> None:
+        calls = []
+        hass.services.async_register("test", "ping", lambda call: calls.append(call))
+        provider = await hass_client()
+        mcp = await hass_client_no_auth()
+        registration = await _register(provider)
+        tokens = await _sign_in(provider, registration, {"options": _levels("control")})
+
+        async def call(domain: str, service: str) -> dict:
+            resp = await _rpc(
+                mcp,
+                tokens["access_token"],
+                "tools/call",
+                {"name": "call_service", "arguments": {"domain": domain, "service": service}},
+            )
+            return (await resp.json())["result"]
+
+        refused = await call("homeassistant", "restart")
+        allowed = await call("test", "ping")
+
+        assert refused["isError"] is True
+        assert "Diagnostics at Full" in refused["content"][0]["text"]
+        assert allowed.get("isError") is not True
+        assert len(calls) == 1
+
+    async def test_a_token_granting_nothing_gets_401_and_its_refresh_still_does(
+        self,
+        both: None,
+        hass_client: ClientSessionGenerator,
+        hass_client_no_auth: ClientSessionGenerator,
+    ) -> None:
+        provider = await hass_client()
+        mcp = await hass_client_no_auth()
+        registration = await _register(provider)
+        nothing = dict.fromkeys(_levels("admin"), "none")
+
+        tokens = await _sign_in(provider, registration, {"options": nothing})
+
+        assert tokens["scope"].split() == ["openid"]
+        resp = await _rpc(mcp, tokens["access_token"], "initialize")
+        assert resp.status == 401
+        assert 'error="invalid_token"' in resp.headers["WWW-Authenticate"]
+        refreshed = await _refresh(provider, registration, tokens["refresh_token"])
+        resp = await _rpc(mcp, refreshed["access_token"], "initialize")
+        assert resp.status == 401
+
+    async def test_a_session_from_before_the_description_gets_administer_at_refresh(
+        self,
+        enable_custom_integrations: None,
+        hass: HomeAssistant,
+        hass_client: ClientSessionGenerator,
+        hass_client_no_auth: ClientSessionGenerator,
+    ) -> None:
+        """A session approved before this server described itself keeps what it could do.
+
+        The provider's collection of the description is held back while the session
+        is approved on the plain screen, as with a provider upgraded under sessions
+        that already exist, and let through afterwards.
+        """
+        from custom_components.oidc_provider import resources as provider_resources
+        from custom_components.oidc_provider.resources import find_resource
+
+        collect = provider_resources._async_collect
+        held = []
+
+        async def hold(*args) -> None:
+            held.append(args)
+
+        with patch.object(provider_resources, "_async_collect", hold):
+            await _setup_provider(hass)
+            await _setup_server(hass)
+        provider = await hass_client()
+        mcp = await hass_client_no_auth()
+        registration = await _register(provider)
+        tokens = await _sign_in(provider, registration, None)
+        assert tokens["scope"].split() == ["openid"]
+        assert ADMIN_ONLY_TOOL in await _tool_names(mcp, tokens["access_token"])
+
+        for args in held:
+            await collect(*args)
+        assert find_resource(hass, RESOURCE).domain == DOMAIN
+
+        resp = await _rpc(mcp, tokens["access_token"], "initialize")
+        assert resp.status == 401
+        assert 'error="invalid_token"' in resp.headers["WWW-Authenticate"]
+
+        refreshed = await _refresh(provider, registration, tokens["refresh_token"])
+
+        assert refreshed["scope"].split() == ["openid", "mcp:admin"]
+        assert ADMIN_ONLY_TOOL in await _tool_names(mcp, refreshed["access_token"])
+
+    async def test_read_only_mode_locks_the_levels_above_look_only(
+        self,
+        enable_custom_integrations: None,
+        hass: HomeAssistant,
+        hass_client: ClientSessionGenerator,
+    ) -> None:
+        from custom_components.mcp_server_http_transport.const import CONF_READ_ONLY
+
+        await _setup_provider(hass)
+        await _setup_server(hass, **{CONF_READ_ONLY: True})
+        provider = await hass_client()
+        registration = await _register(provider)
+        _, challenge = _pkce_pair()
+        resp = await provider.get(
+            "/oidc/authorize",
+            params={
+                "response_type": "code",
+                "client_id": registration["client_id"],
+                "redirect_uri": REDIRECT_URI,
+                "scope": "openid",
+                "state": "s",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "resource": RESOURCE,
+            },
+            headers=FORWARDED,
+        )
+        request_id = re.search(r"oidc_request_id', '([^']+)'", await resp.text()).group(1)
+
+        resp = await provider.post(
+            "/oidc/continue",
+            json={
+                "request_id": request_id,
+                "approve": True,
+                "access": {"options": _levels("admin")},
+            },
+            headers=FORWARDED,
+        )
+
+        assert resp.status == 400

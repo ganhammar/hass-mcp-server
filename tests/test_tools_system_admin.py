@@ -6,10 +6,12 @@ from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 
+from custom_components.mcp_server_http_transport.caller import acting_as
 from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
 from custom_components.mcp_server_http_transport.tools.system_admin import (
     _format_system_log_entry,
     redact_log_text,
+    restart_ha,
 )
 
 _JWT = (
@@ -358,6 +360,18 @@ class TestToolsSystemAdmin:
         )
         context = mock_hass.services.async_call.call_args.kwargs["context"]
         assert context.user_id == CALLER.user_id
+
+    async def test_restart_ha_refuses_a_non_administrator(self, mock_hass):
+        """The restart is not awaited, so the tool checks the caller itself."""
+        mock_hass.services.async_call = AsyncMock()
+        caller = Caller(user_id="user456", auth_method="native", user=Mock(is_admin=False))
+
+        with acting_as(caller):
+            result = await restart_ha(mock_hass, {"confirm": True})
+
+        assert result["isError"] is True
+        assert "administrator" in result["content"][0]["text"]
+        mock_hass.services.async_call.assert_not_awaited()
 
     async def test_post_tools_call_restart_ha_not_confirmed(self, view, mock_hass):
         """Test POST with tools/call for restart_ha with confirm=false."""

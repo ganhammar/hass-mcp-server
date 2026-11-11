@@ -1973,6 +1973,27 @@ class TestToolAuditLog:
 
         assert body["result"]["content"][0]["text"] == "done"
 
+    async def test_a_call_that_escapes_as_an_exception_is_audited_as_an_error(
+        self, view, audit_hass
+    ):
+        message = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "call_service", "arguments": {"domain": "light"}},
+            "id": 1,
+        }
+
+        with (
+            patch.object(view, "_call_tool", AsyncMock(side_effect=RuntimeError("boom"))),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            await view._handle_message(message, self.CALLER)
+
+        (event,) = self._audit_events(audit_hass)
+        assert event.args[1]["outcome"] == "error"
+        assert event.kwargs["context"].user_id == self.CALLER.user_id
+        assert current_caller() is None
+
     async def test_other_methods_are_not_audited(self, view, caplog):
         request = _jsonrpc_request("resources/list")
 

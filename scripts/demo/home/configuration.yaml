@@ -1,0 +1,26 @@
+# The throwaway instance the README demo is recorded on. record_demo.py copies
+# this folder into its work directory and writes http.yaml with a free port.
+homeassistant:
+  name: Birch Lane
+  unit_system: metric
+  time_zone: Europe/Stockholm
+  country: SE
+  currency: SEK
+  language: en
+  latitude: 59.33
+  longitude: 18.07
+  elevation: 20
+
+http: !include http.yaml
+
+frontend:
+config:
+automation: !include automations.yaml
+demo_home:
+input_boolean:
+  away:
+    name: Away
+    icon: mdi:home-export-outline
+
+logger:
+  default: warning

@@ -1,0 +1,20 @@
+- id: hallway_light_when_front_door_opens
+  alias: Hallway light when the front door opens
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.front_door
+      to: "on"
+  actions:
+    - action: light.turn_on
+      target:
+        entity_id: light.hallway_light
+- id: lights_off_when_leaving
+  alias: Lights off when everyone leaves
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.away
+      to: "on"
+  actions:
+    - action: light.turn_off
+      target:
+        entity_id: all

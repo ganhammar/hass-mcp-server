@@ -48,6 +48,43 @@ Pin service responses the same way, by driving the real handler. Mocking a servi
 in a tool test only asserts the shape the tool already assumes, so it stays green
 when core changes underneath it.
 
+## Protocol revisions
+
+`protocol.py` is the one place that knows the MCP revisions the server speaks
+and what differs between them: which methods each has, whether it accepts
+batches, what it declares as capabilities, its resource-not-found code, and how a
+result is finished for it (`resultType`, the server named in `_meta`, the cache
+hints). `classify` places each message in its revision. One that carries
+`io.modelcontextprotocol/protocolVersion` in `params._meta` is in the era of the
+revision it names, as the TypeScript SDK decides: the stateless era for
+2026-07-28 and later, the handshake era for anything earlier. Any other message
+is in the handshake era, in the revision its `MCP-Protocol-Version` header
+names, or 2025-03-26 without one. Handlers return the same payload whatever the
+revision, and the transport never branches on a version string.
+
+The stateless era can be switched off with an option, as a way back for a client
+that implements it incompletely. A request claiming it is then answered as an
+unknown method with 200, which is what a server from before 2026-07-28 says, so
+the client falls back to `initialize`.
+
+The endpoint does not validate `Origin`, although the Streamable HTTP transport
+says a server MUST, against DNS rebinding. It accepts only a bearer token in the
+`Authorization` header, which a browser never attaches by itself, so a page that
+reaches it by rebinding has nothing to authenticate with; Home Assistant's own
+API takes the same position. A check cannot tell a rebinding page from a page on
+Home Assistant's own address without the instance's URLs, which most installs
+never set, and so refuses real clients behind a reverse proxy. Add one, before
+authentication, only once the endpoint accepts a credential a browser sends on
+its own, such as a cookie.
+
+To add a revision, read its changelog and the pages on the base protocol,
+versioning, the Streamable HTTP transport and each server feature, then add a
+`Revision` to `REVISIONS`, newest first, describing every difference in its
+fields. A difference no field covers gets a new field with the old behaviour as
+its default, so the revisions already listed keep what they have. Then extend
+`tests/test_protocol.py`, which pins what each revision gets, and the end-to-end
+tests in `tests/test_e2e.py`.
+
 ## Conventions
 
 Black and Ruff at line length 100, both enforced in CI. Tools register through

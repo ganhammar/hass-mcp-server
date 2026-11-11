@@ -20,6 +20,7 @@ from .const import (
     CONF_READ_ONLY,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
+    CONF_STATELESS_PROTOCOL,
     CONF_TEMPLATE_RENDERING,
     DEFAULT_APPDAEMON_APPS_ROOT,
     DEFAULT_SERVER_NAME,
@@ -53,6 +54,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_APPDAEMON_FILE_ACCESS, default=False): bool,
         vol.Optional(CONF_APPDAEMON_APPS_ROOT, default=DEFAULT_APPDAEMON_APPS_ROOT): str,
         vol.Optional(CONF_SERVER_NAME, default=DEFAULT_SERVER_NAME): str,
+        vol.Optional(CONF_STATELESS_PROTOCOL, default=True): bool,
     }
 )
 
@@ -152,6 +154,7 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_APPDAEMON_APPS_ROOT, DEFAULT_APPDAEMON_APPS_ROOT
         )
         current_server_name = self.config_entry.data.get(CONF_SERVER_NAME, DEFAULT_SERVER_NAME)
+        current_stateless_protocol = self.config_entry.data.get(CONF_STATELESS_PROTOCOL, True)
 
         if user_input is not None:
             submitted_appdaemon_apps_root = user_input.get(
@@ -213,6 +216,7 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_APPDAEMON_APPS_ROOT, current_appdaemon_apps_root
         )
         current_server_name = values.get(CONF_SERVER_NAME, current_server_name)
+        current_stateless_protocol = values.get(CONF_STATELESS_PROTOCOL, current_stateless_protocol)
 
         return self.async_show_form(
             step_id="init",
@@ -242,6 +246,7 @@ class MCPServerOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_SERVER_NAME, description={"suggested_value": current_server_name}
                     ): str,
+                    vol.Optional(CONF_STATELESS_PROTOCOL, default=current_stateless_protocol): bool,
                 }
             ),
             errors=errors,

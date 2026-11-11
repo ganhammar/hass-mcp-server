@@ -1,4 +1,18 @@
-"""HTTP transport for MCP server."""
+"""HTTP transport for MCP server.
+
+The endpoint does not validate the Origin header, although the Streamable HTTP
+transport says a server MUST, to stop DNS rebinding. Rebinding lets a web page
+send requests to this server under the page's own origin; the browser attaches
+only the credentials it holds for that origin. The endpoint accepts nothing but a
+bearer token in the Authorization header, which a browser never sends on its
+own, so a page that reaches it this way has nothing to authenticate with and
+gets the 401 any anonymous request gets. Home Assistant's own API takes the same
+position. A check would also refuse real clients: a page served from Home
+Assistant's own address sends an Origin equal to the Host, exactly as a
+rebinding page does, and telling the two apart needs the instance's URLs, which
+most installs never configure. Validate Origin before anything else once the
+endpoint accepts a credential a browser sends by itself, such as a cookie.
+"""
 
 import inspect
 import logging
@@ -29,7 +43,28 @@ from .const import (
 )
 from .json_utils import dumps
 from .prompts import InvalidPromptRequest, PromptNotAvailable, get_prompt, get_prompts
-from .resources import ResourceNotAvailable, get_resources, read_resource
+from .protocol import (
+    INTERNAL_ERROR,
+    INVALID_PARAMS,
+    INVALID_REQUEST,
+    PARSE_ERROR,
+    STATELESS_VERSIONS,
+    ProtocolError,
+    Revision,
+    capabilities,
+    check_batch,
+    classify,
+    finish_result,
+    method_not_found,
+    routing_headers,
+)
+from .resources import (
+    ResourceNotAvailable,
+    ResourceNotFound,
+    get_resource_templates,
+    get_resources,
+    read_resource,
+)
 from .secret_keys import SECRET_MASK, is_secret_key
 from .tools import (
     TOOLS,
@@ -268,6 +303,26 @@ def _jsonrpc_error(code: int, message: str, msg_id: Any = None) -> dict[str, Any
     }
 
 
+def _protocol_error(err: ProtocolError, msg_id: Any) -> dict[str, Any]:
+    """Build the JSON-RPC error response for a ProtocolError."""
+    return {"jsonrpc": "2.0", "error": err.error(), "id": msg_id}
+
+
+def _in_band(code: int, message: str) -> ProtocolError:
+    """Return the error a request ends in that ships with 200, as JSON-RPC errors do."""
+    return ProtocolError(code, message, status=200)
+
+
+def _message_id(message: Any) -> Any:
+    """Return the id of a JSON-RPC message, or None when it has none to give."""
+    return message.get("id") if isinstance(message, dict) else None
+
+
+def _is_response(message: dict[str, Any]) -> bool:
+    """Return True when a JSON-RPC message is a response rather than a request."""
+    return "result" in message or "error" in message
+
+
 def _accepts_expected_audience(validate_access_token: Any) -> bool:
     """Return True when the provider's validator takes the expected_audience keyword.
 
@@ -453,6 +508,7 @@ class MCPEndpointView(HomeAssistantView):
         paths: list[str] | None = None,
         server_name: str = DEFAULT_SERVER_NAME,
         require_admin: bool = True,
+        stateless_protocol: bool = True,
     ) -> None:
         """Initialize the MCP endpoint, optionally narrowing the paths served.
 
@@ -464,6 +520,7 @@ class MCPEndpointView(HomeAssistantView):
         self.native_auth_enabled = native_auth_enabled
         self.server_name = server_name
         self.require_admin = require_admin
+        self.stateless_protocol = stateless_protocol
         # (user id, reason) pairs already warned about, so a client that keeps
         # retrying with a refused account leaves one warning rather than one per call.
         self._reported_refusals: set[tuple[str, str]] = set()
@@ -690,8 +747,9 @@ class MCPEndpointView(HomeAssistantView):
         """Answer GET probes, which clients use to discover how to authenticate.
 
         This endpoint carries no SSE stream, so an authenticated GET is Method
-        Not Allowed. An unauthenticated one still gets the challenge, because a
-        bare 405 leaves the client with no pointer to the resource metadata.
+        Not Allowed, which every revision allows a server without one to answer.
+        An unauthenticated one still gets the challenge, because a bare 405 leaves
+        the client with no pointer to the resource metadata.
         """
         if not _integration_loaded(self.hass):
             return _service_unavailable()
@@ -726,15 +784,23 @@ class MCPEndpointView(HomeAssistantView):
         except (ValueError, UnicodeDecodeError) as e:
             _LOGGER.error("Could not parse MCP request body: %s", e)
             return web.json_response(
-                _jsonrpc_error(-32700, f"Parse error: {str(e)}"),
+                _jsonrpc_error(PARSE_ERROR, f"Parse error: {str(e)}"),
                 status=400,
             )
 
         _LOGGER.debug("Received MCP request: %s", body)
+        headers = routing_headers(request.headers.items())
+
+        if isinstance(body, list):
+            try:
+                check_batch(body, headers)
+            except ProtocolError as err:
+                return web.json_response(_protocol_error(err, None), status=err.status)
+            return await self._answer_batch(body, caller, headers)
 
         try:
             # Process the message directly
-            response_data = await self._handle_message(body, caller)
+            response_data = await self._handle_message(body, caller, headers)
 
             if response_data is None:
                 # Notification - return 202 Accepted
@@ -743,23 +809,54 @@ class MCPEndpointView(HomeAssistantView):
             # Return JSON response
             return web.json_response(response_data)
 
+        except ProtocolError as err:
+            return web.json_response(_protocol_error(err, _message_id(body)), status=err.status)
         except Exception as e:
             _LOGGER.error("Error handling MCP request: %s", e, exc_info=True)
             # A JSON-RPC error is a complete response, so it ships with 200.
             # Under a non-2xx status intermediary proxies substitute their own
             # error page and the client never sees what actually went wrong.
             return web.json_response(
-                _jsonrpc_error(
-                    -32603,
-                    f"Internal error: {str(e)}",
-                    body.get("id") if isinstance(body, dict) else None,
-                )
+                _jsonrpc_error(INTERNAL_ERROR, f"Internal error: {str(e)}", _message_id(body))
             )
 
+    async def _answer_batch(
+        self, batch: list[Any], caller: Caller, headers: dict[str, list[str]]
+    ) -> web.Response:
+        """Answer a JSON-RPC batch, one message at a time.
+
+        Each message is answered as it would be on its own, and a failure in one is
+        that message's error rather than the batch's. A batch of notifications only
+        is accepted with 202.
+        """
+        responses = []
+        for message in batch:
+            try:
+                response = await self._handle_message(message, caller, headers)
+            except ProtocolError as err:
+                response = _protocol_error(err, _message_id(message))
+            except Exception as e:
+                _LOGGER.error("Error handling MCP request: %s", e, exc_info=True)
+                response = _jsonrpc_error(
+                    INTERNAL_ERROR, f"Internal error: {str(e)}", _message_id(message)
+                )
+            if response is not None:
+                responses.append(response)
+        if not responses:
+            return web.Response(status=202)
+        return web.json_response(responses)
+
     async def _handle_message(
-        self, message: dict[str, Any], caller: Caller
+        self, message: Any, caller: Caller, headers: dict[str, list[str]] | None = None
     ) -> dict[str, Any] | None:
         """Handle a JSON-RPC message on behalf of an authorized caller.
+
+        Returns the response, or None for a message that gets none: a notification
+        is accepted and nothing more, since no notification a client sends asks this
+        server to do anything, and so is a response, since the server sends no
+        requests for one to answer. An error that ships with 200 is returned as the
+        response; one whose HTTP status says something, such as a message outside
+        any revision this server has, is raised as ProtocolError before anything runs.
 
         The caller is the current caller for the whole message, so listing and
         calling see the same access: what tools/list offers is what tools/call
@@ -767,47 +864,61 @@ class MCPEndpointView(HomeAssistantView):
         the caller through current_caller(), and what it does as the caller shares
         its context with the audit event.
         """
-        with acting_as(caller) as context:
-            return await self._dispatch(message, caller, context)
+        if not isinstance(message, dict) or not isinstance(message.get("method"), str):
+            if isinstance(message, dict) and "id" in message and _is_response(message):
+                return None
+            raise ProtocolError(INVALID_REQUEST, "Invalid Request: not a JSON-RPC request")
+        revision = classify(message, headers or {}, stateless=self.stateless_protocol)
+        if "id" not in message:
+            return None
+        try:
+            with acting_as(caller) as context:
+                result = await self._dispatch(message, revision, caller, context)
+        except ProtocolError as err:
+            if err.status != 200:
+                raise
+            return _protocol_error(err, message["id"])
+        server_info = {"name": self.server_name, "version": VERSION}
+        return {
+            "jsonrpc": "2.0",
+            "result": finish_result(revision, message["method"], result, server_info),
+            "id": message["id"],
+        }
 
     async def _dispatch(
-        self, message: dict[str, Any], caller: Caller, context: Context
-    ) -> dict[str, Any] | None:
-        """Answer a JSON-RPC message while its caller is the current one."""
-        method = message.get("method")
-        params = message.get("params", {})
-        msg_id = message.get("id")
+        self, message: dict[str, Any], revision: Revision, caller: Caller, context: Context
+    ) -> dict[str, Any]:
+        """Return the result of a JSON-RPC request while its caller is the current one.
 
-        # Handle initialization
+        An error the request ends in is raised as ProtocolError, which ships with 200
+        unless the revision says otherwise.
+        """
+        method = message["method"]
+        params = message.get("params", {})
+        if method not in revision.methods:
+            raise method_not_found(revision, method)
+
         if method == "initialize":
             return {
-                "jsonrpc": "2.0",
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {},
-                        "resources": {},
-                        "prompts": {},
-                    },
-                    "serverInfo": {
-                        "name": self.server_name,
-                        "version": VERSION,
-                    },
-                    "instructions": SERVER_INSTRUCTIONS,
-                },
-                "id": msg_id,
+                "protocolVersion": revision.version,
+                "capabilities": capabilities(revision),
+                "serverInfo": {"name": self.server_name, "version": VERSION},
+                "instructions": SERVER_INSTRUCTIONS,
             }
 
-        # Handle tools/list
-        if method == "tools/list":
-            tools = await self._get_tools()
+        if method == "server/discover":
             return {
-                "jsonrpc": "2.0",
-                "result": {"tools": tools},
-                "id": msg_id,
+                "supportedVersions": list(STATELESS_VERSIONS),
+                "capabilities": capabilities(revision),
+                "instructions": SERVER_INSTRUCTIONS,
             }
 
-        # Handle tools/call
+        if method == "ping":
+            return {}
+
+        if method == "tools/list":
+            return {"tools": await self._get_tools()}
+
         if method == "tools/call":
             name = params.get("name")
             arguments = params.get("arguments", {})
@@ -823,7 +934,7 @@ class MCPEndpointView(HomeAssistantView):
                     withheld=isinstance(err, ToolNotAvailable),
                     context=context,
                 )
-                return _jsonrpc_error(-32602, str(err), msg_id)
+                raise _in_band(INVALID_PARAMS, str(err)) from err
             except Exception:
                 self._audit_tool_call(caller, name, arguments, OUTCOME_ERROR, context=context)
                 raise
@@ -836,78 +947,46 @@ class MCPEndpointView(HomeAssistantView):
                 OUTCOME_ERROR if is_error else OUTCOME_OK,
                 context=context,
             )
-            return {
-                "jsonrpc": "2.0",
-                "result": result,
-                "id": msg_id,
-            }
+            return result
 
-        # Handle resources/list
         if method == "resources/list":
-            result = get_resources()
-            return {
-                "jsonrpc": "2.0",
-                "result": result,
-                "id": msg_id,
-            }
+            return get_resources()
 
-        # Handle resources/read
+        if method == "resources/templates/list":
+            return get_resource_templates()
+
         if method == "resources/read":
             uri = params.get("uri", "")
             try:
                 contents = await read_resource(self.hass, uri)
             except ResourceNotAvailable as err:
                 self._audit_refused_read(caller, method, uri)
-                return _jsonrpc_error(-32602, str(err), msg_id)
-            return {
-                "jsonrpc": "2.0",
-                "result": {"contents": contents},
-                "id": msg_id,
-            }
+                raise _in_band(INVALID_PARAMS, str(err)) from err
+            except ResourceNotFound as err:
+                raise _in_band(revision.resource_not_found, str(err)) from err
+            return {"contents": contents}
 
-        # Handle prompts/list
         if method == "prompts/list":
-            prompts = get_prompts()
-            return {
-                "jsonrpc": "2.0",
-                "result": {"prompts": prompts},
-                "id": msg_id,
-            }
+            return {"prompts": get_prompts()}
 
-        # Handle prompts/get
         if method == "prompts/get":
             name = params.get("name", "")
             arguments = params.get("arguments", {})
 
             try:
-                result = await get_prompt(self.hass, name, arguments)
+                return await get_prompt(self.hass, name, arguments)
             except InvalidPromptRequest as err:
                 if isinstance(err, PromptNotAvailable):
                     self._audit_refused_read(caller, method, name)
-                return _jsonrpc_error(-32602, str(err), msg_id)
+                raise _in_band(INVALID_PARAMS, str(err)) from err
 
-            return {
-                "jsonrpc": "2.0",
-                "result": result,
-                "id": msg_id,
-            }
-
-        # Handle completion/complete
         if method == "completion/complete":
             ref = params.get("ref", {})
             argument = params.get("argument", {})
-            result = await complete(self.hass, ref, argument)
-            return {
-                "jsonrpc": "2.0",
-                "result": {"completion": result},
-                "id": msg_id,
-            }
+            return {"completion": await complete(self.hass, ref, argument)}
 
-        # Unknown method
-        if msg_id is not None:
-            return _jsonrpc_error(-32601, f"Method not found: {method}", msg_id)
-
-        return None
+        # A method a revision lists that no branch above answers.
+        raise method_not_found(revision, method)
 
     async def _get_tools(self) -> list[dict[str, Any]]:
         """Get available tools."""
@@ -1006,6 +1085,7 @@ def register_mcp_views(
     native_auth_enabled: bool,
     server_name: str = DEFAULT_SERVER_NAME,
     require_admin: bool = True,
+    stateless_protocol: bool = True,
 ) -> None:
     """Register the HTTP views this integration serves.
 
@@ -1018,12 +1098,14 @@ def register_mcp_views(
 
     A reload updates the view the router already holds instead of registering a
     second one, which would sit behind the first and never be reached. The name a
-    client sees and the administrator requirement are refreshed the same way.
+    client sees, the administrator requirement and whether the stateless revisions
+    are served are refreshed the same way.
     """
     if (endpoint := hass.data.get(REGISTERED_ENDPOINT)) is not None:
         endpoint.native_auth_enabled = native_auth_enabled
         endpoint.server_name = server_name
         endpoint.require_admin = require_admin
+        endpoint.stateless_protocol = stateless_protocol
         return
 
     contested = mcp_path_is_contested(hass)
@@ -1034,6 +1116,7 @@ def register_mcp_views(
         paths=endpoint_paths,
         server_name=server_name,
         require_admin=require_admin,
+        stateless_protocol=stateless_protocol,
     )
     metadata_paths = [f"{RESOURCE_METADATA_PREFIX}{path}" for path in endpoint_paths]
 

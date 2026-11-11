@@ -25,6 +25,7 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_READ_ONLY,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
+    CONF_STATELESS_PROTOCOL,
     CONF_TEMPLATE_RENDERING,
     DEFAULT_APPDAEMON_APPS_ROOT,
     DEFAULT_SERVER_NAME,
@@ -369,6 +370,30 @@ class TestMCPServerConfigFlow:
 
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
         assert result["data"][CONF_REQUIRE_ADMIN] is False
+
+    async def test_user_flow_serves_the_stateless_protocol_by_default(self):
+        """The newest revision is on unless the user turns it off."""
+        flow = MCPServerConfigFlow()
+        flow.hass = Mock()
+        flow.hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        result = await flow.async_step_user(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_STATELESS_PROTOCOL].default() is True
+
+    async def test_user_flow_persists_the_stateless_protocol_off(self):
+        """Turning the newest revision off at setup is stored on the entry."""
+        flow = MCPServerConfigFlow()
+        flow.hass = Mock()
+        flow.hass.config_entries.async_domains = Mock(return_value=["oidc_provider"])
+
+        result = await flow.async_step_user(
+            user_input={CONF_NATIVE_AUTH: False, CONF_STATELESS_PROTOCOL: False}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_STATELESS_PROTOCOL] is False
 
 
 class TestMCPServerOptionsFlow:
@@ -797,3 +822,31 @@ class TestMCPServerOptionsFlow:
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
         call_kwargs = flow.hass.config_entries.async_update_entry.call_args
         assert call_kwargs[1]["data"][CONF_REQUIRE_ADMIN] is False
+
+    async def test_init_step_stateless_protocol_defaults_to_true(self):
+        """An entry created before the option existed shows it on."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_STATELESS_PROTOCOL].default() is True
+
+    async def test_init_step_shows_current_stateless_protocol(self):
+        """The form reflects a revision the user already turned off."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True, CONF_STATELESS_PROTOCOL: False})
+        result = await flow.async_step_init(user_input=None)
+
+        schema_keys = {str(k): k for k in result["data_schema"].schema}
+        assert schema_keys[CONF_STATELESS_PROTOCOL].default() is False
+
+    async def test_init_step_persists_stateless_protocol(self):
+        """Turning the newest revision off is merged into the entry data."""
+        flow = self._create_flow(data={CONF_NATIVE_AUTH: True})
+
+        result = await flow.async_step_init(
+            user_input={CONF_NATIVE_AUTH: True, CONF_STATELESS_PROTOCOL: False}
+        )
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert call_kwargs[1]["data"][CONF_STATELESS_PROTOCOL] is False

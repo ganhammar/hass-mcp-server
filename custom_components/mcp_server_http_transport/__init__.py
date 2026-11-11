@@ -21,6 +21,7 @@ from .const import (
     CONF_READ_ONLY,
     CONF_REQUIRE_ADMIN,
     CONF_SERVER_NAME,
+    CONF_STATELESS_PROTOCOL,
     CONF_TEMPLATE_RENDERING,
     DEFAULT_APPDAEMON_APPS_ROOT,
     DEFAULT_SERVER_NAME,
@@ -72,7 +73,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # requests stop being served the moment async_unload_entry clears it
     # (HA has no public register_view reverse — see #37).
     register_mcp_views(
-        hass, native_auth_enabled, server_name=server_name, require_admin=require_admin
+        hass,
+        native_auth_enabled,
+        server_name=server_name,
+        require_admin=require_admin,
+        stateless_protocol=entry.data.get(CONF_STATELESS_PROTOCOL, True),
     )
 
     _LOGGER.info(

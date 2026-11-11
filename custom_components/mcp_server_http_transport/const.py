@@ -48,6 +48,12 @@ APPDAEMON_SHARED_ROOTS = ("/share/", "/media/")
 CONF_SERVER_NAME = "server_name"
 DEFAULT_SERVER_NAME = "home-assistant-mcp-server"
 
+# Whether the protocol revisions without a handshake (2026-07-28 on) are served. A
+# client whose server/discover succeeds stops falling back to initialize, so a
+# client that implements those revisions incompletely needs a way back. An entry
+# without the key serves them.
+CONF_STATELESS_PROTOCOL = "stateless_protocol_enabled"
+
 # What the initialize result tells a client's model about using the server, so it
 # starts with the right tool rather than exploring. Every tool it names is
 # read-only and not behind an option; tests/test_http.py holds it to that.

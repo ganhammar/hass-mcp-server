@@ -19,6 +19,7 @@ path under test.
 """
 
 import json
+import sys
 from ipaddress import ip_address
 from socket import herror
 from unittest.mock import AsyncMock, patch
@@ -36,6 +37,15 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import ATTR_COMPONENT, async_setup_component
+from mcp_clients import (
+    CLAUDE_AI_DISCOVER,
+    CLAUDE_AI_INITIALIZE,
+    CLAUDE_CODE_DISCOVER,
+    INITIALIZED,
+    stateless,
+    stateless_headers,
+    toolbox,
+)
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     MockModule,
@@ -54,6 +64,7 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_NATIVE_AUTH,
     CONF_READ_ONLY,
     CONF_REQUIRE_ADMIN,
+    CONF_STATELESS_PROTOCOL,
     DOMAIN,
     EVENT_TOOL_CALLED,
     ISSUE_ENDPOINT_CONFLICT,
@@ -61,6 +72,9 @@ from custom_components.mcp_server_http_transport.const import (
     MCP_PATH,
     RESOURCE_METADATA_PREFIX,
 )
+
+# What a client that speaks only 2024-11-05 sends with initialize.
+INIT_2024 = {"protocolVersion": "2024-11-05"}
 
 
 @pytest.fixture
@@ -92,7 +106,7 @@ async def test_authenticated_request_is_served(
 
     resp = await client.post(
         "/api/mcp",
-        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        json={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 1},
     )
 
     assert resp.status == 200
@@ -496,7 +510,7 @@ async def test_dedicated_path_is_served(
 
     resp = await client.post(
         MCP_HTTP_PATH,
-        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        json={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 1},
     )
 
     assert resp.status == 200
@@ -593,7 +607,7 @@ async def test_dedicated_path_serves_while_api_mcp_is_contested(
 
     resp = await client.post(
         MCP_HTTP_PATH,
-        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        json={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 1},
     )
 
     assert resp.status == 200
@@ -706,7 +720,7 @@ async def test_a_competitor_arriving_after_setup_does_not_take_the_path(
 
     resp = await client.post(
         MCP_PATH,
-        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        json={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 1},
     )
 
     assert resp.status == 200
@@ -726,7 +740,7 @@ async def test_a_reload_keeps_serving_both_paths(
     for path in (MCP_PATH, MCP_HTTP_PATH):
         resp = await client.post(
             path,
-            json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+            json={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 1},
         )
 
         assert resp.status == 200, path
@@ -1248,3 +1262,335 @@ async def test_read_only_mode_and_disabled_tools_limit_what_a_client_can_reach(
         ("fire_event", "invalid"),
         ("get_error_log", "invalid"),
     ]
+
+
+# --- Protocol revisions through the real view ---------------------------------------
+
+
+async def _rpc(client, message, headers=None, path="/api/mcp"):
+    """POST one message and return (status, decoded body or None)."""
+    resp = await client.post(path, json=message, headers=headers or {})
+    text = await resp.text()
+    return resp.status, json.loads(text) if text else None
+
+
+async def _stateless_rpc(client, message):
+    return await _rpc(client, message, stateless_headers(message))
+
+
+@pytest.mark.parametrize("version", ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"])
+async def test_each_handshake_revision_is_negotiated_and_served(
+    loaded_entry: MockConfigEntry,
+    hass_client: ClientSessionGenerator,
+    version: str,
+) -> None:
+    client = await hass_client()
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": version, "capabilities": {}, "clientInfo": {"name": "t"}},
+    }
+
+    status, body = await _rpc(client, initialize)
+
+    assert status == 200
+    assert body["result"]["protocolVersion"] == version
+    assert ("completions" in body["result"]["capabilities"]) is (version != "2024-11-05")
+    negotiated = {"MCP-Protocol-Version": version}
+    assert await _rpc(client, INITIALIZED, negotiated) == (202, None)
+    status, body = await _rpc(client, {"jsonrpc": "2.0", "id": 2, "method": "ping"}, negotiated)
+    assert (status, body["result"]) == (200, {})
+    status, body = await _rpc(
+        client, {"jsonrpc": "2.0", "id": 3, "method": "tools/list"}, negotiated
+    )
+    assert status == 200
+    assert body["result"]["tools"]
+    assert "resultType" not in body["result"]
+
+
+async def test_a_stateless_exchange_needs_no_handshake(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    hass.states.async_set("sun.sun", "above_horizon")
+    client = await hass_client()
+
+    status, body = await _stateless_rpc(client, stateless("server/discover"))
+    assert status == 200
+    discovered = body["result"]
+    assert discovered["supportedVersions"] == ["2026-07-28"]
+    assert discovered["resultType"] == "complete"
+    assert discovered["_meta"]["io.modelcontextprotocol/serverInfo"]["name"]
+    assert (discovered["ttlMs"], discovered["cacheScope"]) == (3_600_000, "public")
+
+    status, body = await _stateless_rpc(client, stateless("tools/list", msg_id="t"))
+    assert (status, body["id"]) == (200, "t")
+    assert (body["result"]["ttlMs"], body["result"]["cacheScope"]) == (300_000, "private")
+    _, again = await _stateless_rpc(client, stateless("tools/list", msg_id="t"))
+    assert again == body
+
+    call = stateless("tools/call", name="get_state", arguments={"entity_id": "sun.sun"})
+    status, body = await _stateless_rpc(client, call)
+    assert status == 200
+    assert body["result"]["resultType"] == "complete"
+    assert "above_horizon" in body["result"]["content"][0]["text"]
+
+    read = stateless("resources/read", uri="hass://entity/sun.sun")
+    status, body = await _stateless_rpc(client, read)
+    assert (status, body["result"]["ttlMs"]) == (200, 0)
+
+    missing = stateless("resources/read", uri="hass://entity/sun.gone")
+    status, body = await _stateless_rpc(client, missing)
+    assert (status, body["error"]["code"]) == (200, -32602)
+
+
+async def test_stateless_errors_carry_their_http_status(
+    loaded_entry: MockConfigEntry,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    client = await hass_client()
+
+    status, body = await _stateless_rpc(client, stateless("ping"))
+    assert (status, body["error"]["code"]) == (404, -32601)
+
+    message = stateless("tools/list")
+    status, body = await _rpc(client, message, {**stateless_headers(message), "Mcp-Method": "x"})
+    assert (status, body["error"]["code"]) == (400, -32020)
+
+    message["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = "2099-01-01"
+    status, body = await _stateless_rpc(client, message)
+    assert (status, body["error"]["code"]) == (400, -32022)
+    assert body["error"]["data"] == {"supported": ["2026-07-28"], "requested": "2099-01-01"}
+
+    status, body = await _rpc(
+        client, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"MCP-Protocol-Version": "x"}
+    )
+    assert (status, body["error"]["code"]) == (400, -32022)
+
+
+@pytest.mark.parametrize(
+    ("discover", "initialize"),
+    [
+        (CLAUDE_AI_DISCOVER, CLAUDE_AI_INITIALIZE),
+        (CLAUDE_CODE_DISCOVER, CLAUDE_AI_INITIALIZE),
+        (toolbox(CLAUDE_AI_DISCOVER), toolbox(CLAUDE_AI_INITIALIZE)),
+    ],
+    ids=["claude.ai", "claude-code", "toolbox"],
+)
+async def test_the_captured_client_sequences(
+    loaded_entry: MockConfigEntry,
+    hass_client: ClientSessionGenerator,
+    discover: dict,
+    initialize: dict,
+) -> None:
+    """The probe now finds 2026-07-28; the handshake they fell back to still works."""
+    client = await hass_client()
+
+    status, body = await _stateless_rpc(client, discover)
+    assert status == 200
+    assert body["id"] == discover["id"]
+    assert body["result"]["supportedVersions"] == ["2026-07-28"]
+
+    status, body = await _rpc(client, initialize)
+    assert (status, body["result"]["protocolVersion"]) == (200, "2025-11-25")
+    negotiated = {"MCP-Protocol-Version": "2025-11-25"}
+    assert await _rpc(client, INITIALIZED, negotiated) == (202, None)
+    for method in ("tools/list", "prompts/list", "resources/list"):
+        message = {"jsonrpc": "2.0", "id": 3, "method": method, "params": {"_meta": {}}}
+        status, body = await _rpc(client, message, negotiated)
+        assert status == 200 and "resultType" not in body["result"]
+
+
+async def test_get_and_delete_are_not_allowed(
+    loaded_entry: MockConfigEntry,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    client = await hass_client()
+
+    assert (await client.get("/api/mcp")).status == 405
+    assert (await client.delete("/api/mcp", headers={"Mcp-Session-Id": "s"})).status == 405
+
+
+async def test_origin_is_not_validated(
+    loaded_entry: MockConfigEntry,
+    hass_client: ClientSessionGenerator,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """A browser page on the address the request went to is served like any client."""
+    message = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+    same_host = {"Origin": "https://hem.example.se", "Host": "hem.example.se"}
+
+    resp = await (await hass_client()).post("/api/mcp", json=message, headers=same_host)
+    assert resp.status == 200
+
+    resp = await (await hass_client_no_auth()).post("/api/mcp", json=message, headers=same_host)
+    assert resp.status == 401
+    assert "WWW-Authenticate" in resp.headers
+
+
+async def test_a_batch_is_answered_without_the_header(
+    loaded_entry: MockConfigEntry,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    client = await hass_client()
+    batch = [{"jsonrpc": "2.0", "id": 1, "method": "ping"}, INITIALIZED]
+
+    status, body = await _rpc(client, batch)
+
+    assert (status, body) == (200, [{"jsonrpc": "2.0", "id": 1, "result": {}}])
+    status, body = await _rpc(client, batch, {"MCP-Protocol-Version": "2025-11-25"})
+    assert (status, body["error"]["code"]) == (400, -32600)
+
+
+async def _stateless_turn(client, headers=None) -> dict[str, dict]:
+    """Send what a client sends once server/discover finds 2026-07-28: no initialize.
+
+    Returns each answer by method. Every request is stateless, with its headers.
+    """
+    requests = [
+        stateless("server/discover", msg_id=1),
+        stateless("tools/list", msg_id=2),
+        stateless("prompts/list", msg_id=3),
+        stateless("resources/list", msg_id=4),
+        stateless("tools/call", msg_id=5, name="get_state", arguments={"entity_id": "sun.sun"}),
+        stateless("resources/read", msg_id=6, uri="hass://entity/sun.sun"),
+        stateless("prompts/get", msg_id=7, name="naming_conventions", arguments={}),
+    ]
+    answers = {}
+    for message in requests:
+        status, body = await _rpc(
+            client, message, {**stateless_headers(message), **(headers or {})}
+        )
+        assert (status, body["id"]) == (200, message["id"]), body
+        assert body["result"]["resultType"] == "complete"
+        answers[message["method"]] = body["result"]
+    return answers
+
+
+def _check_turn(answers: dict[str, dict]) -> None:
+    assert answers["server/discover"]["supportedVersions"] == ["2026-07-28"]
+    call = answers["tools/call"]
+    assert "isError" not in call
+    assert "above_horizon" in call["content"][0]["text"]
+    assert "above_horizon" in answers["resources/read"]["contents"][0]["text"]
+    assert answers["prompts/get"]["messages"]
+
+
+async def test_a_client_that_found_the_newest_revision_never_initializes(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    answers = await _stateless_turn(await hass_client())
+
+    _check_turn(answers)
+    tools = {tool["name"] for tool in answers["tools/list"]["tools"]}
+    assert {"get_state", "call_service"} <= tools
+    assert "hass://config" in {r["uri"] for r in answers["resources/list"]["resources"]}
+    assert "automation_review" in {p["name"] for p in answers["prompts/list"]["prompts"]}
+
+
+async def test_a_client_limited_by_scopes_gets_only_what_it_was_granted_statelessly(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_admin_user: MockUser,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """The same turn for an OAuth token that grants Read on entities and nothing more."""
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    def validate_access_token(hass, token, issuer, expected_audience=None):
+        return {"sub": hass_admin_user.id, "client_id": "app", "scope": "openid mcp:entities:read"}
+
+    client = await hass_client_no_auth()
+    bearer = {"Authorization": "Bearer oauth-token"}
+    validator = sys.modules["custom_components.oidc_provider.token_validator"]
+    with patch.object(validator, "validate_access_token", validate_access_token):
+        answers = await _stateless_turn(client, bearer)
+
+        _check_turn(answers)
+        tools = {tool["name"] for tool in answers["tools/list"]["tools"]}
+        assert "get_state" in tools
+        assert "call_service" not in tools
+        resources = {r["uri"] for r in answers["resources/list"]["resources"]}
+        assert "hass://entities" in resources
+        assert "hass://config" not in resources
+        prompts = {p["name"] for p in answers["prompts/list"]["prompts"]}
+        assert "naming_conventions" in prompts
+        assert "automation_review" not in prompts
+
+        for message in (
+            stateless("tools/call", name="call_service", arguments={"domain": "x", "service": "y"}),
+            stateless("resources/read", uri="hass://config"),
+            stateless("prompts/get", name="automation_review", arguments={}),
+        ):
+            status, body = await _rpc(client, message, {**stateless_headers(message), **bearer})
+            assert (status, body["error"]["code"]) == (200, -32602), message["method"]
+
+
+async def test_the_newest_revision_can_be_turned_off_without_a_restart(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """With it off a client's probe finds nothing, and the handshake it falls back to works."""
+    hass.states.async_set("sun.sun", "above_horizon")
+    client = await hass_client()
+
+    async def set_option(value: bool) -> None:
+        flow = await hass.config_entries.options.async_init(loaded_entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            flow["flow_id"], {CONF_NATIVE_AUTH: True, CONF_STATELESS_PROTOCOL: value}
+        )
+        assert result["type"] == "create_entry"
+        await hass.async_block_till_done()
+
+    await set_option(False)
+
+    for discover in (CLAUDE_AI_DISCOVER, CLAUDE_CODE_DISCOVER):
+        status, body = await _stateless_rpc(client, discover)
+        assert (status, body) == (
+            200,
+            {
+                "jsonrpc": "2.0",
+                "error": {"code": -32601, "message": "Method not found: server/discover"},
+                "id": discover["id"],
+            },
+        )
+    status, body = await _stateless_rpc(client, stateless("tools/list"))
+    assert (status, body["error"]["code"]) == (200, -32601)
+
+    status, body = await _rpc(client, CLAUDE_AI_INITIALIZE)
+    assert (status, body["result"]["protocolVersion"]) == (200, "2025-11-25")
+    negotiated = {"MCP-Protocol-Version": "2025-11-25"}
+    assert await _rpc(client, INITIALIZED, negotiated) == (202, None)
+    requests = [
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "prompts/list"},
+        {"jsonrpc": "2.0", "id": 4, "method": "resources/list"},
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {"name": "get_state", "arguments": {"entity_id": "sun.sun"}},
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "resources/read",
+            "params": {"uri": "hass://entity/sun.sun"},
+        },
+    ]
+    for message in requests:
+        status, body = await _rpc(client, message, negotiated)
+        assert status == 200 and "resultType" not in body["result"], body
+    assert "above_horizon" in body["result"]["contents"][0]["text"]
+
+    await set_option(True)
+
+    status, body = await _stateless_rpc(client, CLAUDE_AI_DISCOVER)
+    assert (status, body["result"]["supportedVersions"]) == (200, ["2026-07-28"])

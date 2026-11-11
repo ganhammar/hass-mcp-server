@@ -20,6 +20,7 @@ Everything here is set when you add the integration and can be changed later und
 | Enable AppDaemon app file access | Off | Reading and editing AppDaemon apps, see [AppDaemon app files](#appdaemon-app-files) |
 | AppDaemon apps root | `/addon_configs/a0d7b954_appdaemon/apps` | The folder those tools work in |
 | MCP server name | `home-assistant-mcp-server` | The name clients see, see [Server name](#server-name) |
+| Use the newest MCP protocol revision | On | Serves MCP 2026-07-28, see [Protocol revision](#protocol-revision) |
 
 ## Limiting the tools
 
@@ -91,3 +92,9 @@ With **Enable AppDaemon app file access** on, a client can read and edit the fil
 By default, every instance of this integration reports the name `home-assistant-mcp-server` to MCP clients (`serverInfo.name`). That only matters when one client connects to more than one Home Assistant instance: some clients derive the namespace they show for a server's tools from that name, so two servers reporting the same name become one and only one instance stays reachable. VS Code, for example, keeps the first 13 characters of the name before using it.
 
 Set **MCP server name** to something distinct per instance when a client connects to several. Keep the names distinct within their first 13 characters if your client shortens them. A single-instance setup can leave it alone.
+
+## Protocol revision
+
+The server speaks MCP 2026-07-28, in which a client sends each request on its own with no handshake, and the four revisions before it, which start with a handshake. A client that knows 2026-07-28 asks for it first and uses it from then on, and one that does not falls back to the handshake.
+
+Turn off **Use the newest MCP protocol revision** if a client that used to work now connects but lists no tools, or fails on every call. With it off, the server answers a 2026-07-28 request the way a server that has never heard of that revision does, so the client falls back to the handshake, which keeps working either way. Reconnect the client after changing the option, since it may remember for a while which revision the server spoke. Turn it back on once the client is updated.

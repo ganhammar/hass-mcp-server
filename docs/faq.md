@@ -12,6 +12,10 @@ The Model Context Protocol is a standard way for an AI assistant to use outside 
 
 Any MCP client that supports streamable HTTP with either OAuth or a bearer token. Claude on the web is the one this was built for. See [Connecting a client](connecting.md).
 
+### Which versions of the protocol does it speak?
+
+2026-07-28, the current revision, and the four before it: 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05. A client on 2026-07-28 sends each request on its own with no handshake first, and one on an older revision starts with the handshake and gets the revision it asked for. The server keeps no sessions and answers every request with JSON, never with a stream. If a client has trouble with 2026-07-28, it can be turned off, see [Protocol revision](configuration.md#protocol-revision).
+
 ### Does my Home Assistant have to be reachable from the internet?
 
 For Claude on the web, yes, over HTTPS: the connection comes from Claude's servers, not from your browser. A client that runs on your own network can use the local address with a long-lived access token.

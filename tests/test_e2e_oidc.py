@@ -68,6 +68,9 @@ pytestmark = pytest.mark.skipif(
 
 OIDC_DOMAIN = "oidc_provider"
 
+# What a client that speaks only 2024-11-05 sends with initialize.
+INIT_2024 = {"protocolVersion": "2024-11-05"}
+
 # The issuer is derived from the request host; pin it with forwarded headers so
 # the token claims are deterministic. The MCP server binds the audience to
 # {issuer}/api/mcp (RFC 8707).
@@ -131,7 +134,7 @@ def _sign(
 async def _post_initialize(client: ClientSessionGenerator, token: str, path: str = MCP_PATH):
     return await client.post(
         path,
-        json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        json={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 1},
         headers={**FORWARDED, "Authorization": f"Bearer {token}"},
     )
 

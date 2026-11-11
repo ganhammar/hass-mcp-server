@@ -5,6 +5,8 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ..access import PROMPT_AREAS, READ, current_grant, not_granted
+
 # Prompt registry: name -> {"definition": {...}, "handler": callable}
 PROMPTS: dict[str, dict[str, Any]] = {}
 
@@ -15,6 +17,10 @@ class InvalidPromptRequest(Exception):
 
 class UnknownPrompt(InvalidPromptRequest):
     """The prompt name is not registered."""
+
+
+class PromptNotAvailable(InvalidPromptRequest):
+    """The caller's access does not include the data the prompt reads."""
 
 
 class InvalidPromptArguments(InvalidPromptRequest):
@@ -52,9 +58,33 @@ def register_prompt(
     return decorator
 
 
+def prompt_unavailable_reason(name: str) -> str | None:
+    """Return why the request being served may not get a prompt, or None when it may.
+
+    A prompt reads data into the text it returns, so it needs Read in every area
+    whose data it reads. What it suggests changing goes through tools, which are
+    checked when they are called.
+    """
+    grant = current_grant()
+    if grant is None:
+        return None
+    areas = PROMPT_AREAS.get(name)
+    if areas is None:
+        return (
+            f"The access granted to this application does not include prompt '{name}': "
+            "it belongs to no area an application can be given"
+        )
+    for area in areas:
+        if not grant.allows(area, READ):
+            return not_granted(f"prompt '{name}'", area, READ)
+    return None
+
+
 def get_prompts() -> list[dict[str, Any]]:
-    """Return all prompt definitions."""
-    return [p["definition"] for p in PROMPTS.values()]
+    """Return the definitions of the prompts the client making the request can get."""
+    return [
+        p["definition"] for name, p in PROMPTS.items() if prompt_unavailable_reason(name) is None
+    ]
 
 
 def _missing_required(definition: dict[str, Any], arguments: dict[str, Any]) -> list[str]:
@@ -81,9 +111,10 @@ def _describe_missing(definition: dict[str, Any], missing: list[str]) -> str:
 async def get_prompt(hass: HomeAssistant, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Get a prompt by name with arguments.
 
-    Anything the caller got wrong — an unknown name, a non-object arguments, a
-    missing required argument — raises InvalidPromptRequest before a handler
-    runs, so a handler never has to defend against a required key being absent.
+    Anything the caller got wrong raises InvalidPromptRequest before a handler runs:
+    an unknown name, a prompt its access does not include, a non-object arguments,
+    a missing required argument. A handler therefore never has to defend against a
+    required key being absent.
     Clients that enumerate prompts at connect time send placeholder values for
     every argument, so a handler that cannot use a value raises
     InvalidPromptArguments itself rather than logging a server error.
@@ -91,6 +122,9 @@ async def get_prompt(hass: HomeAssistant, name: str, arguments: dict[str, Any]) 
     prompt = PROMPTS.get(name)
     if prompt is None:
         raise UnknownPrompt(f"Unknown prompt: {name}")
+
+    if reason := prompt_unavailable_reason(name):
+        raise PromptNotAvailable(reason)
 
     if not isinstance(arguments, dict):
         got = type(arguments).__name__

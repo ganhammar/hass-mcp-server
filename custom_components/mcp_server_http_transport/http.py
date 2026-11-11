@@ -11,6 +11,7 @@ from homeassistant.components.http.ban import process_success_login, process_wro
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
+from .access import carries_server_scope, grant_from_scopes
 from .caller import Caller, acting_as
 from .completions import complete
 from .const import (
@@ -27,7 +28,7 @@ from .const import (
 )
 from .json_utils import dumps
 from .prompts import InvalidPromptRequest, get_prompt, get_prompts
-from .resources import get_resources, read_resource
+from .resources import ResourceNotAvailable, get_resources, read_resource
 from .secret_keys import SECRET_MASK, is_secret_key
 from .tools import (
     TOOLS,
@@ -79,13 +80,14 @@ class ValidatedToken:
     the paired OIDC provider signs the authorizing user's id as the subject, and a
     Long-Lived Access Token belongs to a user directly. ``client_id`` and
     ``scopes`` come from an OAuth token's claims; a Long-Lived Access Token has
-    neither.
+    neither, and is never ``limited_by_scopes``.
     """
 
     sub: str
     auth_method: str
     client_id: str | None = None
     scopes: frozenset[str] = frozenset()
+    limited_by_scopes: bool = False
 
 
 def _token_client_id(claims: dict[str, Any]) -> str | None:
@@ -312,8 +314,35 @@ def _get_issuer(request: web.Request) -> str | None:
         return None
 
 
+def _provider_describes(hass: HomeAssistant, resource: str) -> bool:
+    """Return whether the installed OIDC provider has collected this server's description.
+
+    The provider asks the user what an application may do here only once it has
+    collected the description in oidc_provider.py, and from then on settles the access
+    of every session for this resource, also one that began before. A provider that
+    predates descriptions has no resources module, and one that is not set up has
+    collected nothing, so both answer False.
+    """
+    try:
+        from custom_components.oidc_provider.resources import find_resource
+    except ImportError:
+        return False
+    try:
+        described = find_resource(hass, resource)
+    except Exception:  # noqa: BLE001 - a provider that cannot answer has described nothing
+        _LOGGER.debug("Could not ask the OIDC provider about %s", resource, exc_info=True)
+        return False
+    return getattr(described, "domain", None) == DOMAIN
+
+
 def _get_protected_resource_metadata(base_url: str, resource_path: str) -> dict[str, Any]:
-    """Generate OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
+    """Generate OAuth 2.0 Protected Resource Metadata (RFC 9728).
+
+    Only openid is advertised. The provider refuses an authorization request
+    without it, and grants this server's own scopes from what the user chooses on
+    the consent screen whatever the client asks for, so listing them would only
+    have clients request scopes that change nothing.
+    """
     resource = f"{base_url}{resource_path}"
     return {
         "resource": resource,
@@ -485,11 +514,19 @@ class MCPEndpointView(HomeAssistantView):
                 result = validate_access_token(self.hass, token, expected_issuer)
             sub = result.get("sub") if isinstance(result, dict) else None
             if isinstance(sub, str) and sub:
+                scopes = _token_scopes(result)
+                # A token is limited by its scopes once it carries one of this
+                # server's, or once the provider asks users what to grant here. A
+                # token from a provider that does neither works as before.
+                limited = carries_server_scope(scopes) or _provider_describes(
+                    self.hass, expected_audience
+                )
                 return ValidatedToken(
                     sub=sub,
                     auth_method=AUTH_METHOD_OIDC,
                     client_id=_token_client_id(result),
-                    scopes=_token_scopes(result),
+                    scopes=scopes,
+                    limited_by_scopes=limited,
                 )
         except ImportError as e:
             _LOGGER.debug("OIDC provider not available: %s", e)
@@ -514,6 +551,13 @@ class MCPEndpointView(HomeAssistantView):
         valid token whose user no longer exists or is deactivated is refused, and
         so is a non-administrator while require_admin is on: Home Assistant itself
         restricts most of what the tools do to administrators.
+
+        A valid OAuth token that is limited by its scopes and grants nothing here
+        gets the 401 as well, so the client refreshes it: the provider gives a
+        session from before this server described its access the access it names
+        for those, and a client whose refreshed token still grants nothing goes
+        back to the user to choose. Such a token is valid, so it counts neither
+        as a failed login nor as an authorized request, the same as the 403.
         """
         token = await self._validate_token(request)
         if token is None:
@@ -529,6 +573,11 @@ class MCPEndpointView(HomeAssistantView):
         elif self.require_admin and not user.is_admin:
             reason = "user is not an administrator"
             description = "This MCP server requires a Home Assistant administrator account"
+        elif token.limited_by_scopes and not grant_from_scopes(token.scopes).grants_anything:
+            _LOGGER.debug(
+                "Answering a token of user %s that grants no access here with 401", token.sub
+            )
+            return self._unauthorized(request, grants_nothing=True)
         else:
             self._record_successful_login(request)
             return Caller(
@@ -537,6 +586,7 @@ class MCPEndpointView(HomeAssistantView):
                 user=user,
                 client_id=token.client_id,
                 scopes=token.scopes,
+                limited_by_scopes=token.limited_by_scopes,
             )
 
         first_time = (token.sub, reason) not in self._reported_refusals
@@ -577,30 +627,38 @@ class MCPEndpointView(HomeAssistantView):
         except Exception:
             _LOGGER.debug("Could not reset the failed login attempt count", exc_info=True)
 
-    def _unauthorized(self, request: web.Request) -> web.Response:
+    def _unauthorized(self, request: web.Request, *, grants_nothing: bool = False) -> web.Response:
         """Build the 401 that points a client at this resource's metadata.
 
         The resource_metadata URL is the RFC 9728 path-suffixed form. HA Core
         serves its own metadata at the bare /.well-known/oauth-protected-resource
         and wins that route by registering first, so a client that falls back to
-        the root path is told the authorization server is HA itself.
+        the root path is told the authorization server is HA itself. The challenge
+        names openid as the scope to ask for, since the provider refuses an
+        authorization request without it.
+
+        ``grants_nothing`` is for a valid token that grants no access here. Its
+        challenge carries error="invalid_token" (RFC 6750), which has the client
+        refresh the token before it asks the user again.
         """
+        description = "Invalid or missing token"
         base_url = _get_issuer(request)
         if base_url is not None:
             resource_metadata_url = (
                 f"{base_url}{RESOURCE_METADATA_PREFIX}{_resource_path(request.path)}"
             )
             www_authenticate = (
-                f'Bearer realm="MCP Server",' f' resource_metadata="{resource_metadata_url}"'
+                f'Bearer realm="MCP Server", resource_metadata="{resource_metadata_url}",'
+                ' scope="openid"'
             )
         else:
             www_authenticate = 'Bearer realm="Home Assistant MCP Server"'
+        if grants_nothing:
+            description = "The token grants this application no access to this MCP server"
+            www_authenticate += f', error="invalid_token", error_description="{description}"'
 
         return web.json_response(
-            {
-                "error": "invalid_token",
-                "error_description": "Invalid or missing token",
-            },
+            {"error": "invalid_token", "error_description": description},
             status=401,
             headers={"WWW-Authenticate": www_authenticate},
         )
@@ -678,7 +736,21 @@ class MCPEndpointView(HomeAssistantView):
     async def _handle_message(
         self, message: dict[str, Any], caller: Caller
     ) -> dict[str, Any] | None:
-        """Handle a JSON-RPC message on behalf of an authorized caller."""
+        """Handle a JSON-RPC message on behalf of an authorized caller.
+
+        The caller is the current caller for the whole message, so listing and
+        calling see the same access: what tools/list offers is what tools/call
+        accepts, and the same holds for resources and prompts. A tool handler finds
+        the caller through current_caller(), and what it does as the caller shares
+        its context with the audit event.
+        """
+        with acting_as(caller) as context:
+            return await self._dispatch(message, caller, context)
+
+    async def _dispatch(
+        self, message: dict[str, Any], caller: Caller, context: Context
+    ) -> dict[str, Any] | None:
+        """Answer a JSON-RPC message while its caller is the current one."""
         method = message.get("method")
         params = message.get("params", {})
         msg_id = message.get("id")
@@ -716,33 +788,30 @@ class MCPEndpointView(HomeAssistantView):
             name = params.get("name")
             arguments = params.get("arguments", {})
 
-            # The handler finds the caller through current_caller(), and what it
-            # does as the caller shares its context with the audit event.
-            with acting_as(caller) as context:
-                try:
-                    result = await self._call_tool(name, arguments)
-                except InvalidToolRequest as err:
-                    self._audit_tool_call(
-                        caller,
-                        name,
-                        arguments,
-                        OUTCOME_INVALID,
-                        withheld=isinstance(err, ToolNotAvailable),
-                        context=context,
-                    )
-                    return _jsonrpc_error(-32602, str(err), msg_id)
-                except Exception:
-                    self._audit_tool_call(caller, name, arguments, OUTCOME_ERROR, context=context)
-                    raise
-
-                is_error = isinstance(result, dict) and result.get("isError") is True
+            try:
+                result = await self._call_tool(name, arguments)
+            except InvalidToolRequest as err:
                 self._audit_tool_call(
                     caller,
                     name,
                     arguments,
-                    OUTCOME_ERROR if is_error else OUTCOME_OK,
+                    OUTCOME_INVALID,
+                    withheld=isinstance(err, ToolNotAvailable),
                     context=context,
                 )
+                return _jsonrpc_error(-32602, str(err), msg_id)
+            except Exception:
+                self._audit_tool_call(caller, name, arguments, OUTCOME_ERROR, context=context)
+                raise
+
+            is_error = isinstance(result, dict) and result.get("isError") is True
+            self._audit_tool_call(
+                caller,
+                name,
+                arguments,
+                OUTCOME_ERROR if is_error else OUTCOME_OK,
+                context=context,
+            )
             return {
                 "jsonrpc": "2.0",
                 "result": result,
@@ -761,7 +830,10 @@ class MCPEndpointView(HomeAssistantView):
         # Handle resources/read
         if method == "resources/read":
             uri = params.get("uri", "")
-            contents = await read_resource(self.hass, uri)
+            try:
+                contents = await read_resource(self.hass, uri)
+            except ResourceNotAvailable as err:
+                return _jsonrpc_error(-32602, str(err), msg_id)
             return {
                 "jsonrpc": "2.0",
                 "result": {"contents": contents},
@@ -834,9 +906,10 @@ class MCPEndpointView(HomeAssistantView):
         EVENT_TOOL_CALLED under ``context``, the one the call's own changes were
         recorded under, or a new one with the caller as its user. A read-only
         tool is logged at DEBUG only: an event per read would flood the recorder.
-        A call to a tool the options withhold is recorded like a write whatever
-        the tool does, since the client was never offered it. Secret-named
-        argument values are masked and the arguments shortened in both.
+        A call to a tool the options or the caller's access withhold is recorded
+        like a write whatever the tool does, since the client was never offered
+        it. Secret-named argument values are masked and the arguments shortened
+        in both.
         """
         read_only = tool_is_read_only(name) and not withheld
         level = logging.DEBUG if read_only else logging.INFO

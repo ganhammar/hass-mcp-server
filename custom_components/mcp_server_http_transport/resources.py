@@ -9,6 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
 
+from .access import READ, RESOURCE_AREAS, current_grant, not_granted
 from .json_utils import dumps
 from .tools.labels import label_json
 from .tools.registries import area_json, device_entries, floor_json
@@ -86,16 +87,56 @@ RESOURCE_TEMPLATES = [
 ]
 
 
+class ResourceNotAvailable(Exception):
+    """The caller's access does not include the resource; the transport answers -32602."""
+
+
+def resource_key(uri: Any) -> str | None:
+    """Return the URI or URI template in RESOURCE_AREAS that a requested URI reads, or None.
+
+    A URI matches a template the way read_resource dispatches it, by what precedes the
+    template's first variable.
+    """
+    if not isinstance(uri, str):
+        return None
+    if any(resource["uri"] == uri for resource in RESOURCES):
+        return uri
+    for template in RESOURCE_TEMPLATES:
+        if uri.startswith(template["uriTemplate"].split("{", 1)[0]):
+            return template["uriTemplate"]
+    return None
+
+
+def _withheld(key: str | None) -> str | None:
+    """Return why the request being served may not read a resource, or None when it may."""
+    grant = current_grant()
+    if grant is None:
+        return None
+    area = RESOURCE_AREAS.get(key) if key is not None else None
+    if area is None:
+        return f"The access granted to this application does not include resource {key}"
+    if not grant.allows(area, READ):
+        return not_granted(f"resource {key}", area, READ)
+    return None
+
+
 def get_resources() -> dict[str, Any]:
-    """Return all resource and resource template definitions."""
+    """Return the resources and resource templates the client making the request can read."""
     return {
-        "resources": RESOURCES,
-        "resourceTemplates": RESOURCE_TEMPLATES,
+        "resources": [r for r in RESOURCES if _withheld(r["uri"]) is None],
+        "resourceTemplates": [t for t in RESOURCE_TEMPLATES if _withheld(t["uriTemplate"]) is None],
     }
 
 
 async def read_resource(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
-    """Read a resource by URI."""
+    """Read a resource by URI.
+
+    A resource the caller's access does not include raises ResourceNotAvailable
+    before anything is read.
+    """
+    key = resource_key(uri)
+    if key is not None and (reason := _withheld(key)):
+        raise ResourceNotAvailable(reason)
     if uri == "hass://config":
         return _read_config(hass, uri)
 

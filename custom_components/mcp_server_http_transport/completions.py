@@ -5,15 +5,29 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 
+from .access import COMPLETION_AREAS, may_read
+
 MAX_COMPLETIONS = 100
+
+_NO_COMPLETIONS: dict[str, Any] = {"values": [], "hasMore": False}
 
 
 async def complete(
     hass: HomeAssistant, ref: dict[str, Any], argument: dict[str, Any]
 ) -> dict[str, Any]:
-    """Handle completion/complete requests."""
+    """Handle completion/complete requests.
+
+    A completion that lists what is in Home Assistant, such as entity IDs, is a read
+    of its area, so a caller whose access does not include reading that area gets
+    none. Completions from a fixed list are given to every caller.
+    """
     arg_name = argument.get("name", "")
     arg_value = argument.get("value", "")
+
+    area = COMPLETION_AREAS.get(arg_name) if isinstance(arg_name, str) else None
+    helper_domain = arg_name == "domain" and ref.get("name") == "create_helper"
+    if area is not None and not helper_domain and not may_read(area):
+        return dict(_NO_COMPLETIONS)
 
     if arg_name == "entity_id":
         return _complete_entity_id(hass, arg_value)

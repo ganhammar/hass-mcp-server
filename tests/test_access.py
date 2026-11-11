@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import pytest
 
 from custom_components.mcp_server_http_transport import access
+from custom_components.mcp_server_http_transport import resources as resources_mod
 from custom_components.mcp_server_http_transport.access import (
     AREAS,
     COMPLETION_AREAS,
@@ -37,6 +38,7 @@ from custom_components.mcp_server_http_transport.prompts import (
     PromptNotAvailable,
     get_prompt,
     get_prompts,
+    prompt_unavailable_reason,
 )
 from custom_components.mcp_server_http_transport.resources import (
     RESOURCE_TEMPLATES,
@@ -565,3 +567,32 @@ class TestDeviceDetails:
         assert "state" not in limited_body["entities"][0]
         assert "states_omitted" in limited_body
         assert json.loads(full["content"][0]["text"])["entities"][0]["state"] == "on"
+
+
+class TestFailsClosed:
+    """What is not classified is never given to a limited caller, and a core change leaves
+    the fixed service list in charge."""
+
+    def test_a_prompt_without_an_area_is_withheld_from_a_limited_caller(self):
+        with acting_as(_caller("mcp:admin")):
+            reason = prompt_unavailable_reason("not_a_classified_prompt")
+
+        assert "belongs to no area" in reason
+
+    def test_a_resource_without_an_area_is_withheld_from_a_limited_caller(self):
+        with acting_as(_caller("mcp:admin")):
+            reason = resources_mod._withheld("hass://not-classified")
+
+        assert reason == (
+            "The access granted to this application does not include resource "
+            "hass://not-classified"
+        )
+
+    def test_admin_detection_answers_no_when_core_drops_its_handler(self, monkeypatch):
+        from homeassistant.helpers import service as service_helper
+
+        monkeypatch.delattr(service_helper, "_async_admin_handler")
+
+        assert access.is_admin_service(Mock(), "homeassistant", "restart") is False
+        # The fixed list still holds the service back.
+        assert access.is_system_service(Mock(), "homeassistant", "restart") is True

@@ -1944,6 +1944,13 @@ class TestSearchEntitiesForgiving:
 
         assert _ids(result) == ["binary_sensor.front_door", "sensor.outdoor_temperature"]
 
+    async def test_a_device_that_is_gone_gives_no_area_and_no_words(self, hass, home):
+        # An entity can outlive its device for a moment while it is being removed.
+        places = entities_mod._Places(hass)
+
+        assert places.device("no-such-device") == (None, frozenset())
+        assert places.device(None) == (None, frozenset())
+
     async def test_a_missing_limit_is_the_default(self, hass, home):
         result = await entities_mod.search_entities(hass, {"query": "office", "limit": None})
 

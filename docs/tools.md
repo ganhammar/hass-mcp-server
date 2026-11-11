@@ -4,7 +4,7 @@
 
 Everything the server offers a client. Tools marked opt-in, and the KNX tools while KNX is not set up, are left out of the list a client sees until they can be used: see [Configuration](configuration.md#limiting-the-tools).
 
-You do not call these yourself: the assistant picks them from what you ask. The list is here so you can see what it is able to do, and which tools to switch off if you want it to do less.
+You do not call these yourself: the assistant picks them from what you ask. The list is here so you can see what it is able to do, and which tools to switch off if you want it to do less. When it connects, the server also tells the assistant which tool to start with for common questions, so a question such as "is the office light on?" can be answered with a single `search_entities` call.
 
 **Experimental tools.** `create_dashboard`, `update_dashboard`, `delete_dashboard`, the helper tools other than `list_helpers`, and the three KNX entity tools use Home Assistant internals that have no stable API, so a Home Assistant update can break them. The helper tools only manage helpers created in the UI, not ones defined in YAML.
 
@@ -21,7 +21,7 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `get_entity_registry` | Read registry metadata for an entity, including disabled or unavailable entities |
 | `update_entity_registry` | Preview by default or apply (`apply=true`) a change to an entity's `name`, same-domain `new_entity_id`, area, labels, or whether it is disabled or hidden. HA validates IDs on apply; **references in automations, scripts, dashboards and templates are not migrated** |
 | `delete_entity` | Delete the registry entry of a leftover entity that nothing provides any more; an entity still provided is refused (requires explicit confirmation) |
-| `search_entities` | Search entities by friendly name, device class, domain, or area |
+| `search_entities` | Find entities from plain words such as "office lights" and return their states. Every word has to match the entity ID, name, an alias or the device class, or the name or an alias of its area, floor or device, in any order. Word endings may differ, so "lights" finds "light" and "kontoret" finds "kontor". A word that nothing in the home matches is left out, and the reply says so and lists the rooms. Filters by `domain`, `device_class` and area (its ID, else its name, else an alias). The closest matches come first, with configuration, diagnostic and hidden entities last, and the reply says when `limit` cut the list |
 | `get_device_details` | Get a device and every entity registered to it (all domains), with optional states |
 | `call_service` | Call any Home Assistant service |
 | `create_calendar_event` | Create a one-off calendar event (local calendars; entity API) |

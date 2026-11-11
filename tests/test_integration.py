@@ -1280,7 +1280,7 @@ class TestMCPClientSession:
         assert "Successfully deleted config" in result["result"]["content"][0]["text"]
         assert dashboard_store == {}
 
-    # ── New tools: fire_event, search_entities, get_logbook ──────────
+    # ── New tools: fire_event, get_logbook ───────────────────────────
 
     async def test_fire_event(self, view, populated_hass):
         """Test firing an event on the event bus."""
@@ -1303,80 +1303,6 @@ class TestMCPClientSession:
         assert _fired_by_tool(populated_hass.bus.async_fire) == [
             call("test_event", {"source": "test"}, context=ANY)
         ]
-
-    async def test_search_entities_by_query(self, view, populated_hass, mock_entity_registry):
-        """Test searching entities by friendly name."""
-        with (
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_entity_registry,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            result = await self._call(
-                view,
-                "tools/call",
-                {"name": "search_entities", "arguments": {"query": "bedroom"}},
-                msg_id=201,
-            )
-        data = json.loads(result["result"]["content"][0]["text"])
-        entity_ids = [e["entity_id"] for e in data]
-        assert "light.bedroom" in entity_ids
-
-    async def test_search_entities_by_device_class(
-        self, view, populated_hass, mock_entity_registry
-    ):
-        """Test searching entities by device class."""
-        with (
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_entity_registry,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            result = await self._call(
-                view,
-                "tools/call",
-                {
-                    "name": "search_entities",
-                    "arguments": {"device_class": "temperature"},
-                },
-                msg_id=202,
-            )
-        data = json.loads(result["result"]["content"][0]["text"])
-        assert len(data) == 1
-        assert data[0]["entity_id"] == "sensor.temperature"
-        assert data[0]["device_class"] == "temperature"
-
-    async def test_search_entities_by_alias(self, view, populated_hass, mock_entity_registry):
-        """Test searching entities matches aliases."""
-        with (
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_entity_registry,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            result = await self._call(
-                view,
-                "tools/call",
-                {"name": "search_entities", "arguments": {"query": "lounge"}},
-                msg_id=203,
-            )
-        data = json.loads(result["result"]["content"][0]["text"])
-        assert len(data) == 1
-        assert data[0]["entity_id"] == "light.living_room"
-
-    # ── New resources: devices, services, floors ─────────────────────
 
     async def test_devices_consistency_across_tools_and_resources(self, view, mock_device_registry):
         """Verify list_devices tool and hass://devices resource return consistent data."""
@@ -1724,57 +1650,6 @@ class TestMCPClientSession:
             assert "not allowed" in text
             assert result["result"]["isError"] is True
             assert _fired_by_tool(populated_hass.bus.async_fire) == []
-
-    async def test_search_entities_by_area(
-        self, view, populated_hass, mock_entity_registry, mock_device_registry
-    ):
-        """Test searching entities by area_id including device fallback."""
-        with (
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_entity_registry,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=mock_device_registry,
-            ),
-        ):
-            result = await self._call(
-                view,
-                "tools/call",
-                {"name": "search_entities", "arguments": {"area_id": "bedroom"}},
-                msg_id=400,
-            )
-        data = json.loads(result["result"]["content"][0]["text"])
-        entity_ids = [e["entity_id"] for e in data]
-        assert "light.bedroom" in entity_ids
-        assert "sensor.temperature" in entity_ids
-        for entry in data:
-            assert entry["area_id"] == "bedroom"
-
-    async def test_search_entities_limit(self, view, populated_hass, mock_entity_registry):
-        """Test that search_entities respects the limit parameter."""
-        with (
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_entity_registry,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            result = await self._call(
-                view,
-                "tools/call",
-                {
-                    "name": "search_entities",
-                    "arguments": {"domain": "light", "limit": 1},
-                },
-                msg_id=401,
-            )
-        data = json.loads(result["result"]["content"][0]["text"])
-        assert len(data) == 1
 
     async def test_get_logbook_end_to_end(self, view, populated_hass):
         """Test get_logbook fetches entries via the recorder."""

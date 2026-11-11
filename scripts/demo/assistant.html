@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Assistant (illustration)</title>
+<!--
+  A schematic chat window for the README demo. It stands for "an assistant" and is
+  deliberately plain: system font, slate and teal, no logo. record_demo.py drives it
+  through window.demo and fills in the answer it composed from real tool calls.
+-->
+<style>
+  :root {
+    --bg: #eef1f4;
+    --window: #ffffff;
+    --line: #d9dee5;
+    --text: #1f2933;
+    --muted: #5f6b7a;
+    --accent: #0f766e;
+    --accent-soft: #e6f4f1;
+    --user: #e9edf2;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px 8px;
+  }
+  .window {
+    flex: 1;
+    min-height: 0;
+    background: var(--window);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    font-weight: 600;
+  }
+  .mark {
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 2px solid var(--accent);
+    position: relative;
+  }
+  .mark::after {
+    content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--accent);
+  }
+  .bar .spacer { flex: 1; }
+  .tag {
+    font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); border: 1px dashed #aab3bf; border-radius: 4px; padding: 2px 7px;
+  }
+  .connectors { font-size: 13px; font-weight: 500; color: var(--muted); }
+  .connectors b { color: var(--accent); font-weight: 600; }
+  .chat {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 18px 0 8px;
+  }
+  .column { width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  .empty {
+    margin-top: 110px; text-align: center; color: var(--muted); font-size: 18px;
+  }
+  .system {
+    align-self: center; font-size: 13px; color: var(--accent);
+    background: var(--accent-soft); border-radius: 999px; padding: 4px 12px;
+  }
+  .user {
+    align-self: flex-end; background: var(--user); border-radius: 14px; padding: 8px 14px;
+  }
+  .assistant { display: flex; flex-direction: column; gap: 8px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+  .tool {
+    font: 11.5px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #f3f5f8; border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; color: #384350;
+  }
+  .tool.done::before { content: "\2713\00a0"; color: var(--accent); }
+  .answer p { margin: 0 0 7px; }
+  .answer b { font-weight: 600; }
+  .thinking { color: var(--muted); font-size: 14px; }
+  .composer {
+    margin: 0 auto 14px; width: 680px; display: flex; gap: 8px; align-items: center;
+    border: 1px solid #c4cbd4; border-radius: 12px; padding: 8px 8px 8px 14px; background: #fff;
+  }
+  .composer .input { flex: 1; min-height: 22px; }
+  .composer .input.placeholder { color: #9aa4b1; }
+  .caret { display: inline-block; width: 1.5px; height: 1.1em; background: var(--text); vertical-align: -0.18em; margin-left: 1px; }
+  .send {
+    width: 32px; height: 32px; border-radius: 8px; border: 0; background: var(--accent); color: #fff;
+    font-size: 16px; display: grid; place-items: center;
+  }
+  .send.idle { background: #b9c3cd; }
+  .footnote { text-align: center; font-size: 11.5px; color: var(--muted); padding-top: 6px; }
+
+  .overlay {
+    position: absolute; inset: 0; background: rgba(31, 41, 51, .32);
+    display: none; align-items: center; justify-content: center;
+  }
+  .overlay.open { display: flex; }
+  .dialog {
+    width: 460px; background: #fff; border-radius: 12px; padding: 20px 22px 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.18);
+  }
+  .dialog h2 { margin: 0 0 4px; font-size: 18px; }
+  .dialog .sub { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .field .box {
+    border: 1px solid #c4cbd4; border-radius: 8px; padding: 8px 10px; min-height: 38px;
+    font-size: 14.5px;
+  }
+  .field .box.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field .box.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13.5px; }
+  .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .buttons button {
+    font: inherit; font-size: 14px; border-radius: 8px; padding: 7px 16px; border: 1px solid #c4cbd4; background: #fff;
+  }
+  .buttons button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="bar">
+      <span class="mark" aria-hidden="true"></span>
+      <span>Wren</span>
+      <span class="tag">Illustration</span>
+      <span class="spacer"></span>
+      <span class="connectors" id="connectors">No connectors</span>
+    </div>
+    <div class="chat"><div class="column" id="column"><div class="empty" id="empty">What can I help with?</div></div></div>
+    <div class="composer">
+      <div class="input placeholder" id="composer">Ask anything</div>
+      <button class="send idle" id="send" aria-label="Send">&#8593;</button>
+    </div>
+    <div class="overlay" id="overlay">
+      <div class="dialog">
+        <h2>Add custom connector</h2>
+        <p class="sub">Connect a remote MCP server to the assistant.</p>
+        <div class="field"><label>Name</label><div class="box">Home Assistant</div></div>
+        <div class="field"><label>Remote MCP server URL</label><div class="box mono" id="url"></div></div>
+        <div class="buttons"><button>Cancel</button><button class="primary" id="connect">Connect</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="footnote">The assistant side is illustrated, not a screenshot of a real product. The Home Assistant screens and the data are real.</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const caret = '<span class="caret"></span>';
+
+  window.demo = {
+    openDialog() {
+      $("overlay").classList.add("open");
+      $("url").classList.add("focus");
+      $("url").innerHTML = caret;
+    },
+    typeUrl(text) {
+      $("url").innerHTML = esc(text) + caret;
+    },
+    connecting() {
+      $("url").classList.remove("focus");
+      $("url").innerHTML = $("url").textContent;
+      $("connect").textContent = "Connecting…";
+    },
+    connected(level) {
+      $("overlay").classList.remove("open");
+      $("empty").remove();
+      $("connectors").innerHTML = "Connector: <b>Home Assistant</b>";
+      this.add("div", "system", `Home Assistant connected · access: ${esc(level)}`);
+    },
+    type(text) {
+      const box = $("composer");
+      box.classList.toggle("placeholder", !text);
+      box.innerHTML = text ? esc(text) + caret : "Ask anything";
+      $("send").classList.toggle("idle", !text);
+    },
+    send(text) {
+      this.type("");
+      this.add("div", "user", esc(text));
+      const turn = this.add("div", "assistant", "");
+      turn.innerHTML = '<div class="tools" id="tools"><span>Home Assistant</span></div><div class="thinking" id="thinking">Looking at your home…</div>';
+    },
+    tool(name, count) {
+      let chip = document.querySelector(`.tool[data-name="${name}"]`);
+      if (!chip) {
+        chip = document.createElement("span");
+        chip.className = "tool";
+        chip.dataset.name = name;
+        $("tools").append(chip);
+      }
+      chip.textContent = count > 1 ? `${name} \u00d7${count}` : name;
+    },
+    toolDone() {
+      for (const chip of document.querySelectorAll(".tool")) chip.classList.add("done");
+    },
+    answer(html) {
+      $("thinking").outerHTML = `<div class="answer">${html}</div>`;
+    },
+    add(tag, cls, html) {
+      const el = document.createElement(tag);
+      el.className = cls;
+      el.innerHTML = html;
+      $("column").append(el);
+      return el;
+    },
+  };
+</script>
+</body>
+</html>

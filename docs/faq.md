@@ -40,7 +40,7 @@ Yes. The consent screen asks each time an application connects, so one can contr
 
 ### What changes for my existing connection when I update?
 
-Nothing you would notice: a connection made before keeps what it could do, which is Administer, still limited by the options. To choose a level for it, open Connected applications (`https://your-home-assistant/oidc_login`) and use Change access. This needs the OIDC Provider release after 1.8.0.
+Nothing you would notice: a connection made before keeps what it could do, which is Administer, still limited by the options. In read-only mode it is held at Read. To choose a level for it, open Connected applications (`https://your-home-assistant/oidc_login`) and use Change access. This needs the OIDC Provider release after 1.8.0.
 
 ### Can I see what it did?
 

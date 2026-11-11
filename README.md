@@ -47,7 +47,7 @@ The [full reference](https://github.com/ganhammar/hass-mcp-server/blob/main/docs
 
 ## Staying in control
 
-- **Access per app.** The consent screen asks what each app may do: Look only, Control devices, Edit the setup or Administer, or None, Read or Full per area. It needs the OIDC Provider release after 1.8.0. A connection from before keeps Administer until you sign it out and connect again.
+- **Access per app.** The consent screen asks what each app may do: Look only, Control devices, Edit the setup or Administer, or None, Read or Full per area. It needs the OIDC Provider release after 1.8.0. A connection from before keeps Administer until you change it with Change access under Connected applications, and in read-only mode it is held at Read.
 - **Read-only mode** offers only the tools that read, to every connection. Nothing can be changed.
 - **Disabled tools** switches off individual tools, such as `restart_ha`.
 - **Opt-in groups** stay off until you enable them: config files, cameras and images, templates, AppDaemon apps and integration management.

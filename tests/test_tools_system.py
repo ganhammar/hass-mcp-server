@@ -27,6 +27,8 @@ _CORE_EVENTS = [
     "core_config_updated",
     "component_loaded",
     "call_service",
+    "service_registered",
+    "service_removed",
     "state_changed",
     "state_reported",
     "logbook_entry",

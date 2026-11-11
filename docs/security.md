@@ -85,7 +85,7 @@ When you update, a connection made before keeps what it could do, which is Admin
 `fire_event` refuses the events Home Assistant fires for its own bookkeeping, because Home Assistant and its built-in integrations act on them as fact. A forged `user_removed` makes the Mobile App integration delete that user's phones and Person unlink them, a forged `entity_registry_updated` can take an entity out of Home Assistant or move its history to another entity, and a forged `homeassistant_stop` disconnects integrations while Home Assistant keeps running. The refused events are:
 
 - `homeassistant_start`, `homeassistant_started`, `homeassistant_stop`, `homeassistant_final_write` and `homeassistant_close`
-- `core_config_updated`, `component_loaded`, `call_service`, `state_changed` and `state_reported`
+- `core_config_updated`, `component_loaded`, `call_service`, `service_registered`, `service_removed`, `state_changed` and `state_reported`
 - `user_removed`
 - `entity_registry_updated`, `device_registry_updated`, `area_registry_updated`, `floor_registry_updated`, `label_registry_updated` and `category_registry_updated`
 - `logbook_entry`, `automation_triggered` and `script_started`, which write the logbook

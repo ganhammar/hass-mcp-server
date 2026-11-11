@@ -4,7 +4,7 @@
 
 Everything the server offers a client. Tools marked opt-in, and the KNX tools while KNX is not set up, are left out of the list a client sees until they can be used: see [Configuration](configuration.md#limiting-the-tools).
 
-You do not call these yourself: the assistant picks them from what you ask. The list is here so you can see what it is able to do, and which tools to switch off if you want it to do less.
+You do not call these yourself: the assistant picks them from what you ask. The list is here so you can see what it is able to do, and which tools to switch off if you want it to do less. When it connects, the server also tells the assistant which tool to start with for common questions, so a question such as "is the office light on?" takes a single `search_entities` call.
 
 **Experimental tools.** `create_dashboard`, `update_dashboard`, `delete_dashboard`, the helper tools other than `list_helpers`, and the three KNX entity tools use Home Assistant internals that have no stable API, so a Home Assistant update can break them. The helper tools only manage helpers created in the UI, not ones defined in YAML.
 

@@ -48,6 +48,26 @@ APPDAEMON_SHARED_ROOTS = ("/share/", "/media/")
 CONF_SERVER_NAME = "server_name"
 DEFAULT_SERVER_NAME = "home-assistant-mcp-server"
 
+# What the initialize result tells a client's model about using the server, so it
+# starts with the right tool rather than exploring. Every tool it names is
+# read-only and not behind an option; tests/test_http.py holds it to that.
+SERVER_INSTRUCTIONS = (
+    "Tools for the owner's Home Assistant. Answer in as few calls as you can: go "
+    "straight to the tool for the kind of question.\n"
+    "- The state of something by name or room ('are the office lights on?', 'how warm "
+    "is the bedroom?'): search_entities with plain words such as 'office lights'. It "
+    "matches names, aliases, rooms, floors and devices in any order and returns current "
+    "states, so there is no need to look up areas or entity IDs first.\n"
+    "- Several entities whose IDs you already know: batch_get_state.\n"
+    "- Why something did or did not happen: get_logbook and get_history for what "
+    "changed and when, list_traces and get_trace for what an automation or script did.\n"
+    "- Where an entity, service or name is used in automations, scripts, scenes or "
+    "dashboards: search_config.\n"
+    "- Energy use and other long-term figures: get_statistics.\n"
+    "Which tools are offered depends on what the owner allows, so one named here may "
+    "be missing."
+)
+
 
 def validate_server_name(value: str) -> str:
     """Validate the client-facing server name."""

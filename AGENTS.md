@@ -100,10 +100,13 @@ them; read them on the event loop, since a function passed to
 `async_add_executor_job` does not see them. Pass `context=caller_context()` to a
 service call or event that is the change the caller asked for, as `call_service`,
 `fire_event` and `restart_ha` do: Home Assistant then records the user against the
-change and checks the call against that user's permissions. Leave it off a service
-call that is the tool's own plumbing, such as the reload after a YAML write or the
-`recorder.get_statistics` read. Both are admin-only, so for a non-administrator
-the reload would be refused after the file has already changed.
+change, and checks a service call against that user's permissions. An event is
+not checked. A refusal only reaches the handler when the call is awaited, so a
+tool that calls with `blocking=False`, as `restart_ha` does, checks the caller
+itself first. Leave the context off a service call that is the tool's own
+plumbing, such as the reload after a YAML write or the `recorder.get_statistics`
+read. Most of those are admin-only, so for a non-administrator the reload would be
+refused after the file has already changed.
 
 `call_tool` and `get_tool_schemas` also apply the two options that limit the tool
 set: read-only mode and the list of disabled tools. Read-only mode goes by the

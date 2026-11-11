@@ -44,7 +44,7 @@ The integration sends nothing anywhere on its own. What the assistant reads thro
 
 ### Can other people in my household use it?
 
-Only administrators can connect by default. You can lift that, but then any user with a token has the same reach through the tools as an administrator, apart from the actions a tool calls as that user, which Home Assistant checks against their own permissions. See [Security and auditing](security.md#authorization).
+Only administrators can connect by default. You can lift that, but then any user with a token has the same reach through the tools as an administrator, apart from the actions `call_service` and `restart_ha` call as that user, which Home Assistant checks against their own permissions. See [Security and auditing](security.md#authorization).
 
 ## Using it
 

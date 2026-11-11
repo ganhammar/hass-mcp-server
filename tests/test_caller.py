@@ -129,3 +129,24 @@ async def test_a_caller_set_in_one_task_is_not_seen_by_another():
 
     assert seen_meanwhile is None
     assert await asyncio.create_task(peek()) is None
+
+
+async def test_a_task_that_outlives_the_call_sees_no_caller_once_it_has_ended():
+    caller = _caller()
+    call_ended = asyncio.Event()
+    seen = {}
+
+    async def background():
+        seen["during"] = current_caller()
+        await call_ended.wait()
+        seen["after"] = current_caller()
+        seen["context_after"] = caller_context()
+
+    with acting_as(caller):
+        task = asyncio.create_task(background())
+        await asyncio.sleep(0)
+
+    call_ended.set()
+    await task
+
+    assert seen == {"during": caller, "after": None, "context_after": None}

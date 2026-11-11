@@ -41,6 +41,7 @@ from pytest_homeassistant_custom_component.common import (
     MockModule,
     MockUser,
     async_capture_events,
+    async_mock_service,
     mock_config_flow,
     mock_integration,
     mock_platform,
@@ -272,6 +273,43 @@ async def test_home_assistant_applies_the_callers_own_permissions(
     assert result["isError"] is True
     assert "Unauthorized" in result["content"][0]["text"]
     assert hass.states.get("input_boolean.mcp_e2e").state == "off"
+
+
+async def test_a_non_administrator_is_told_the_restart_was_refused(
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_read_only_access_token: str,
+) -> None:
+    """The restart is not awaited, so the tool refuses a non-administrator itself."""
+    assert await async_setup_component(hass, "http", {})
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_NATIVE_AUTH: True, CONF_REQUIRE_ADMIN: False})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    restarts = async_mock_service(hass, "homeassistant", "restart")
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client_no_auth()
+
+    resp = await client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "restart_ha", "arguments": {"confirm": True}},
+            "id": 1,
+        },
+        headers={"Authorization": f"Bearer {hass_read_only_access_token}"},
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    result = (await resp.json())["result"]
+    assert result["isError"] is True
+    assert "administrator" in result["content"][0]["text"]
+    assert restarts == []
+    (event,) = events
+    assert event.data["outcome"] == "error"
 
 
 async def test_a_read_only_tool_fires_no_audit_event(

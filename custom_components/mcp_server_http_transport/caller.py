@@ -11,9 +11,10 @@ for one request is never seen by another, including one served at the same time.
 in the same task sees no caller. The value holds across every ``await`` in the
 call. A function handed to ``hass.async_add_executor_job`` runs in a thread
 without the context and sees no caller, so a handler reads it before handing work
-off. A task created during the call starts with a copy of the context and still
-sees the caller after the call has ended, so only code that runs as part of the
-call should rely on it.
+off. A task or timer created during the call starts with a copy of the context
+and can outlive the call by far, an integration set up by a tool keeps its timers
+until it is reloaded, so the call is marked as ended when it finishes and reads
+no caller from then on, in every copy.
 """
 
 from collections.abc import Iterator
@@ -42,10 +43,13 @@ class Caller:
     scopes: frozenset[str] = frozenset()
 
 
-@dataclass(frozen=True)
+@dataclass
 class _ActiveCall:
+    """A tool call in progress. ``ended`` is set when it finishes."""
+
     caller: Caller
     context: Context
+    ended: bool = False
 
 
 _ACTIVE_CALL: ContextVar[_ActiveCall | None] = ContextVar(
@@ -62,16 +66,23 @@ def acting_as(caller: Caller) -> Iterator[Context]:
     makes and the audit event for it share one context ID.
     """
     context = Context(user_id=caller.user_id)
-    token = _ACTIVE_CALL.set(_ActiveCall(caller, context))
+    call = _ActiveCall(caller, context)
+    token = _ACTIVE_CALL.set(call)
     try:
         yield context
     finally:
+        call.ended = True
         _ACTIVE_CALL.reset(token)
+
+
+def _running_call() -> _ActiveCall | None:
+    active = _ACTIVE_CALL.get()
+    return active if active is not None and not active.ended else None
 
 
 def current_caller() -> Caller | None:
     """Return the caller the running tool call acts for, or None outside a call."""
-    active = _ACTIVE_CALL.get()
+    active = _running_call()
     return active.caller if active is not None else None
 
 
@@ -82,5 +93,5 @@ def caller_context() -> Context | None:
     ``hass.bus.async_fire``, so Home Assistant attributes what follows to the
     caller. None outside a call is what both take by default.
     """
-    active = _ACTIVE_CALL.get()
+    active = _running_call()
     return active.context if active is not None else None

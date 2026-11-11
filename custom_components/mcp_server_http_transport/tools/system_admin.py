@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from . import (
     ANNOTATION_DESTRUCTIVE,
     ANNOTATION_READ_ONLY,
+    caller_context,
     dumps,
     error_result,
     register_tool,
@@ -217,7 +218,9 @@ async def restart_ha(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
         )
 
     try:
-        await hass.services.async_call("homeassistant", "restart", blocking=False)
+        await hass.services.async_call(
+            "homeassistant", "restart", blocking=False, context=caller_context()
+        )
         return {"content": [{"type": "text", "text": "Home Assistant restart has been initiated"}]}
     except Exception as e:
         _LOGGER.error("Error restarting Home Assistant: %s", e)

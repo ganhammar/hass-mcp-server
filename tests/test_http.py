@@ -21,6 +21,7 @@ from custom_components.mcp_server_http_transport.const import (
 )
 from custom_components.mcp_server_http_transport.http import (
     ARGUMENTS_PREVIEW_CHARS,
+    CLIENT_ID_PREVIEW_CHARS,
     REGISTERED_ENDPOINT,
     REGISTERED_ROUTES,
     SECRET_MASK,
@@ -41,7 +42,13 @@ from custom_components.mcp_server_http_transport.http import (
     truncate_arguments,
 )
 from custom_components.mcp_server_http_transport.json_utils import dumps
-from custom_components.mcp_server_http_transport.tools import TOOLS, call_tool, error_result
+from custom_components.mcp_server_http_transport.tools import (
+    TOOLS,
+    call_tool,
+    caller_context,
+    current_caller,
+    error_result,
+)
 
 # What a validated bearer token resolves to; the view then looks its user up.
 TOKEN = ValidatedToken(sub="user123", auth_method="native")
@@ -1732,6 +1739,15 @@ class TestToolAuditLog:
     """Each tools/call leaves one log line, and a call that can change something an event."""
 
     CALLER = Caller(user_id="user123", auth_method="oidc", user=_user())
+    # A client that signs in with a Client ID Metadata Document is named by its URL.
+    CLIENT_ID = "https://app.example.com/oauth/client.json"
+    APP_CALLER = Caller(
+        user_id="user123",
+        auth_method="oidc",
+        user=_user(),
+        client_id=CLIENT_ID,
+        scopes=frozenset({"openid"}),
+    )
 
     @pytest.fixture
     def audit_hass(self):
@@ -1743,14 +1759,14 @@ class TestToolAuditLog:
     def view(self, audit_hass):
         return MCPEndpointView(audit_hass)
 
-    async def _call(self, view, name, arguments, handler=None, schema=None):
+    async def _call(self, view, name, arguments, handler=None, schema=None, caller=None):
         """POST one tools/call, optionally standing a handler in for the tool's own."""
         request = _jsonrpc_request("tools/call", {"name": name, "arguments": arguments})
         tools = {}
         if handler is not None:
             tools[name] = {"schema": schema or TOOLS[name]["schema"], "handler": handler}
         with (
-            patch.object(view, "_authenticate", return_value=self.CALLER),
+            patch.object(view, "_authenticate", return_value=caller or self.CALLER),
             patch.dict(TOOLS, tools),
         ):
             response = await view.post(request)
@@ -1921,6 +1937,7 @@ class TestToolAuditLog:
             "tool": "call_service",
             "user_id": "user123",
             "auth_method": "oidc",
+            "client_id": None,
             "outcome": "ok",
             "arguments": {
                 "domain": "lock",
@@ -1966,3 +1983,276 @@ class TestToolAuditLog:
             await view.post(request)
 
         assert self._audit_records(caplog) == []
+
+    async def test_the_client_is_named_in_the_log_line(self, view, caplog):
+        handler = AsyncMock(return_value={"content": []})
+
+        with caplog.at_level(logging.INFO, logger=_HTTP_LOGGER):
+            await self._call(
+                view,
+                "call_service",
+                {"domain": "light", "service": "turn_on"},
+                handler,
+                caller=self.APP_CALLER,
+            )
+
+        (record,) = self._audit_records(caplog)
+        expected = f'by user user123 (oidc auth, client "{self.CLIENT_ID}"): call_service -> ok'
+        assert record.getMessage().startswith(f"MCP tool call {expected}")
+
+    async def test_a_call_without_a_client_names_none(self, view, caplog):
+        handler = AsyncMock(return_value={"content": []})
+
+        with caplog.at_level(logging.INFO, logger=_HTTP_LOGGER):
+            await self._call(view, "call_service", {"domain": "light", "service": "t"}, handler)
+
+        (record,) = self._audit_records(caplog)
+        assert "client" not in record.getMessage()
+        assert record.getMessage().startswith("MCP tool call by user user123 (oidc auth): ")
+
+    async def test_the_event_carries_the_client(self, view, audit_hass):
+        handler = AsyncMock(return_value={"content": []})
+
+        await self._call(
+            view,
+            "call_service",
+            {"domain": "light", "service": "turn_on"},
+            handler,
+            caller=self.APP_CALLER,
+        )
+
+        (event,) = self._audit_events(audit_hass)
+        assert event.args[1]["client_id"] == self.CLIENT_ID
+
+    async def test_a_client_id_cannot_forge_a_log_line(self, view, caplog):
+        client_id = 'x"): restart_ha -> ok\nMCP tool call by user admin (native auth): x'
+        caller = Caller(user_id="user123", auth_method="oidc", user=_user(), client_id=client_id)
+        handler = AsyncMock(return_value={"content": []})
+
+        with caplog.at_level(logging.INFO, logger=_HTTP_LOGGER):
+            await self._call(
+                view, "call_service", {"domain": "light", "service": "t"}, handler, caller=caller
+            )
+
+        (record,) = self._audit_records(caplog)
+        assert "\n" not in record.getMessage()
+        assert dumps(client_id) in record.getMessage()
+
+    async def test_an_overlong_client_id_is_cut_in_the_record(self, view, audit_hass, caplog):
+        client_id = "https://example.com/" + "x" * 5_000
+        caller = Caller(user_id="user123", auth_method="oidc", user=_user(), client_id=client_id)
+        handler = AsyncMock(return_value={"content": []})
+
+        with caplog.at_level(logging.INFO, logger=_HTTP_LOGGER):
+            await self._call(
+                view, "call_service", {"domain": "light", "service": "t"}, handler, caller=caller
+            )
+
+        (event,) = self._audit_events(audit_hass)
+        assert event.args[1]["client_id"] == client_id[:CLIENT_ID_PREVIEW_CHARS]
+        assert client_id not in caplog.text
+        assert dumps(client_id[:CLIENT_ID_PREVIEW_CHARS]) in caplog.text
+
+    async def test_the_event_shares_the_context_the_tool_ran_under(self, view, audit_hass):
+        seen = []
+
+        async def handler(hass, arguments):
+            seen.append(caller_context())
+            return {"content": []}
+
+        await self._call(view, "call_service", {"domain": "light", "service": "t"}, handler)
+
+        (event,) = self._audit_events(audit_hass)
+        (context,) = seen
+        assert event.kwargs["context"] is context
+        assert context.user_id == "user123"
+
+    async def test_an_invalid_call_is_audited_under_a_context_of_the_caller(self, view, audit_hass):
+        await self._call(view, "call_service", {"domain": "light"})
+
+        (event,) = self._audit_events(audit_hass)
+        assert event.kwargs["context"].user_id == "user123"
+
+
+class TestTokenClaims:
+    """The caller carries the OAuth client and scopes from the token's claims."""
+
+    @pytest.fixture
+    def claims_hass(self):
+        claims_hass = Mock()
+        claims_hass.data = {DOMAIN: {"entry_id": Mock()}}
+        claims_hass.auth.async_get_user = AsyncMock(return_value=_user())
+        claims_hass.auth.async_validate_access_token = Mock(return_value=None)
+        return claims_hass
+
+    @pytest.fixture
+    def validator(self):
+        import sys
+
+        validator = sys.modules["custom_components.oidc_provider.token_validator"]
+        original = validator.validate_access_token.return_value
+        yield validator
+        validator.validate_access_token.return_value = original
+
+    async def _validate(self, hass, claims, validator):
+        validator.validate_access_token.return_value = claims
+        request = Mock(path=MCP_PATH)
+        request.headers = {"Authorization": "Bearer oidc_token"}
+        return await MCPEndpointView(hass)._validate_token(request)
+
+    async def test_client_id_and_scope_are_read(self, claims_hass, validator):
+        claims = {"sub": "u", "client_id": "https://claude.ai/x", "scope": "openid  mcp:read"}
+
+        token = await self._validate(claims_hass, claims, validator)
+
+        assert token == ValidatedToken(
+            sub="u",
+            auth_method="oidc",
+            client_id="https://claude.ai/x",
+            scopes=frozenset({"openid", "mcp:read"}),
+        )
+
+    async def test_azp_names_the_client_when_client_id_is_absent(self, claims_hass, validator):
+        token = await self._validate(claims_hass, {"sub": "u", "azp": "client-a"}, validator)
+
+        assert token.client_id == "client-a"
+
+    async def test_client_id_wins_over_azp(self, claims_hass, validator):
+        claims = {"sub": "u", "client_id": "client-a", "azp": "client-b"}
+
+        token = await self._validate(claims_hass, claims, validator)
+
+        assert token.client_id == "client-a"
+
+    async def test_a_scope_list_is_read(self, claims_hass, validator):
+        claims = {"sub": "u", "scope": ["openid", "", 3, "mcp:read"]}
+
+        token = await self._validate(claims_hass, claims, validator)
+
+        assert token.scopes == frozenset({"openid", "mcp:read"})
+
+    @pytest.mark.parametrize(
+        "claims",
+        [
+            {"sub": "u"},
+            {"sub": "u", "client_id": "", "scope": ""},
+            {"sub": "u", "client_id": 7, "azp": None, "scope": {"openid": True}},
+        ],
+    )
+    async def test_missing_or_malformed_claims_give_no_client_and_no_scopes(
+        self, claims_hass, validator, claims
+    ):
+        token = await self._validate(claims_hass, claims, validator)
+
+        assert token == ValidatedToken(sub="u", auth_method="oidc")
+        assert token.scopes == frozenset()
+
+    async def test_a_long_lived_token_has_no_client_and_no_scopes(self, claims_hass, validator):
+        refresh_token = Mock()
+        refresh_token.user.id = "ha_user"
+        claims_hass.auth.async_validate_access_token.return_value = refresh_token
+        view = MCPEndpointView(claims_hass, native_auth_enabled=True)
+        request = Mock(path=MCP_PATH)
+        request.headers = {"Authorization": "Bearer llat"}
+        validator.validate_access_token.return_value = None
+
+        token = await view._validate_token(request)
+
+        assert token.client_id is None
+        assert token.scopes == frozenset()
+
+    async def test_the_caller_carries_them(self, claims_hass):
+        token = ValidatedToken(
+            sub="user123", auth_method="oidc", client_id="c", scopes=frozenset({"openid"})
+        )
+        view = MCPEndpointView(claims_hass)
+
+        with patch.object(view, "_validate_token", return_value=token):
+            caller = await view._authenticate(_jsonrpc_request("initialize"))
+
+        assert caller.client_id == "c"
+        assert caller.scopes == frozenset({"openid"})
+
+
+class TestCallerDuringToolCall:
+    """A handler sees the caller of the request it serves, and nothing outside one."""
+
+    @pytest.fixture
+    def call_hass(self):
+        call_hass = Mock()
+        call_hass.data = {DOMAIN: {"entry_id": Mock()}}
+        return call_hass
+
+    @staticmethod
+    def _caller(user_id: str) -> Caller:
+        return Caller(user_id=user_id, auth_method="oidc", user=_user(), client_id=f"app-{user_id}")
+
+    async def _post(self, view, caller, handler):
+        request = _jsonrpc_request(
+            "tools/call", {"name": "call_service", "arguments": {"domain": "a", "service": "b"}}
+        )
+        tool = {"schema": TOOLS["call_service"]["schema"], "handler": handler}
+        with (
+            patch.object(view, "_authenticate", return_value=caller),
+            patch.dict(TOOLS, {"call_service": tool}),
+        ):
+            return json.loads((await view.post(request)).body)
+
+    async def test_the_handler_sees_the_caller(self, call_hass):
+        seen = []
+
+        async def handler(hass, arguments):
+            seen.append((current_caller(), caller_context()))
+            return {"content": []}
+
+        caller = self._caller("anna")
+        await self._post(MCPEndpointView(call_hass), caller, handler)
+
+        ((seen_caller, seen_context),) = seen
+        assert seen_caller is caller
+        assert seen_context.user_id == "anna"
+
+    async def test_nothing_is_left_behind_after_the_call(self, call_hass):
+        async def handler(hass, arguments):
+            return {"content": []}
+
+        await self._post(MCPEndpointView(call_hass), self._caller("anna"), handler)
+
+        assert current_caller() is None
+        assert caller_context() is None
+
+    async def test_nothing_is_left_behind_after_a_handler_raises(self, call_hass):
+        async def handler(hass, arguments):
+            raise RuntimeError("boom")
+
+        body = await self._post(MCPEndpointView(call_hass), self._caller("anna"), handler)
+
+        assert body["result"]["isError"] is True
+        assert current_caller() is None
+
+    async def test_concurrent_requests_each_see_their_own_caller(self, call_hass):
+        import asyncio
+
+        view = MCPEndpointView(call_hass)
+        both_running = asyncio.Barrier(2)
+        seen = {}
+
+        async def handler(hass, arguments):
+            before = current_caller()
+            await both_running.wait()
+            seen[before.user_id] = (current_caller(), caller_context().user_id)
+            return {"content": []}
+
+        anna, bob = self._caller("anna"), self._caller("bob")
+        tool = {"schema": TOOLS["call_service"]["schema"], "handler": handler}
+        request = {"name": "call_service", "arguments": {"domain": "a", "service": "b"}}
+
+        async def post(caller):
+            message = {"jsonrpc": "2.0", "method": "tools/call", "params": request, "id": 1}
+            return await view._handle_message(message, caller)
+
+        with patch.dict(TOOLS, {"call_service": tool}):
+            await asyncio.gather(post(anna), post(bob))
+
+        assert seen == {"anna": (anna, "anna"), "bob": (bob, "bob")}
+        assert current_caller() is None

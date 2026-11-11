@@ -29,11 +29,16 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    MockUser,
+    async_capture_events,
+)
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.mcp_server_http_transport.const import (
     DOMAIN,
+    EVENT_TOOL_CALLED,
     MCP_HTTP_PATH,
     MCP_PATH,
 )
@@ -94,6 +99,7 @@ def _sign(
     sub: str,
     iss: str = TOKEN_ISSUER,
     exp_offset: int = 3600,
+    claims: dict | None = None,
 ) -> str:
     """Sign an access token the provider would issue, with controllable claims.
 
@@ -101,7 +107,7 @@ def _sign(
     subject, and the server resolves that user before serving the request.
     """
     now = int(time.time())
-    payload = {"sub": sub, "iat": now, "exp": now + exp_offset, "iss": iss}
+    payload = {"sub": sub, "iat": now, "exp": now + exp_offset, "iss": iss, **(claims or {})}
     if aud is not None:
         payload["aud"] = aud
     pem = private_key.private_bytes(
@@ -286,3 +292,40 @@ async def test_a_token_for_an_unknown_user_is_refused(
     resp = await _post_initialize(client, token)
 
     assert resp.status == 403
+
+
+async def test_the_tokens_client_reaches_the_audit_event(
+    oidc_ready: rsa.RSAPrivateKey,
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_admin_user: MockUser,
+) -> None:
+    """The client and user a real validated token names are the ones the audit trail records."""
+    client_id = "https://app.example.com/oauth/client.json"
+    events = async_capture_events(hass, EVENT_TOOL_CALLED)
+    client = await hass_client_no_auth()
+    token = _sign(
+        oidc_ready,
+        aud=RESOURCE,
+        sub=hass_admin_user.id,
+        claims={"client_id": client_id, "azp": client_id, "scope": "openid profile"},
+    )
+
+    resp = await client.post(
+        MCP_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "fire_event", "arguments": {"event_type": "mcp_e2e_oidc"}},
+            "id": 1,
+        },
+        headers={**FORWARDED, "Authorization": f"Bearer {token}"},
+    )
+    await hass.async_block_till_done()
+
+    assert resp.status == 200
+    (event,) = events
+    assert event.data["client_id"] == client_id
+    assert event.data["auth_method"] == "oidc"
+    assert event.data["user_id"] == hass_admin_user.id
+    assert event.context.user_id == hass_admin_user.id

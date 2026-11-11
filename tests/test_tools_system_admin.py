@@ -2,7 +2,7 @@
 
 import json
 import tempfile
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 
@@ -353,6 +353,11 @@ class TestToolsSystemAdmin:
         assert "isError" not in body["result"]
         text = body["result"]["content"][0]["text"]
         assert "restart has been initiated" in text
+        mock_hass.services.async_call.assert_awaited_once_with(
+            "homeassistant", "restart", blocking=False, context=ANY
+        )
+        context = mock_hass.services.async_call.call_args.kwargs["context"]
+        assert context.user_id == CALLER.user_id
 
     async def test_post_tools_call_restart_ha_not_confirmed(self, view, mock_hass):
         """Test POST with tools/call for restart_ha with confirm=false."""

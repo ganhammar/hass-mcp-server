@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from homeassistant.core import SupportsResponse
@@ -176,8 +176,12 @@ class TestToolsEntities:
             "turn_on",
             {"brightness": 255, "entity_id": "light.living_room"},
             blocking=True,
+            context=ANY,
             return_response=False,
         )
+        # Home Assistant records the change as made by the calling user.
+        context = mock_hass.services.async_call.call_args.kwargs["context"]
+        assert context.user_id == CALLER.user_id
 
     async def test_post_tools_call_service_returns_response_data(self, view, mock_hass):
         """A service that only exists to return data must return it.
@@ -221,6 +225,7 @@ class TestToolsEntities:
             "get_events",
             {"entity_id": "calendar.family"},
             blocking=True,
+            context=ANY,
             return_response=True,
         )
 
@@ -332,6 +337,7 @@ class TestToolsEntities:
             "no_such_service",
             {},
             blocking=True,
+            context=ANY,
             return_response=False,
         )
 

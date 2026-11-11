@@ -7,7 +7,7 @@ HTTP POST → token validation → JSON-RPC dispatch → module handler → resp
 
 import json
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, call, patch
+from unittest.mock import ANY, AsyncMock, Mock, call, patch
 
 import pytest
 from homeassistant.core import SupportsResponse
@@ -488,6 +488,7 @@ class TestMCPClientSession:
             "turn_on",
             {"brightness": 128, "transition": 2, "entity_id": "light.bedroom"},
             blocking=True,
+            context=ANY,
             return_response=False,
         )
 
@@ -1300,7 +1301,7 @@ class TestMCPClientSession:
         )
         assert "Successfully fired event" in result["result"]["content"][0]["text"]
         assert _fired_by_tool(populated_hass.bus.async_fire) == [
-            call("test_event", {"source": "test"})
+            call("test_event", {"source": "test"}, context=ANY)
         ]
 
     async def test_search_entities_by_query(self, view, populated_hass, mock_entity_registry):

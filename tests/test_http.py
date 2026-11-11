@@ -57,6 +57,9 @@ from custom_components.mcp_server_http_transport.tools import (
 # What a validated bearer token resolves to; the view then looks its user up.
 TOKEN = ValidatedToken(sub="user123", auth_method="native")
 
+# What a client that speaks only 2024-11-05 sends with initialize.
+INIT_2024 = {"protocolVersion": "2024-11-05"}
+
 _MANIFEST = Path(__file__).resolve().parents[1] / "custom_components" / DOMAIN / "manifest.json"
 
 
@@ -352,7 +355,9 @@ class TestMCPEndpointView:
         """Test POST with initialize request."""
         request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 1})
+        request.json = AsyncMock(
+            return_value={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 1}
+        )
 
         with patch.object(view, "_validate_token", return_value=TOKEN):
             response = await view.post(request)
@@ -398,7 +403,9 @@ class TestMCPEndpointView:
         """The instructions are what point the model at the right tool to start with."""
         request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 22})
+        request.json = AsyncMock(
+            return_value={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 22}
+        )
 
         with patch.object(view, "_validate_token", return_value=TOKEN):
             response = await view.post(request)
@@ -929,7 +936,9 @@ class TestNativeAuth:
 
         request = Mock(path=MCP_PATH)
         request.headers = {"Authorization": "Bearer my_llat"}
-        request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 1})
+        request.json = AsyncMock(
+            return_value={"jsonrpc": "2.0", "method": "initialize", "params": INIT_2024, "id": 1}
+        )
 
         response = await view.post(request)
 

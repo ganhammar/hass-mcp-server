@@ -269,7 +269,7 @@ class TestMCPClientSession:
     async def test_full_session_lifecycle(self, view, list_every_tool):
         """Test a complete MCP session: initialize → discover → use."""
         # Step 1: Initialize
-        result = await self._call(view, "initialize")
+        result = await self._call(view, "initialize", {"protocolVersion": "2024-11-05"})
         assert result["result"]["protocolVersion"] == "2024-11-05"
         caps = result["result"]["capabilities"]
         assert "tools" in caps

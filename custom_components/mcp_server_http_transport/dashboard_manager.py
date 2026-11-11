@@ -21,6 +21,10 @@ _MAX_CARD_DEPTH = 6
 _MAX_SUMMARY_ENTITIES = 10
 
 
+class DashboardNotFound(ValueError):
+    """No dashboard is registered under the URL path."""
+
+
 def _register_panel(
     hass: HomeAssistant,
     url_path: str,
@@ -88,7 +92,7 @@ async def get_dashboard_config(hass: HomeAssistant, url_path: str) -> dict[str, 
     dashboards = hass.data[LOVELACE_DATA].dashboards
 
     if key not in dashboards:
-        raise ValueError(f"Dashboard '{url_path}' not found")
+        raise DashboardNotFound(f"Dashboard '{url_path}' not found")
 
     dashboard = dashboards[key]
     try:
@@ -151,7 +155,7 @@ async def save_dashboard_config(hass: HomeAssistant, url_path: str, config: dict
     dashboards = hass.data[LOVELACE_DATA].dashboards
 
     if key not in dashboards:
-        raise ValueError(f"Dashboard '{url_path}' not found")
+        raise DashboardNotFound(f"Dashboard '{url_path}' not found")
 
     dashboard = dashboards[key]
     try:
@@ -328,7 +332,7 @@ async def delete_dashboard_config(hass: HomeAssistant, url_path: str) -> None:
     dashboards = hass.data[LOVELACE_DATA].dashboards
 
     if key not in dashboards:
-        raise ValueError(f"Dashboard '{url_path}' not found")
+        raise DashboardNotFound(f"Dashboard '{url_path}' not found")
 
     dashboard = dashboards[key]
     try:

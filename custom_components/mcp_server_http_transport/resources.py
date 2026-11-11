@@ -91,6 +91,10 @@ class ResourceNotAvailable(Exception):
     """The caller's access does not include the resource; the transport answers -32602."""
 
 
+class ResourceNotFound(Exception):
+    """No resource exists at the URI; the transport answers with the revision's code for it."""
+
+
 def resource_key(uri: Any) -> str | None:
     """Return the URI or URI template in RESOURCE_AREAS that a requested URI reads, or None.
 
@@ -124,7 +128,14 @@ def get_resources() -> dict[str, Any]:
     """Return the resources and resource templates the client making the request can read."""
     return {
         "resources": [r for r in RESOURCES if _withheld(r["uri"]) is None],
-        "resourceTemplates": [t for t in RESOURCE_TEMPLATES if _withheld(t["uriTemplate"]) is None],
+        **get_resource_templates(),
+    }
+
+
+def get_resource_templates() -> dict[str, Any]:
+    """Return the resource templates the client making the request can read."""
+    return {
+        "resourceTemplates": [t for t in RESOURCE_TEMPLATES if _withheld(t["uriTemplate"]) is None]
     }
 
 
@@ -132,7 +143,7 @@ async def read_resource(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
     """Read a resource by URI.
 
     A resource the caller's access does not include raises ResourceNotAvailable
-    before anything is read.
+    before anything is read, and one that does not exist raises ResourceNotFound.
     """
     key = resource_key(uri)
     if key is not None and (reason := _withheld(key)):
@@ -173,7 +184,7 @@ async def read_resource(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
         url_path = uri[len("hass://dashboard/") :]
         return await _read_dashboard(hass, uri, url_path)
 
-    raise ValueError(f"Unknown resource: {uri}")
+    raise ResourceNotFound(f"Unknown resource: {uri}")
 
 
 def _read_config(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
@@ -215,9 +226,12 @@ def _read_areas(hass: HomeAssistant, uri: str) -> list[dict[str, Any]]:
 
 async def _read_dashboard(hass: HomeAssistant, uri: str, url_path: str) -> list[dict[str, Any]]:
     """Read a dashboard configuration as a resource."""
-    from .dashboard_manager import get_dashboard_config
+    from .dashboard_manager import DashboardNotFound, get_dashboard_config
 
-    config = await get_dashboard_config(hass, url_path)
+    try:
+        config = await get_dashboard_config(hass, url_path)
+    except DashboardNotFound as err:
+        raise ResourceNotFound(str(err)) from err
     return [
         {
             "uri": uri,
@@ -283,7 +297,7 @@ def _read_entity(hass: HomeAssistant, uri: str, entity_id: str) -> list[dict[str
     state = hass.states.get(entity_id)
 
     if state is None:
-        raise ValueError(f"Entity {entity_id} not found")
+        raise ResourceNotFound(f"Entity {entity_id} not found")
 
     data = {
         "entity_id": state.entity_id,

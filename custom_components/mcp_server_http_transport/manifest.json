@@ -11,5 +11,5 @@
   "issue_tracker": "https://github.com/ganhammar/hass-mcp-server/issues",
   "requirements": ["python-dateutil>=2.9.0"],
   "single_config_entry": true,
-  "version": "2.1.0"
+  "version": "2.2.0"
 }

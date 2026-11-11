@@ -10,6 +10,12 @@ from pathlib import Path
 import pytest
 
 from custom_components.mcp_server_http_transport import tools
+from custom_components.mcp_server_http_transport.access import (
+    AREAS,
+    LEVEL_TITLES,
+    PROMPT_AREAS,
+    RESOURCE_AREAS,
+)
 from custom_components.mcp_server_http_transport.prompts import get_prompts
 from custom_components.mcp_server_http_transport.resources import RESOURCE_TEMPLATES, RESOURCES
 from custom_components.mcp_server_http_transport.tools import TOOLS
@@ -29,6 +35,10 @@ def _section(text: str, heading: str) -> str:
 
 def _first_column(section: str) -> list[str]:
     return re.findall(r"(?m)^\| `([^`]+)` \|", section)
+
+
+def _second_column(section: str) -> dict[str, str]:
+    return dict(re.findall(r"(?m)^\| `([^`]+)` \| ([^|]+?) \|", section))
 
 
 def _anchors(page: Path) -> set[str]:
@@ -63,6 +73,30 @@ class TestToolReference:
         documented = _first_column(_section(self.reference, "Prompts"))
 
         assert sorted(documented) == sorted(prompt["name"] for prompt in get_prompts())
+
+    def test_the_access_column_names_each_tools_area_and_setting(self):
+        documented = _second_column(_section(self.reference, "Tools"))
+
+        expected = {}
+        for name in TOOLS:
+            area, level = tools.tool_access(name)
+            expected[name] = f"{AREAS[area].title}: {LEVEL_TITLES[level]}"
+        assert documented == expected
+
+    def test_the_access_column_names_each_resources_area(self):
+        documented = _second_column(_section(self.reference, "Resources"))
+
+        assert documented == {
+            key: f"{AREAS[area].title}: Read" for key, area in RESOURCE_AREAS.items()
+        }
+
+    def test_the_access_column_names_the_areas_each_prompt_reads(self):
+        documented = _second_column(_section(self.reference, "Prompts"))
+
+        assert documented == {
+            name: "; ".join(AREAS[area].title for area in areas)
+            for name, areas in PROMPT_AREAS.items()
+        }
 
     def test_the_tool_counts_quoted_elsewhere_are_current(self):
         """The README gives the total, and the configuration page how many start hidden."""

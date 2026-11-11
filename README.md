@@ -14,7 +14,7 @@ Things you can ask once it is connected:
 
 - **It administers the whole instance**, not only the entities exposed to Assist as Home Assistant's built-in MCP Server does: 117 tools for automations, dashboards, the registries, integrations, traces and diagnostics. See [how the two differ](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/faq.md#how-is-this-different-from-home-assistants-built-in-mcp-server).
 - **Everyone signs in as themselves.** Clients authenticate through Home Assistant as a real user, with OAuth or a long-lived access token, so there is no shared secret URL and every change is logged with who made it.
-- **You decide how far it reaches.** Read-only mode, a switch for every tool, and opt-ins for the groups that reach furthest. A tool that is off is not even shown to the client.
+- **You decide how far it reaches.** When an app connects, you choose what it may do, from Look only to Administer or area by area. On top of that come read-only mode, a switch for every tool, and opt-ins for the groups that reach furthest. A tool that is off is not even shown to the client.
 - **It is tested on each change** against Home Assistant 2025.6, the oldest supported version, and three newer releases up to 2026.10.
 
 ## Quick start
@@ -23,9 +23,9 @@ Things you can ask once it is connected:
 
 1. **Install.** In HACS, download "MCP Server" and "OIDC Provider", then restart Home Assistant. The OIDC Provider handles the sign-in for Claude; skip it if you will only use long-lived access tokens.
 2. **Add the integrations.** Under Settings > Devices & Services > Add Integration, add "OIDC Provider" first, then "MCP Server (HTTP Transport)".
-3. **Connect Claude.** In Claude, open Settings > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`. Claude sends you to Home Assistant to sign in and approve the connection.
+3. **Connect Claude.** In Claude, open Settings > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`. Claude sends you to Home Assistant to sign in, choose what Claude may do, and approve.
 
-Start in read-only mode if you want to see what it does before letting it change anything. [Connecting a client](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/connecting.md) covers other clients and long-lived access tokens.
+Choose Look only, or start in read-only mode, if you want to see what it does before letting it change anything. [Connecting a client](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/connecting.md) covers other clients and long-lived access tokens.
 
 ## What it can do
 
@@ -47,7 +47,8 @@ The [full reference](https://github.com/ganhammar/hass-mcp-server/blob/main/docs
 
 ## Staying in control
 
-- **Read-only mode** offers only the tools that read. Nothing can be changed.
+- **Access per app.** The consent screen asks what each app may do: Look only, Control devices, Edit the setup or Administer, or None, Read or Full per area. It needs the OIDC Provider release after 1.8.0. A connection from before keeps Administer until you sign it out and connect again.
+- **Read-only mode** offers only the tools that read, to every connection. Nothing can be changed.
 - **Disabled tools** switches off individual tools, such as `restart_ha`.
 - **Opt-in groups** stay off until you enable them: config files, cameras and images, templates, AppDaemon apps and integration management.
 - **The audit log and event** record who called what, with secrets masked.
@@ -59,7 +60,7 @@ See [Configuration](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/
 
 - [Connecting a client](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/connecting.md): Claude on the web, long-lived access tokens
 - [Configuration](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/configuration.md): every option, limiting the tools, the opt-in groups
-- [Security and auditing](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/security.md): who may connect, the audit log and event
+- [Security and auditing](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/security.md): who may connect, what each app may do, the audit log and event
 - [Tools, resources and prompts](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/tools.md): the full reference
 - [FAQ](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/faq.md): what it is, what it can do, and staying safe
 - [Troubleshooting](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/troubleshooting.md): setup problems, path conflicts, IP bans

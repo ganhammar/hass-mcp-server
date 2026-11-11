@@ -93,10 +93,10 @@ tool module and fails when a module is added without one.
 
 A handler learns who called it from `current_caller()` in `tools/__init__.py`: the
 `Caller` with the user, how they authenticated, the OAuth client and the token's
-scopes, or None outside a call. `caller_context()` is the Home Assistant `Context`
-for the call, one per call and carrying the user's ID. The transport sets both
-around each `tools/call` with a context variable, so no handler signature carries
-them; read them on the event loop, since a function passed to
+scopes, or None outside a request. `caller_context()` is the Home Assistant
+`Context` for the request, one per request and carrying the user's ID. The
+transport sets both around each JSON-RPC request with a context variable, so no
+handler signature carries them; read them on the event loop, since a function passed to
 `async_add_executor_job` does not see them. Pass `context=caller_context()` to a
 service call or event that is the change the caller asked for, as `call_service`,
 `fire_event` and `restart_ha` do: Home Assistant then records the user against the
@@ -109,14 +109,26 @@ read. Most of those are admin-only, so for a non-administrator the reload would 
 refused after the file has already changed.
 
 `call_tool` and `get_tool_schemas` also apply the two options that limit the tool
-set: read-only mode and the list of disabled tools. Read-only mode goes by the
-`readOnlyHint` annotation and nothing else, which makes the annotation a security
-boundary. Give every tool an annotation, and use `ANNOTATION_READ_ONLY` only for a
+set, read-only mode and the list of disabled tools, and then the access the
+caller's token grants. Read-only mode goes by the `readOnlyHint` annotation and
+nothing else, which makes the annotation a security boundary, and so does the
+access: a read-only tool needs only Read in its area. Give every tool an annotation, and use `ANNOTATION_READ_ONLY` only for a
 tool that cannot change anything. A tool that previews by default but can apply
 the change is not read-only. A withheld tool raises `ToolNotAvailable`, an
 `InvalidToolRequest`, so it never reaches the handler. The list of disabled
 tools is stored by name, so renaming a tool silently switches it back on for
 anyone who had disabled it.
+
+A new tool, resource or prompt also needs a place in `access.py`, the table both
+the consent screen description (`oidc_provider.py`) and the enforcement work from.
+A tool goes in `_TOOLS_BY_AREA` under the area whose things it reads or changes, and
+its `readOnlyHint` decides whether it needs Read or Full there. A resource goes in
+`RESOURCE_AREAS`, and a prompt in `PROMPT_AREAS` with every area whose data it puts
+into its text. `tests/test_access.py` fails when one is missing, and a caller limited
+by scopes is never offered one that is. A handler that reads across areas, as
+`search_config` does, checks `tool_unavailable_reason` or `may_read` for each part
+and leaves out what the caller may not read. A service a tool calls with names the
+caller chose goes through `service_refusal` first, as `call_service` does.
 
 A new tool, resource or prompt needs a row in `docs/tools.md`, which is written
 by hand so each can be described for a person rather than for the model.

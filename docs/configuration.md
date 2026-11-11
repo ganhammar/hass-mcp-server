@@ -23,17 +23,19 @@ Everything here is set when you add the integration and can be changed later und
 
 ## Limiting the tools
 
-Two options decide which tools a client is offered at all. A tool they withhold is left out of the tool list and refused if a client calls it anyway.
+Two options decide which tools a client is offered at all. A tool they withhold is left out of the tool list and refused if a client calls it anyway. They apply to every connection, whatever it was granted when it connected.
 
 - **Read-only mode** keeps only the tools that read: listing, searching, and fetching state, history, configuration and logs. Everything that can change something is withheld, including `call_service`.
 - **Disabled tools** switches off individual tools by name, for example `restart_ha`.
 
 A tool whose own option is off is left out of the list as well, and so are the KNX tools while KNX is not set up. On a default setup that is 35 of the 117 tools, which a client would otherwise carry in its context without being able to use them.
 
+An application that connects through the OIDC Provider can be limited further, per connection: the consent screen asks what it may do, as a level such as Look only or area by area. See [Choosing what an application may do](security.md#choosing-what-an-application-may-do). The options stay the outer limit: no choice there turns on a tool they keep off. In read-only mode the consent screen offers nothing above Read.
+
 Worth knowing:
 
 - A client usually reads the tool list once, when it connects. Reconnect it after changing an option.
-- The limits cover tools only. Resources such as `hass://entities` are still served, so disabling a listing tool does not hide the data it lists.
+- Read-only mode and the disabled tools cover tools only. Resources such as `hass://entities` are still served, so disabling a listing tool does not hide the data it lists. The access chosen on the consent screen covers resources and prompts as well.
 - A call to a withheld tool is logged and fires the audit event, even for a tool that only reads.
 
 ## Template rendering

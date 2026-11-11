@@ -247,6 +247,9 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
     event_type = arguments["event_type"]
     event_data = arguments.get("event_data", {})
 
+    if not isinstance(event_type, str) or not event_type:
+        return error_result("Error: event_type must be a non-empty string")
+
     if event_type in CORE_EVENT_TYPES:
         return error_result(
             f"Error: firing '{event_type}' is not allowed: it is an event Home Assistant "

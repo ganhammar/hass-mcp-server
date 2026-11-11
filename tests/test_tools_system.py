@@ -423,6 +423,14 @@ class TestToolsSystem:
         assert response.status == 200
         return json.loads(response.body)["result"]
 
+    @pytest.mark.parametrize("event_type", [["user_removed"], {"a": 1}, 5, ""])
+    async def test_post_tools_call_fire_event_wants_a_string(self, view, mock_hass, event_type):
+        result = await self._fire(view, mock_hass, event_type)
+
+        assert result["isError"] is True
+        assert result["content"][0]["text"] == "Error: event_type must be a non-empty string"
+        assert _fired_by_tool(mock_hass.bus.async_fire) == []
+
     def test_every_core_event_is_covered_below(self):
         assert CORE_EVENT_TYPES == set(_CORE_EVENTS)
 

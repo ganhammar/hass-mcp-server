@@ -88,10 +88,10 @@ When you update, a connection made before keeps what it could do, which is Admin
 - `core_config_updated`, `component_loaded`, `call_service`, `service_registered`, `service_removed`, `state_changed` and `state_reported`
 - `user_removed`
 - `entity_registry_updated`, `device_registry_updated`, `area_registry_updated`, `floor_registry_updated`, `label_registry_updated` and `category_registry_updated`
-- `logbook_entry`, `automation_triggered` and `script_started`, which write the logbook
+- `logbook_entry`, `automation_triggered` and `script_started`, which write a logbook entry saying something happened or ran, with any name and cause
 - `labs_updated`, which turns a preview feature on or off
 
-The tool also refuses this integration's own `mcp_server_http_transport_` events, so a call cannot forge the audit event. This holds for every caller, administrators included, which makes the tool stricter than Home Assistant's own API on purpose. Every other event fires, your own and those integrations fire for devices, such as `zha_event` or `mobile_app_notification_action`. An automation that triggers on one of those can therefore be set off by anyone who may fire events, so keep that in mind before giving an application Diagnostics at Full.
+The tool also refuses this integration's own `mcp_server_http_transport_` events, so a call cannot forge the audit event. This holds for every caller, administrators included, which makes the tool stricter than Home Assistant's own API on purpose. Every other event fires, your own and those integrations fire for devices, such as `zha_event`, `tag_scanned` or `mobile_app_notification_action`. An automation that triggers on one of those can therefore be set off by anyone who may fire events, so keep that in mind before giving an application Diagnostics at Full.
 
 ## Who made a change
 

@@ -306,8 +306,8 @@ class TestClassifyStateless:
         message = stateless("tools/call")
         assert classify(message, headers_of(stateless_headers(message))) is REVISIONS[0]
 
-    @pytest.mark.parametrize("version", ["2099-01-01", "2025-11-25"])
-    def test_a_revision_this_server_does_not_serve_statelessly_is_unsupported(self, version):
+    @pytest.mark.parametrize("version", ["2099-01-01", "2026-12-01"])
+    def test_a_later_revision_this_server_does_not_have_is_unsupported(self, version):
         message = stateless("tools/list")
         message["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = version
         with pytest.raises(ProtocolError) as err:
@@ -318,6 +318,77 @@ class TestClassifyStateless:
             "message": "Unsupported protocol version",
             "data": {"supported": ["2026-07-28"], "requested": version},
         }
+
+
+class TestClassifyHandshakeClaim:
+    """A _meta claim naming a revision before 2026-07-28 is a request in that revision."""
+
+    @staticmethod
+    def _claiming(version, method="tools/list", **params):
+        message = stateless(method, **params)
+        message["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = version
+        return message
+
+    @pytest.mark.parametrize("version", HANDSHAKE_VERSIONS)
+    def test_the_claim_names_the_revision(self, version):
+        assert classify(self._claiming(version), {}).version == version
+
+    def test_a_header_that_agrees_with_the_claim_passes(self):
+        headers = headers_of({"MCP-Protocol-Version": "2025-06-18"})
+        assert classify(self._claiming("2025-06-18"), headers).version == "2025-06-18"
+
+    @pytest.mark.parametrize("header", ["2025-11-25", STATELESS])
+    def test_a_header_that_disagrees_with_the_claim_is_a_mismatch(self, header):
+        headers = headers_of({"MCP-Protocol-Version": header})
+        with pytest.raises(ProtocolError) as err:
+            classify(self._claiming("2025-06-18"), headers)
+        assert (_code(err), err.value.status) == (HEADER_MISMATCH, 400)
+
+    def test_no_stateless_header_is_required(self):
+        message = self._claiming("2025-11-25", "tools/call", name="get_state")
+        assert classify(message, headers_of({"Mcp-Method": "other"})).version == "2025-11-25"
+
+    def test_an_earlier_revision_this_server_does_not_have_is_unsupported(self):
+        with pytest.raises(ProtocolError) as err:
+            classify(self._claiming("2024-01-01"), {})
+        assert (_code(err), err.value.status) == (UNSUPPORTED_PROTOCOL_VERSION, 400)
+        assert err.value.data == {"supported": list(HANDSHAKE_VERSIONS), "requested": "2024-01-01"}
+
+    def test_initialize_still_negotiates_from_its_params(self):
+        message = self._claiming("2025-11-25", "initialize", protocolVersion="2025-03-26")
+        assert classify(message, {}).version == "2025-03-26"
+
+
+class TestClassifyStatelessNotification:
+    """The revision defines no header rules for a notification; present headers must match."""
+
+    @staticmethod
+    def _notification():
+        return {"jsonrpc": "2.0", "method": "notifications/x", "params": {"_meta": envelope()}}
+
+    @pytest.mark.parametrize(
+        "pairs",
+        [
+            {},
+            {"MCP-Protocol-Version": STATELESS},
+            {"Mcp-Method": "notifications/x"},
+        ],
+    )
+    def test_absent_headers_are_accepted(self, pairs):
+        assert classify(self._notification(), headers_of(pairs)) is REVISIONS[0]
+
+    def test_client_capabilities_are_not_required(self):
+        message = self._notification()
+        del message["params"]["_meta"]["io.modelcontextprotocol/clientCapabilities"]
+        assert classify(message, {}) is REVISIONS[0]
+
+    @pytest.mark.parametrize(
+        "pairs", [{"Mcp-Method": "notifications/y"}, {"MCP-Protocol-Version": "2025-11-25"}]
+    )
+    def test_a_present_header_that_does_not_match_is_a_mismatch(self, pairs):
+        with pytest.raises(ProtocolError) as err:
+            classify(self._notification(), headers_of(pairs))
+        assert (_code(err), err.value.status) == (HEADER_MISMATCH, 400)
 
 
 class TestCheckBatch:
@@ -779,6 +850,33 @@ class TestStateless:
         message["params"]["_meta"] = envelope()
 
         assert await post(view, message, stateless_headers(message)) == (202, None)
+
+    async def test_a_notification_without_its_headers_is_accepted(self, view):
+        message = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}
+        message["params"]["_meta"] = envelope()
+
+        assert await post(view, message) == (202, None)
+
+    async def test_a_notification_whose_method_header_disagrees_is_400(self, view):
+        message = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}
+        message["params"]["_meta"] = envelope()
+
+        status, body = await post(view, message, {"Mcp-Method": "notifications/progress"})
+
+        assert status == 400
+        assert (body["id"], body["error"]["code"]) == (None, HEADER_MISMATCH)
+
+    async def test_a_claim_of_a_handshake_revision_is_served_in_it(self, view, hass):
+        message = stateless("resources/read", uri="hass://entity/light.gone")
+        message["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = "2025-11-25"
+
+        status, body = await post(view, message, {"MCP-Protocol-Version": "2025-11-25"})
+
+        assert status == 200
+        assert body["error"] == {
+            "code": RESOURCE_NOT_FOUND,
+            "message": "Entity light.gone not found",
+        }
 
     async def test_a_method_a_revision_lists_but_nothing_answers_is_not_found(self, view):
         revision = Revision("2099-01-01", stateless=True, methods=frozenset({"x/y"}))

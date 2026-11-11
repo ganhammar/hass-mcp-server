@@ -55,11 +55,12 @@ and what differs between them: which methods each has, whether it accepts
 batches, what it declares as capabilities, its resource-not-found code, and how a
 result is finished for it (`resultType`, the server named in `_meta`, the cache
 hints). `classify` places each message in its revision. One that carries
-`io.modelcontextprotocol/protocolVersion` in `params._meta` is in the stateless
-era (2026-07-28 on); any other is in the handshake era, in the revision its
-`MCP-Protocol-Version` header names, or 2025-03-26 without one. Handlers return
-the same payload whatever the revision, and the transport never branches on a
-version string.
+`io.modelcontextprotocol/protocolVersion` in `params._meta` is in the era of the
+revision it names, as the TypeScript SDK decides: the stateless era for
+2026-07-28 and later, the handshake era for anything earlier. Any other message
+is in the handshake era, in the revision its `MCP-Protocol-Version` header
+names, or 2025-03-26 without one. Handlers return the same payload whatever the
+revision, and the transport never branches on a version string.
 
 The endpoint does not validate `Origin`, although the Streamable HTTP transport
 says a server MUST, against DNS rebinding. It accepts only a bearer token in the

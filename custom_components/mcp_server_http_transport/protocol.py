@@ -10,11 +10,16 @@ with ``initialize``, after which the client names the negotiated revision in the
 ``MCP-Protocol-Version`` header. A stateless revision (2026-07-28) has no handshake:
 every request names its revision and the client's capabilities in ``params._meta``,
 and the HTTP headers mirror the revision, the method and the name it acts on. A
-request is in the stateless era when its ``_meta`` claims a revision, and in the
-handshake era otherwise, as the TypeScript SDK classifies it.
+request whose ``_meta`` claims a revision is in the era of the revision it names:
+the stateless era for 2026-07-28 and anything later, the handshake era for
+anything earlier. A request without a claim is in the handshake era. That is how
+the TypeScript SDK classifies them.
 
 Nothing is remembered between requests: the server keeps no sessions, so a
 handshake-era request is served in the revision its header names.
+
+Origin is not validated here or in the transport; the module docstring of
+``http.py`` says why and what would change that.
 """
 
 from __future__ import annotations
@@ -84,12 +89,11 @@ class CacheHint:
 
 
 # Every list depends on who asks: the caller's scopes decide what is listed, and so
-# does the integration's options, which a reload changes without a notification
-# this server could send. Five minutes bounds how long a client goes on offering a
-# tool after it is withheld, and a call to it in that time is refused and has the
-# client fetch the list again. A read returns live state and is stale at once.
-# What server/discover returns is the same for every caller and changes only with
-# an upgrade or a new server name.
+# do the integration's options, which a reload changes without a notification this
+# server could send. For up to five minutes a client may therefore show a list that
+# no longer matches what the caller may do; every call is checked regardless. A
+# read returns live state and is stale at once. What server/discover returns is the
+# same for every caller and changes only with an upgrade or a new server name.
 _LIST_HINT = CacheHint(ttl_ms=300_000, scope="private")
 _STATELESS_CACHE_HINTS = MappingProxyType(
     {
@@ -135,6 +139,11 @@ _BY_VERSION = {revision.version: revision for revision in REVISIONS}
 
 STATELESS_VERSIONS = tuple(r.version for r in REVISIONS if r.stateless)
 HANDSHAKE_VERSIONS = tuple(r.version for r in REVISIONS if not r.stateless)
+
+# The first revision without a handshake. A claimed revision that sorts at or after
+# it is in the stateless era, known or not, and one that sorts before it is in the
+# handshake era.
+_FIRST_STATELESS = STATELESS_VERSIONS[-1]
 
 # The revision of a handshake-era request without the MCP-Protocol-Version header,
 # as the transport specification says to assume from 2025-06-18 on.
@@ -228,25 +237,41 @@ def routing_headers(pairs: Iterable[tuple[str, str]]) -> dict[str, list[str]]:
 def classify(message: Mapping[str, Any], headers: Mapping[str, list[str]]) -> Revision:
     """Return the revision a single JSON-RPC message is in, or raise ProtocolError.
 
-    A message whose params._meta claims a revision is in the stateless era and is
-    checked as that era requires: the envelope, then the headers against the body,
-    then whether the revision is one this server has. Anything else is in the
-    handshake era. Initialize negotiates its revision from its params and ignores
-    the header, which names the revision negotiated before; every other message is
-    in the revision its MCP-Protocol-Version header names.
+    A message whose params._meta claims a revision is in the era of the revision it
+    names. A stateless-era message is checked as that era requires: the envelope,
+    then the headers against the body, then whether the revision is one this server
+    has.
+
+    Any other message is in the handshake era. Initialize negotiates its revision
+    from its params and ignores the header, which names the revision negotiated
+    before. Every other message is in the revision its claim names, which the
+    MCP-Protocol-Version header must agree with when present, or else in the one
+    the header names.
     """
+    params = message.get("params")
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    claimed = None
+    if isinstance(meta, dict) and META_PROTOCOL_VERSION in meta:
+        claimed = meta[META_PROTOCOL_VERSION]
+        if not isinstance(claimed, str):
+            raise ProtocolError(INVALID_PARAMS, f"{META_PROTOCOL_VERSION} must be a string")
+    claims_stateless = claimed is not None and claimed >= _FIRST_STATELESS
+
     for name in _ROUTING_HEADERS:
         if len(headers.get(name, ())) > 1:
             raise _header_mismatch(f"The {name} header appears more than once")
     header_version = _header(headers, HEADER_PROTOCOL_VERSION)
 
-    params = message.get("params")
-    meta = params.get("_meta") if isinstance(params, dict) else None
-    if isinstance(meta, dict) and META_PROTOCOL_VERSION in meta:
+    if claims_stateless:
         return _classify_stateless(message, meta, headers, header_version)
-
     if message.get("method") == "initialize":
         return negotiate(params.get("protocolVersion") if isinstance(params, dict) else None)
+    if claimed is not None:
+        if header_version is not None and header_version != claimed:
+            raise _header_mismatch(
+                "The MCP-Protocol-Version header does not match the protocol version in _meta"
+            )
+        header_version = claimed
     if header_version is None:
         return HEADERLESS
     revision = _BY_VERSION.get(header_version)
@@ -297,16 +322,22 @@ def _classify_stateless(
     headers: Mapping[str, list[str]],
     header_version: str | None,
 ) -> Revision:
-    """Check a message that claims a stateless revision, and return that revision."""
+    """Check a message that claims a stateless revision, and return that revision.
+
+    A request must carry the client's capabilities and every header the revision
+    requires. The revision defines no header rules for a notification, so one is
+    checked only against the headers it does carry, as the TypeScript SDK does.
+    """
     version = meta[META_PROTOCOL_VERSION]
-    if not isinstance(version, str):
-        raise ProtocolError(INVALID_PARAMS, f"{META_PROTOCOL_VERSION} must be a string")
-    if META_CLIENT_CAPABILITIES not in meta:
+    is_request = "id" in message
+    if is_request and META_CLIENT_CAPABILITIES not in meta:
         raise ProtocolError(INVALID_PARAMS, f"params._meta is missing {META_CLIENT_CAPABILITIES}")
 
-    _require_match("MCP-Protocol-Version", header_version, version, "protocol version in _meta")
+    _require_match(
+        "MCP-Protocol-Version", header_version, version, "protocol version in _meta", is_request
+    )
     method = message.get("method")
-    _require_match("Mcp-Method", _header(headers, HEADER_METHOD), method, "method")
+    _require_match("Mcp-Method", _header(headers, HEADER_METHOD), method, "method", is_request)
     field_name = _NAMED_BY.get(method) if isinstance(method, str) else None
     if field_name is not None:
         value = message["params"].get(field_name)
@@ -315,18 +346,25 @@ def _classify_stateless(
             name = _decoded(raw)
             if raw is not None and name is None:
                 raise _header_mismatch("The Mcp-Name header is not valid base64 of UTF-8 text")
-            _require_match("Mcp-Name", name, value, field_name)
+            _require_match("Mcp-Name", name, value, field_name, is_request)
 
     revision = _BY_VERSION.get(version)
-    if revision is None or not revision.stateless:
+    if revision is None:
         raise _unsupported(version, STATELESS_VERSIONS)
     return revision
 
 
-def _require_match(header: str, value: str | None, expected: Any, field_name: str) -> None:
-    """Raise HeaderMismatch unless a header is present and equals the body's value."""
+def _require_match(
+    header: str, value: str | None, expected: Any, field_name: str, required: bool
+) -> None:
+    """Raise HeaderMismatch unless a header equals the body's value.
+
+    An absent header is a mismatch only when it is ``required``.
+    """
     if value is None:
-        raise _header_mismatch(f"The {header} header is missing")
+        if required:
+            raise _header_mismatch(f"The {header} header is missing")
+        return
     if value != expected:
         raise _header_mismatch(f"The {header} header does not match the {field_name} in the body")
 
@@ -376,8 +414,8 @@ def _unsupported(requested: str, supported: tuple[str, ...]) -> ProtocolError:
     """Return the UnsupportedProtocolVersion error listing the revisions that would work.
 
     The list names the revisions of the era the client asked in: the stateless ones
-    for a request carrying its revision in _meta, the handshake ones for a request
-    whose header named one, so a client retrying with an entry from it is served.
+    for a request claiming a stateless revision, the handshake ones for any other,
+    so a client retrying with an entry from it is served.
     """
     return ProtocolError(
         UNSUPPORTED_PROTOCOL_VERSION,

@@ -2,7 +2,7 @@
 
 Let an AI assistant such as Claude work with your Home Assistant: read what is going on, explain why something happened, and change automations, dashboards and devices for you. It is a custom integration that gives the assistant a set of tools for your Home Assistant, and it works wherever Home Assistant is reachable, including Claude on the web.
 
-![Demo: Home Assistant is added to an assistant as a custom connector, Home Assistant's consent screen asks what Claude may do and Look only is approved, and the question "Describe my home" is answered with the rooms on each floor, the lights that are on, the temperatures and an open balcony door, read through tools such as list_areas and search_entities. The assistant is illustrated; the Home Assistant screens and the data are real.](https://raw.githubusercontent.com/ganhammar/hass-mcp-server/main/docs/images/demo.gif)
+![Demo: Home Assistant is added to an assistant as a custom connector, Home Assistant's consent screen asks what the assistant, here a made-up one called Wren, may do and Look only is approved, and the question "Describe my home" is answered with the rooms on each floor, the lights that are on, the temperatures and an open balcony door, read through tools such as list_areas and search_entities. The assistant is illustrated; the Home Assistant screens and the data are real.](https://raw.githubusercontent.com/ganhammar/hass-mcp-server/main/docs/images/demo.gif)
 
 Things you can ask once it is connected:
 

@@ -51,7 +51,8 @@ SCALE = 2
 ASSISTANT = "https://assistant.example"
 REDIRECT_URI = f"{ASSISTANT}/oauth/callback"
 SHOWN_SERVER_URL = "https://your-home-assistant/api/mcp_http"
-CLIENT_NAME = "Claude"
+# A made-up assistant, so the illustration is not taken for a real product.
+CLIENT_NAME = "Wren"
 QUESTION = "Describe my home"
 
 PERSON = "Sam Lindqvist"
@@ -68,7 +69,11 @@ LEVEL_TITLES = {
 CAPTIONS = {
     "connect": ("1", "Add Home Assistant to the assistant", "Assistant: illustrated"),
     "signin": ("2", "Sign in to Home Assistant", "Real Home Assistant screen"),
-    "consent": ("2", "Home Assistant asks what Claude may do", "Real Home Assistant screen"),
+    "consent": (
+        "2",
+        f"Home Assistant asks what {CLIENT_NAME} may do",
+        "Real Home Assistant screen",
+    ),
     "ask": ("3", "Ask about your home", "Assistant: illustrated · facts: real tool calls"),
 }
 

@@ -64,7 +64,7 @@ Be clear about these before you rely on a lower level:
 
 ### Connections from before
 
-When you update, a connection made before keeps what it could do, which is Administer, still limited by the options. The next time the application renews its sign-in, which happens within the hour, the OIDC Provider records that, and Connected applications shows it. To choose for an existing connection, sign it out under Connected applications (`https://your-home-assistant/oidc_login`) and connect it again: the consent screen then asks. Changing what a connection may do without signing it out is not possible yet.
+When you update, a connection made before keeps what it could do, which is Administer, still limited by the options. The next time the application renews its sign-in, which happens within the hour, the OIDC Provider records that, and Connected applications shows it. To choose for an existing connection, open Connected applications (`https://your-home-assistant/oidc_login`) and use Change access. The change applies the next time the application renews its sign-in, which happens within the hour.
 
 ### What an application sees when it is refused
 

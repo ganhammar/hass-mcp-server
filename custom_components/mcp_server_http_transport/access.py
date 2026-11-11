@@ -219,8 +219,8 @@ def not_granted(what: str, area: str, level: str) -> str:
     """Explain a refusal: the access granted to the application does not reach this."""
     return (
         f"The access granted to this application does not include {what}: it needs "
-        f"{describe_requirement(area, level)}. To change what the application may do, "
-        "sign it out under Connected applications in Home Assistant and connect it again"
+        f"{describe_requirement(area, level)}. The person who connected the application "
+        "can change what it may do under Connected applications in Home Assistant"
     )
 
 

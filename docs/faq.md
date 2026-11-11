@@ -40,7 +40,7 @@ Yes. The consent screen asks each time an application connects, so one can contr
 
 ### What changes for my existing connection when I update?
 
-Nothing you would notice: a connection made before keeps what it could do, which is Administer, still limited by the options. To choose a level for it, sign it out under Connected applications (`https://your-home-assistant/oidc_login`) and connect it again. This needs the OIDC Provider release after 1.8.0.
+Nothing you would notice: a connection made before keeps what it could do, which is Administer, still limited by the options. To choose a level for it, open Connected applications (`https://your-home-assistant/oidc_login`) and use Change access. This needs the OIDC Provider release after 1.8.0.
 
 ### Can I see what it did?
 
@@ -66,7 +66,7 @@ The tool belongs to a group that is off. The message names the option, and [Conf
 
 ### The assistant says the access granted to it does not include a tool.
 
-You chose a level or area settings without it when the application connected. The message names the area and setting the tool needs. To change it, sign the application out under Connected applications (`https://your-home-assistant/oidc_login`) and connect it again.
+You chose a level or area settings without it when the application connected. The message names the area and setting the tool needs. To change it, open Connected applications (`https://your-home-assistant/oidc_login`) and use Change access. The change applies the next time the application renews its sign-in, which happens within the hour.
 
 ### Can it edit my YAML configuration?
 

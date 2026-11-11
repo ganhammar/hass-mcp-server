@@ -61,6 +61,16 @@ era (2026-07-28 on); any other is in the handshake era, in the revision its
 the same payload whatever the revision, and the transport never branches on a
 version string.
 
+The endpoint does not validate `Origin`, although the Streamable HTTP transport
+says a server MUST, against DNS rebinding. It accepts only a bearer token in the
+`Authorization` header, which a browser never attaches by itself, so a page that
+reaches it by rebinding has nothing to authenticate with; Home Assistant's own
+API takes the same position. A check cannot tell a rebinding page from a page on
+Home Assistant's own address without the instance's URLs, which most installs
+never set, and so refuses real clients behind a reverse proxy. Add one, before
+authentication, only once the endpoint accepts a credential a browser sends on
+its own, such as a cookie.
+
 To add a revision, read its changelog and the pages on the base protocol,
 versioning, the Streamable HTTP transport and each server feature, then add a
 `Revision` to `REVISIONS`, newest first, describing every difference in its

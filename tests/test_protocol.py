@@ -5,7 +5,6 @@ the unit suite; tests/test_e2e.py repeats the exchanges through the real view.
 """
 
 import json
-import sys
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -31,7 +30,6 @@ from custom_components.mcp_server_http_transport.const import (
 from custom_components.mcp_server_http_transport.http import (
     MCPEndpointView,
     ValidatedToken,
-    _hostname,
 )
 from custom_components.mcp_server_http_transport.protocol import (
     HANDSHAKE_VERSIONS,
@@ -371,9 +369,6 @@ def hass(list_every_tool):
     hass.auth.async_get_user = AsyncMock(
         return_value=Mock(id="user123", is_active=True, is_admin=True)
     )
-    hass.config.internal_url = None
-    hass.config.external_url = None
-    hass.config.components = set()
     hass.states.get = Mock(return_value=None)
     list_every_tool(hass)
     return hass
@@ -884,89 +879,32 @@ class TestBatch:
         assert (body["id"], body["error"]["code"]) == (None, code)
 
 
-class TestOrigin:
-    async def _post(self, view, origin, host="ha.example.com"):
+class TestOriginIsNotValidated:
+    """The endpoint takes only a bearer token, so Origin decides nothing; see http.py."""
+
+    @staticmethod
+    def _request(origin, host="hem.example.se", authorization="Bearer t"):
         request = Mock(path=MCP_PATH, host=host)
-        request.headers = {"Authorization": "Bearer t", "Origin": origin}
+        request.headers = {"Origin": origin}
+        if authorization:
+            request.headers["Authorization"] = authorization
         request.json = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "method": "ping"})
-        with patch.object(view, "_validate_token", return_value=TOKEN) as validate:
-            response = await view.post(request)
-        return response, validate
-
-    @pytest.mark.parametrize("origin", ["https://ha.example.com", "null"])
-    async def test_a_page_on_a_host_this_server_does_not_answer_to_is_refused(self, view, origin):
-        response, validate = await self._post(view, origin)
-
-        assert response.status == 403
-        assert json.loads(response.body) == {
-            "jsonrpc": "2.0",
-            "error": {"code": INVALID_REQUEST, "message": "Origin not allowed for this host"},
-            "id": None,
-        }
-        validate.assert_not_called()
+        return request
 
     @pytest.mark.parametrize(
-        ("origin", "host"),
-        [
-            ("https://claude.ai", "ha.example.com"),
-            ("chrome-extension://abcdef", "ha.example.com"),
-            ("http://192.168.1.5:8123", "192.168.1.5:8123"),
-            ("http://[::1]:8123", "[::1]:8123"),
-            ("http://localhost:8123", "localhost:8123"),
-            ("http://homeassistant.local:8123", "homeassistant.local:8123"),
-            ("null", "192.168.1.5:8123"),
-        ],
+        "origin", ["https://hem.example.se", "null", "http://attacker.example"]
     )
-    async def test_other_origins_and_names_rebinding_cannot_use_pass(self, view, origin, host):
-        response, _ = await self._post(view, origin, host)
+    async def test_a_request_with_a_token_is_served_whatever_its_origin(self, view, origin):
+        with patch.object(view, "_validate_token", return_value=TOKEN):
+            response = await view.post(self._request(origin))
 
         assert response.status == 200
 
-    @pytest.mark.parametrize("attribute", ["internal_url", "external_url"])
-    async def test_home_assistants_own_urls_pass(self, view, hass, attribute):
-        setattr(hass.config, attribute, "https://HA.example.com:8443/")
+    async def test_a_request_without_a_token_gets_the_challenge(self, view):
+        response = await view.post(self._request("https://hem.example.se", authorization=None))
 
-        response, _ = await self._post(view, "https://ha.example.com:8443", "ha.example.com:8443")
-
-        assert response.status == 200
-
-    @pytest.mark.parametrize(
-        ("remote_ui", "status"),
-        [(Mock(return_value="https://ha.example.com"), 200), (Mock(side_effect=Exception), 403)],
-    )
-    async def test_the_cloud_url_passes_when_there_is_one(self, view, hass, remote_ui, status):
-        hass.config.components = {"cloud"}
-        cloud = Mock(async_remote_ui_url=remote_ui)
-
-        with patch.dict(sys.modules, {"homeassistant.components.cloud": cloud}):
-            response, _ = await self._post(view, "https://ha.example.com")
-
-        assert response.status == status
-        remote_ui.assert_called_once_with(hass)
-
-    async def test_a_get_is_refused_the_same_way(self, view):
-        request = Mock(path=MCP_PATH, host="ha.example.com")
-        request.headers = {"Origin": "https://ha.example.com"}
-
-        response = await view.get(request)
-
-        assert response.status == 403
-
-
-@pytest.mark.parametrize(
-    ("value", "host"),
-    [
-        ("https://Example.COM:8123/path", "example.com"),
-        ("example.com:8123", "example.com"),
-        ("[::1]:8123", "::1"),
-        ("", None),
-        (None, None),
-        ("http://[bad", None),
-        ("file://", None),
-    ],
-)
-def test_hostname(value, host):
-    assert _hostname(value) == host
+        assert response.status == 401
+        assert "WWW-Authenticate" in response.headers
 
 
 class TestFailures:

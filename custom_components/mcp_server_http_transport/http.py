@@ -1,7 +1,20 @@
-"""HTTP transport for MCP server."""
+"""HTTP transport for MCP server.
+
+The endpoint does not validate the Origin header, although the Streamable HTTP
+transport says a server MUST, to stop DNS rebinding. Rebinding lets a web page
+send requests to this server under the page's own origin; the browser attaches
+only the credentials it holds for that origin. The endpoint accepts nothing but a
+bearer token in the Authorization header, which a browser never sends on its
+own, so a page that reaches it this way has nothing to authenticate with and
+gets the 401 any anonymous request gets. Home Assistant's own API takes the same
+position. A check would also refuse real clients: a page served from Home
+Assistant's own address sends an Origin equal to the Host, exactly as a
+rebinding page does, and telling the two apart needs the instance's URLs, which
+most installs never configure. Validate Origin before anything else once the
+endpoint accepts a credential a browser sends by itself, such as a cookie.
+"""
 
 import inspect
-import ipaddress
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -11,7 +24,6 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.ban import process_success_login, process_wrong_login
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import issue_registry as ir
-from yarl import URL
 
 from .access import carries_server_scope, grant_from_scopes
 from .caller import Caller, acting_as
@@ -309,30 +321,6 @@ def _message_id(message: Any) -> Any:
 def _is_response(message: dict[str, Any]) -> bool:
     """Return True when a JSON-RPC message is a response rather than a request."""
     return "result" in message or "error" in message
-
-
-def _hostname(value: str | None) -> str | None:
-    """Return the lowercase host in a URL, an origin or a Host header value, or None."""
-    if not value:
-        return None
-    try:
-        host = URL(value if "://" in value else f"//{value}").raw_host
-    except ValueError:
-        return None
-    return host.lower() if host else None
-
-
-def _is_local_name(host: str) -> bool:
-    """Return True for a host name DNS rebinding cannot use: an address or a local name.
-
-    A rebinding page needs a DNS name the attacker controls. An IP literal is not
-    one, and neither is localhost or a multicast DNS name under .local.
-    """
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        return host == "localhost" or host.endswith((".localhost", ".local"))
-    return True
 
 
 def _accepts_expected_audience(validate_access_token: Any) -> bool:
@@ -763,8 +751,6 @@ class MCPEndpointView(HomeAssistantView):
         """
         if not _integration_loaded(self.hass):
             return _service_unavailable()
-        if (refused := self._refuse_origin(request)) is not None:
-            return refused
 
         caller = await self._authenticate(request)
         if isinstance(caller, web.Response):
@@ -783,8 +769,6 @@ class MCPEndpointView(HomeAssistantView):
         """Handle POST requests for MCP messages."""
         if not _integration_loaded(self.hass):
             return _service_unavailable()
-        if (refused := self._refuse_origin(request)) is not None:
-            return refused
 
         caller = await self._authenticate(request)
         if isinstance(caller, web.Response):
@@ -833,47 +817,6 @@ class MCPEndpointView(HomeAssistantView):
             return web.json_response(
                 _jsonrpc_error(INTERNAL_ERROR, f"Internal error: {str(e)}", _message_id(body))
             )
-
-    def _refuse_origin(self, request: web.Request) -> web.Response | None:
-        """Refuse a browser request that DNS rebinding could have produced, or return None.
-
-        Every revision requires a server to validate Origin and answer an invalid one
-        with 403. A rebinding page is served from the attacker's own host name, which
-        resolves to this server by the time it sends, so its request is same-origin
-        with a host name Home Assistant does not answer to. That is what is refused:
-        an Origin (or the opaque "null" one) naming the host the request was sent to,
-        when that host is a DNS name other than one of Home Assistant's own URLs.
-
-        A request from another origin is left to CORS and the bearer token, which a
-        rebinding page does not have either, so a browser extension or a client the
-        user allowed through cors_allowed_origins keeps working. A request without
-        Origin is not from a browser page at all.
-        """
-        origin = request.headers.get(hdrs.ORIGIN)
-        if origin is None:
-            return None
-        host = _hostname(request.host)
-        if origin != "null" and _hostname(origin) != host:
-            return None
-        if host is None or _is_local_name(host) or host in self._own_hostnames():
-            return None
-        _LOGGER.debug("Refused an MCP request from origin %s sent to host %s", origin, host)
-        return web.json_response(
-            _jsonrpc_error(INVALID_REQUEST, "Origin not allowed for this host"),
-            status=403,
-        )
-
-    def _own_hostnames(self) -> set[str]:
-        """Return the host names of Home Assistant's own URLs: internal, external, cloud."""
-        urls = [self.hass.config.internal_url, self.hass.config.external_url]
-        if "cloud" in self.hass.config.components:
-            from homeassistant.components.cloud import async_remote_ui_url
-
-            try:
-                urls.append(async_remote_ui_url(self.hass))
-            except Exception:  # noqa: BLE001 - without a remote UI there is no cloud URL
-                _LOGGER.debug("Home Assistant Cloud has no remote UI URL")
-        return {name for url in urls if url and (name := _hostname(url)) is not None}
 
     async def _answer_batch(
         self, batch: list[Any], caller: Caller, headers: dict[str, list[str]]

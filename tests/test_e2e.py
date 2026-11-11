@@ -1411,22 +1411,21 @@ async def test_get_and_delete_are_not_allowed(
     assert (await client.delete("/api/mcp", headers={"Mcp-Session-Id": "s"})).status == 405
 
 
-async def test_a_rebinding_origin_is_refused(
+async def test_origin_is_not_validated(
     loaded_entry: MockConfigEntry,
     hass_client: ClientSessionGenerator,
+    hass_client_no_auth: ClientSessionGenerator,
 ) -> None:
-    client = await hass_client()
+    """A browser page on the address the request went to is served like any client."""
     message = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+    same_host = {"Origin": "https://hem.example.se", "Host": "hem.example.se"}
 
-    resp = await client.post(
-        "/api/mcp",
-        json=message,
-        headers={"Origin": "http://attacker.example", "Host": "attacker.example"},
-    )
-    assert resp.status == 403
-
-    resp = await client.post("/api/mcp", json=message, headers={"Origin": "https://claude.ai"})
+    resp = await (await hass_client()).post("/api/mcp", json=message, headers=same_host)
     assert resp.status == 200
+
+    resp = await (await hass_client_no_auth()).post("/api/mcp", json=message, headers=same_host)
+    assert resp.status == 401
+    assert "WWW-Authenticate" in resp.headers
 
 
 async def test_a_batch_is_answered_without_the_header(

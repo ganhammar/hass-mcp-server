@@ -48,6 +48,27 @@ Pin service responses the same way, by driving the real handler. Mocking a servi
 in a tool test only asserts the shape the tool already assumes, so it stays green
 when core changes underneath it.
 
+## Protocol revisions
+
+`protocol.py` is the one place that knows the MCP revisions the server speaks
+and what differs between them: which methods each has, whether it accepts
+batches, what it declares as capabilities, its resource-not-found code, and how a
+result is finished for it (`resultType`, the server named in `_meta`, the cache
+hints). `classify` places each message in its revision. One that carries
+`io.modelcontextprotocol/protocolVersion` in `params._meta` is in the stateless
+era (2026-07-28 on); any other is in the handshake era, in the revision its
+`MCP-Protocol-Version` header names, or 2025-03-26 without one. Handlers return
+the same payload whatever the revision, and the transport never branches on a
+version string.
+
+To add a revision, read its changelog and the pages on the base protocol,
+versioning, the Streamable HTTP transport and each server feature, then add a
+`Revision` to `REVISIONS`, newest first, describing every difference in its
+fields. A difference no field covers gets a new field with the old behaviour as
+its default, so the revisions already listed keep what they have. Then extend
+`tests/test_protocol.py`, which pins what each revision gets, and the end-to-end
+tests in `tests/test_e2e.py`.
+
 ## Conventions
 
 Black and Ruff at line length 100, both enforced in CI. Tools register through

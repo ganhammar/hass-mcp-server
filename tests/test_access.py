@@ -5,6 +5,8 @@ here, as a tool without a failing-call test fails test_tools_is_error.py.
 """
 
 import json
+import re
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -596,3 +598,25 @@ class TestFailsClosed:
         assert access.is_admin_service(Mock(), "homeassistant", "restart") is False
         # The fixed list still holds the service back.
         assert access.is_system_service(Mock(), "homeassistant", "restart") is True
+
+
+def test_no_source_text_reads_as_registering_a_service():
+    """hassfest fails an integration without services.yaml whose source matches this pattern.
+
+    The integration registers no services, and hassfest searches the text, so a
+    docstring that names one of these helpers is enough to fail validation.
+    """
+    pattern = re.compile(
+        r"(hass\.services\.(register|async_register))"
+        r"|async_register_entity_service|async_register_admin_service"
+    )
+    package = Path(access.__file__).parent
+
+    matches = [
+        f"{path.relative_to(package)}:{number}"
+        for path in sorted(package.rglob("*.py"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if pattern.search(line)
+    ]
+
+    assert matches == []

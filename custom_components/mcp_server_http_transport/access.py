@@ -480,7 +480,8 @@ HOMEASSISTANT_ENTITY_SERVICES = frozenset({"turn_on", "turn_off", "toggle", "upd
 def is_admin_service(hass: Any, domain: str, service: str) -> bool:
     """Return whether Home Assistant registered a service as one only administrators may call.
 
-    ``async_register_admin_service`` registers a ``functools.partial`` of the private
+    The service helper that registers an administrator-only service (named in the
+    contract test) registers a ``functools.partial`` of the private
     ``_async_admin_handler`` as the service's job target, and that is what this looks
     for in ``hass.services.async_services_internal()``, keyed by the lower-cased names
     Home Assistant registers under. Both are internals: should either change, this

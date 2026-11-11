@@ -16,6 +16,10 @@ Claude connects from its own servers, not from your browser, so Home Assistant h
 
 The consent screen offers four levels: Look only, Control devices, Edit the setup and Administer. Look only is preselected the first time, and your last choice for the same application after that. **Choose in detail** sets each area on its own instead, for example everything except cameras. What each level and area allows, and what it does not cover, is in [Choosing what an application may do](security.md#choosing-what-an-application-may-do). This needs the OIDC Provider release after 1.8.0; an older one only asks whether to approve.
 
+![The consent screen: Claude is asking for access, with the four levels listed and Look only selected, Choose in detail below them, and the Approve and Deny buttons.](images/consent.png)
+
+The screen as the demo instance shows it, where the application returns to a stand-in address; with Claude it names Claude's own.
+
 To change what a connected application may do, open Connected applications (`https://your-home-assistant/oidc_login`) and use Change access. The change applies the next time the application renews its sign-in, which happens within the hour. A connection made before you updated keeps what it could do until you change it, which is Administer, or Read in every area in read-only mode.
 
 If your OIDC Provider was set up before its version 1.8.0, turn on **Allow client metadata documents** in its options first. That is how Claude identifies itself.

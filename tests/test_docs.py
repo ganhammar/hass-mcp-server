@@ -24,6 +24,7 @@ ROOT = Path(__file__).parent.parent
 DOCS = ROOT / "docs"
 PAGES = [ROOT / "README.md", *sorted(DOCS.glob("*.md"))]
 REPO_URL = "https://github.com/ganhammar/hass-mcp-server/blob/main/"
+RAW_URL = "https://raw.githubusercontent.com/ganhammar/hass-mcp-server/main/"
 
 
 def _section(text: str, heading: str) -> str:
@@ -123,10 +124,16 @@ def test_the_repair_for_a_contested_path_links_to_a_section_that_exists():
 
 @pytest.mark.parametrize("page", PAGES, ids=lambda page: page.name)
 def test_links_between_the_pages_lead_somewhere(page: Path):
-    """The README links by full URL, since HACS shows it outside the repository."""
+    """The README links by full URL, since HACS shows it outside the repository.
+
+    Its images are linked as raw files, which is what an image needs outside GitHub.
+    """
     for target in re.findall(r"\]\(([^)\s]+)\)", page.read_text()):
         if target.startswith(REPO_URL):
             path, _, anchor = target[len(REPO_URL) :].partition("#")
+            linked = ROOT / path
+        elif target.startswith(RAW_URL):
+            path, anchor = target[len(RAW_URL) :], ""
             linked = ROOT / path
         elif target.startswith(("http://", "https://")):
             continue

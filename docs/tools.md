@@ -21,7 +21,7 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `get_entity_registry` | Read registry metadata for an entity, including disabled or unavailable entities |
 | `update_entity_registry` | Preview by default or apply (`apply=true`) a change to an entity's `name`, same-domain `new_entity_id`, area, labels, or whether it is disabled or hidden. HA validates IDs on apply; **references in automations, scripts, dashboards and templates are not migrated** |
 | `delete_entity` | Delete the registry entry of a leftover entity that nothing provides any more; an entity still provided is refused (requires explicit confirmation) |
-| `search_entities` | Search entities by friendly name, device class, domain, or area |
+| `search_entities` | Find entities from plain words such as "office lights" and return their states. Every word has to match the entity ID, name or an alias, or the name or an alias of its area, floor or device, in any order; a trailing "s" is optional. Filters by `domain`, `device_class` and area (ID, name or alias). The best matches come first, with configuration, diagnostic and hidden entities last, and the reply says when `limit` cut the list |
 | `get_device_details` | Get a device and every entity registered to it (all domains), with optional states |
 | `call_service` | Call any Home Assistant service |
 | `create_calendar_event` | Create a one-off calendar event (local calendars; entity API) |

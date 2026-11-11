@@ -61,6 +61,7 @@ Be clear about these before you rely on a lower level:
 - **Templates can read every state**, whatever Entities and their states is set to.
 - **Config files and AppDaemon apps reach past the other areas.** With Config files at Full an application can change any YAML file, such as a dashboard kept in YAML. AppDaemon apps are code, and a changed app can do anything AppDaemon can do.
 - **A listing can name things from another area**, such as the area an entity is in, or the entities that are unavailable in the system status.
+- **The choice holds only while the OIDC Provider has this server's description.** The provider collects it when Home Assistant starts, and logs a warning when that fails or times out. For the rest of that run the consent screen only asks whether to approve, and a token that carries no choice of this server's gets what the options allow. That includes a token from an earlier run whose user set every area to None, since such a token carries no choice either. An application cannot bring this about: whether tokens are limited depends only on what the provider has collected, never on the address or headers of a request.
 
 ### Connections from before
 

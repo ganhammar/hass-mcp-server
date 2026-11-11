@@ -2365,7 +2365,7 @@ class TestScopeLimits:
         )
 
         assert token.limited_by_scopes is True
-        describes.assert_called_once_with(scope_hass, "https://homeassistant.local/api/mcp")
+        describes.assert_called_once_with(scope_hass)
 
     async def test_a_token_from_a_provider_that_does_not_describe_is_not_limited(
         self, scope_hass, validator
@@ -2523,27 +2523,28 @@ class TestProviderDescribes:
         from custom_components.mcp_server_http_transport.http import _provider_describes
 
         # tests/conftest.py stands in for a provider without a resources module.
-        assert _provider_describes(Mock(), "https://ha.example.com/api/mcp") is False
+        assert _provider_describes(Mock()) is False
 
     @pytest.mark.parametrize(
-        ("found", "expected"),
+        ("collected", "expected"),
         [
-            (SimpleNamespace(domain=DOMAIN), True),
-            (SimpleNamespace(domain="another_integration"), False),
-            (None, False),
+            ([SimpleNamespace(domain="another_integration"), SimpleNamespace(domain=DOMAIN)], True),
+            ([SimpleNamespace(domain="another_integration")], False),
+            ([object()], False),
+            ([], False),
         ],
     )
-    def test_the_provider_is_asked_for_the_resource(self, found, expected):
+    def test_the_provider_is_asked_what_it_has_collected(self, collected, expected):
         import sys
 
         from custom_components.mcp_server_http_transport.http import _provider_describes
 
         resources = Mock()
-        resources.find_resource = Mock(return_value=found)
+        resources.described_resources = Mock(return_value=collected)
         with patch.dict(sys.modules, {"custom_components.oidc_provider.resources": resources}):
-            assert _provider_describes("hass", "https://ha.example.com/api/mcp") is expected
+            assert _provider_describes("hass") is expected
 
-        resources.find_resource.assert_called_once_with("hass", "https://ha.example.com/api/mcp")
+        resources.described_resources.assert_called_once_with("hass")
 
     def test_a_provider_that_fails_to_answer_has_described_nothing(self):
         import sys
@@ -2551,9 +2552,34 @@ class TestProviderDescribes:
         from custom_components.mcp_server_http_transport.http import _provider_describes
 
         resources = Mock()
-        resources.find_resource = Mock(side_effect=RuntimeError("broken"))
+        resources.described_resources = Mock(side_effect=RuntimeError("broken"))
         with patch.dict(sys.modules, {"custom_components.oidc_provider.resources": resources}):
-            assert _provider_describes("hass", "https://ha.example.com/api/mcp") is False
+            assert _provider_describes("hass") is False
+
+    async def test_whether_a_token_is_limited_does_not_depend_on_the_request(self):
+        """A client that steers the audience with forwarded headers is limited all the same."""
+        import sys
+
+        validator = sys.modules["custom_components.oidc_provider.token_validator"]
+        original = validator.validate_access_token.return_value
+        validator.validate_access_token.return_value = {"sub": "u", "scope": "openid"}
+        resources = Mock()
+        resources.described_resources = Mock(return_value=[SimpleNamespace(domain=DOMAIN)])
+        resources.find_resource = Mock(return_value=None)
+        request = Mock(path=MCP_PATH)
+        request.headers = {
+            "Authorization": "Bearer oidc_token",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "ha.example.com/x",
+        }
+        try:
+            with patch.dict(sys.modules, {"custom_components.oidc_provider.resources": resources}):
+                token = await MCPEndpointView(Mock())._validate_token(request)
+        finally:
+            validator.validate_access_token.return_value = original
+
+        assert token.limited_by_scopes is True
+        resources.find_resource.assert_not_called()
 
 
 def test_every_401_challenge_names_openid_as_the_scope():

@@ -314,7 +314,7 @@ def _get_issuer(request: web.Request) -> str | None:
         return None
 
 
-def _provider_describes(hass: HomeAssistant, resource: str) -> bool:
+def _provider_describes(hass: HomeAssistant) -> bool:
     """Return whether the installed OIDC provider has collected this server's description.
 
     The provider asks the user what an application may do here only once it has
@@ -322,17 +322,29 @@ def _provider_describes(hass: HomeAssistant, resource: str) -> bool:
     of every session for this resource, also one that began before. A provider that
     predates descriptions has no resources module, and one that is not set up has
     collected nothing, so both answer False.
+
+    The answer depends on nothing in the request. The resource a token was issued
+    for, and the audience it is checked against, come from the Host and
+    X-Forwarded-Host headers the client sends; a client that steers them to a
+    resource the provider does not recognise skips the choice, and must not get a
+    token this server treats as unlimited for it.
+
+    One case stays open, and no client can bring it about: when the provider fails
+    to collect the description in a run, such as when describing times out, a token
+    without a scope of this server is not limited in that run. A token whose user
+    chose None everywhere carries none, so it gets what the options allow.
     """
     try:
-        from custom_components.oidc_provider.resources import find_resource
+        from custom_components.oidc_provider.resources import described_resources
     except ImportError:
         return False
     try:
-        described = find_resource(hass, resource)
+        return any(
+            getattr(described, "domain", None) == DOMAIN for described in described_resources(hass)
+        )
     except Exception:  # noqa: BLE001 - a provider that cannot answer has described nothing
-        _LOGGER.debug("Could not ask the OIDC provider about %s", resource, exc_info=True)
+        _LOGGER.debug("Could not ask the OIDC provider what it has collected", exc_info=True)
         return False
-    return getattr(described, "domain", None) == DOMAIN
 
 
 def _get_protected_resource_metadata(base_url: str, resource_path: str) -> dict[str, Any]:
@@ -518,9 +530,7 @@ class MCPEndpointView(HomeAssistantView):
                 # A token is limited by its scopes once it carries one of this
                 # server's, or once the provider asks users what to grant here. A
                 # token from a provider that does neither works as before.
-                limited = carries_server_scope(scopes) or _provider_describes(
-                    self.hass, expected_audience
-                )
+                limited = carries_server_scope(scopes) or _provider_describes(self.hass)
                 return ValidatedToken(
                     sub=sub,
                     auth_method=AUTH_METHOD_OIDC,

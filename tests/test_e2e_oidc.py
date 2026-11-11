@@ -348,6 +348,11 @@ async def test_the_tokens_client_reaches_the_audit_event(
 REDIRECT_URI = "https://app.example.com/callback"
 ADMIN_ONLY_TOOL = "restart_ha"
 
+# A client can put a path into the forwarded host. The issuer, and with it the
+# audience this server checks, then carry that path too.
+STEERED = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "mcp.example.com/x"}
+STEERED_RESOURCE = f"{ISSUER_BASE}/x{MCP_PATH}"
+
 
 def _pkce_pair() -> tuple[str, str]:
     verifier = secrets.token_urlsafe(64)
@@ -391,11 +396,20 @@ async def _register(client) -> dict:
     return await resp.json()
 
 
-async def _sign_in(client, registration: dict, access: dict | None) -> dict:
+async def _sign_in(
+    client,
+    registration: dict,
+    access: dict | None,
+    *,
+    resource: str = RESOURCE,
+    headers: dict[str, str] = FORWARDED,
+    offered: list | None = None,
+) -> dict:
     """Authorize as the signed-in user, approve with a choice of access, redeem the code.
 
     Returns the token response. ``access`` is what the consent screen posts: None
-    for the plain approve screen, or {"options": {area: setting}}.
+    for the plain approve screen, or {"options": {area: setting}}. When ``offered`` is
+    a list, what the consent screen offers of access, or None, is appended to it.
     """
     verifier, challenge = _pkce_pair()
     resp = await client.get(
@@ -408,17 +422,23 @@ async def _sign_in(client, registration: dict, access: dict | None) -> dict:
             "state": "s",
             "code_challenge": challenge,
             "code_challenge_method": "S256",
-            "resource": RESOURCE,
+            "resource": resource,
         },
-        headers=FORWARDED,
+        headers=headers,
     )
     assert resp.status == 200, await resp.text()
     request_id = re.search(r"oidc_request_id', '([^']+)'", await resp.text()).group(1)
+    if offered is not None:
+        resp = await client.get(
+            "/oidc/continue", params={"request_id": request_id}, headers=headers
+        )
+        assert resp.status == 200, await resp.text()
+        offered.append((await resp.json()).get("access"))
 
     decision = {"request_id": request_id, "approve": True}
     if access is not None:
         decision["access"] = access
-    resp = await client.post("/oidc/continue", json=decision, headers=FORWARDED)
+    resp = await client.post("/oidc/continue", json=decision, headers=headers)
     assert resp.status == 200, await resp.text()
     code = parse_qs(urlparse((await resp.json())["redirect_url"]).query)["code"][0]
 
@@ -432,13 +452,15 @@ async def _sign_in(client, registration: dict, access: dict | None) -> dict:
             "client_secret": registration["client_secret"],
             "code_verifier": verifier,
         },
-        headers=FORWARDED,
+        headers=headers,
     )
     assert resp.status == 200, await resp.text()
     return await resp.json()
 
 
-async def _refresh(client, registration: dict, refresh_token: str) -> dict:
+async def _refresh(
+    client, registration: dict, refresh_token: str, headers: dict[str, str] = FORWARDED
+) -> dict:
     resp = await client.post(
         "/oidc/token",
         data={
@@ -447,18 +469,24 @@ async def _refresh(client, registration: dict, refresh_token: str) -> dict:
             "client_id": registration["client_id"],
             "client_secret": registration["client_secret"],
         },
-        headers=FORWARDED,
+        headers=headers,
     )
     assert resp.status == 200, await resp.text()
     return await resp.json()
 
 
-async def _rpc(client, token: str, method: str, params: dict | None = None):
+async def _rpc(
+    client,
+    token: str,
+    method: str,
+    params: dict | None = None,
+    headers: dict[str, str] = FORWARDED,
+):
     body = {"jsonrpc": "2.0", "method": method, "id": 1}
     if params is not None:
         body["params"] = params
     return await client.post(
-        MCP_PATH, json=body, headers={**FORWARDED, "Authorization": f"Bearer {token}"}
+        MCP_PATH, json=body, headers={**headers, "Authorization": f"Bearer {token}"}
     )
 
 
@@ -477,24 +505,39 @@ def _levels(preset_id: str) -> dict[str, str]:
 class TestProviderContract:
     """What this server relies on in the provider, beyond validate_access_token."""
 
-    async def test_find_resource_names_the_integration_that_described_it(
+    async def test_described_resources_names_the_integration_that_described_it(
         self, enable_custom_integrations: None, hass: HomeAssistant
     ) -> None:
-        """http._provider_describes asks find_resource(hass, indicator) for its domain."""
+        """http._provider_describes asks described_resources(hass) for this domain."""
         import inspect
 
-        from custom_components.oidc_provider.resources import find_resource
+        from custom_components.oidc_provider.resources import described_resources
 
-        assert list(inspect.signature(find_resource).parameters) == ["hass", "indicator"]
-        assert find_resource(hass, RESOURCE) is None
+        assert list(inspect.signature(described_resources).parameters) == ["hass"]
+        assert described_resources(hass) == []
 
         await _setup_provider(hass)
-        assert find_resource(hass, RESOURCE) is None
+        assert [d.domain for d in described_resources(hass)] == []
+        await _setup_server(hass)
+
+        assert [d.domain for d in described_resources(hass)] == [DOMAIN]
+
+    async def test_the_provider_does_not_recognise_a_steered_resource(
+        self, enable_custom_integrations: None, hass: HomeAssistant
+    ) -> None:
+        """A resource under a path the description does not name gets no consent choice.
+
+        This is why whether a token is limited cannot be decided by matching the
+        audience the request steers: the provider matches nothing either.
+        """
+        from custom_components.oidc_provider.resources import find_resource
+
+        await _setup_provider(hass)
         await _setup_server(hass)
 
         for indicator in (RESOURCE, RESOURCE_HTTP, "http://192.168.1.10:8123/api/mcp"):
             assert find_resource(hass, indicator).domain == DOMAIN
-        assert find_resource(hass, "https://mcp.example.com/api/other") is None
+        assert find_resource(hass, STEERED_RESOURCE) is None
 
     async def test_the_validator_returns_the_scope_claim(
         self, oidc_ready: rsa.RSAPrivateKey, hass: HomeAssistant, hass_admin_user: MockUser
@@ -664,6 +707,46 @@ class TestChosenAccess:
         assert 'error="invalid_token"' in resp.headers["WWW-Authenticate"]
         refreshed = await _refresh(provider, registration, tokens["refresh_token"])
         resp = await _rpc(mcp, refreshed["access_token"], "initialize")
+        assert resp.status == 401
+
+    async def test_a_steered_audience_does_not_skip_the_choice(
+        self,
+        both: None,
+        hass_client: ClientSessionGenerator,
+        hass_client_no_auth: ClientSessionGenerator,
+    ) -> None:
+        """A client that steers the resource past the provider's match gains nothing.
+
+        The provider does not recognise the steered resource, so the user sees the
+        plain approve screen and the token carries only openid. This server accepts
+        the token, since its audience is the steered one, and must treat it as
+        granting nothing; so must it the refreshed token, and the client ends back
+        at the consent screen.
+        """
+        provider = await hass_client()
+        mcp = await hass_client_no_auth()
+        registration = await _register(provider)
+        offered: list = []
+
+        tokens = await _sign_in(
+            provider,
+            registration,
+            None,
+            resource=STEERED_RESOURCE,
+            headers=STEERED,
+            offered=offered,
+        )
+
+        assert offered == [None]
+        assert tokens["scope"].split() == ["openid"]
+        resp = await _rpc(mcp, tokens["access_token"], "tools/list", headers=STEERED)
+        assert resp.status == 401, await resp.text()
+        assert 'error="invalid_token"' in resp.headers["WWW-Authenticate"]
+
+        refreshed = await _refresh(provider, registration, tokens["refresh_token"], STEERED)
+
+        assert refreshed["scope"].split() == ["openid"]
+        resp = await _rpc(mcp, refreshed["access_token"], "tools/list", headers=STEERED)
         assert resp.status == 401
 
     async def test_a_session_from_before_the_description_gets_administer_at_refresh(

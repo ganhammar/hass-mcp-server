@@ -25,7 +25,7 @@ You do not call these yourself: the assistant picks them from what you ask. The 
 | `delete_entity` | Areas, floors, devices and labels: Full | Delete the registry entry of a leftover entity that nothing provides any more; an entity still provided is refused (requires explicit confirmation) |
 | `search_entities` | Entities and their states: Read | Search entities by friendly name, device class, domain, or area |
 | `get_device_details` | Areas, floors, devices and labels: Read | Get a device and every entity registered to it (all domains), with optional states |
-| `call_service` | Entities and their states: Full | Call any Home Assistant service |
+| `call_service` | Entities and their states: Full | Call any Home Assistant service; system services and those Home Assistant reserves for administrators also need Diagnostics: Full |
 | `create_calendar_event` | Calendars: Full | Create a one-off calendar event (local calendars; entity API) |
 | `create_recurring_calendar_event` | Calendars: Full | Create a recurring calendar series with RRULE (local calendars) |
 | `list_calendar_events` | Calendars: Read | List events in a time window (uid for deletes; descriptions omitted by default) |

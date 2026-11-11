@@ -19,13 +19,16 @@ place only, to tell whether a token carries any scope of this server at all, and
 can only limit a token further.
 """
 
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from types import MappingProxyType
 from typing import Any
 
 from .caller import Caller, current_caller
+
+_LOGGER = logging.getLogger(__name__)
 
 SCOPE_PREFIX = "mcp:"
 
@@ -438,8 +441,13 @@ def may_read(area: str) -> bool:
 
 # Services that reach Home Assistant itself rather than a device: restarting or
 # stopping it, running commands on the host, add-ons, backups, updates, the recorder's
-# history, remote access and logging. A token limited by its scopes calls them only
-# with Diagnostics at Full, the area that holds restart_ha.
+# history, remote access and logging, and raw access to a bus, such as publishing any
+# MQTT message. A token limited by its scopes calls them only with Diagnostics at Full,
+# the area that holds restart_ha. A service Home Assistant registered as one only
+# administrators may call needs the same, so the list holds what that does not
+# catch on every supported Home Assistant version: services registered without the
+# administrator check, such as shell_command's and python_script's, and services only
+# later versions register with it, such as mqtt.publish.
 SYSTEM_SERVICE_DOMAINS = frozenset(
     {
         "homeassistant",
@@ -455,29 +463,67 @@ SYSTEM_SERVICE_DOMAINS = frozenset(
         "logger",
         "profiler",
         "debugpy",
+        "mqtt",
+        "synology_dsm",
     }
 )
+# Single services that reach the system in a domain whose other services act on devices.
+SYSTEM_SERVICES = frozenset({("homematic", "set_install_mode")})
+# Every domain's reload service reads its configuration again, and some integrations
+# register it without the administrator check.
+RELOAD_SERVICE = "reload"
 # The services of the homeassistant domain that act on entities, which Entities and
 # their states at Full covers.
 HOMEASSISTANT_ENTITY_SERVICES = frozenset({"turn_on", "turn_off", "toggle", "update_entity"})
 
 
-def is_system_service(domain: Any, service: Any) -> bool:
+def is_admin_service(hass: Any, domain: str, service: str) -> bool:
+    """Return whether Home Assistant registered a service as one only administrators may call.
+
+    ``async_register_admin_service`` registers a ``functools.partial`` of the private
+    ``_async_admin_handler`` as the service's job target, and that is what this looks
+    for in ``hass.services.async_services_internal()``, keyed by the lower-cased names
+    Home Assistant registers under. Both are internals: should either change, this
+    answers False rather than raising, and the fixed lists still hold. A contract test
+    in tests/test_ha_api_contracts.py pins them. Must run on the event loop.
+    """
+    try:
+        from homeassistant.helpers import service as service_helper
+
+        admin_handler = getattr(service_helper, "_async_admin_handler", None)
+        if admin_handler is None:
+            return False
+        registered = hass.services.async_services_internal().get(domain, {}).get(service)
+        target = getattr(getattr(registered, "job", None), "target", None)
+        return isinstance(target, partial) and target.func is admin_handler
+    except Exception:  # noqa: BLE001 - a core change leaves the fixed lists in charge
+        _LOGGER.debug("Could not tell whether %s.%s is admin-only", domain, service, exc_info=True)
+        return False
+
+
+def is_system_service(hass: Any, domain: Any, service: Any) -> bool:
     """Return whether a service reaches the system, by its names as Home Assistant reads them.
 
-    Home Assistant lower-cases both names before it looks a service up, so they are
-    compared lower-cased here too. A name that is not a string is not a service Home
-    Assistant can call.
+    Home Assistant lower-cases both names when it registers a service and when it looks
+    one up, so they are compared lower-cased here too. A name that is not a string is
+    not a service Home Assistant can call.
     """
     if not isinstance(domain, str) or not isinstance(service, str):
         return False
     domain, service = domain.lower(), service.lower()
     if domain == "homeassistant":
-        return service not in HOMEASSISTANT_ENTITY_SERVICES
-    return domain in SYSTEM_SERVICE_DOMAINS
+        if service not in HOMEASSISTANT_ENTITY_SERVICES:
+            return True
+    elif (
+        domain in SYSTEM_SERVICE_DOMAINS
+        or service == RELOAD_SERVICE
+        or (domain, service) in SYSTEM_SERVICES
+    ):
+        return True
+    return is_admin_service(hass, domain, service)
 
 
-def service_refusal(domain: Any, service: Any) -> str | None:
+def service_refusal(hass: Any, domain: Any, service: Any) -> str | None:
     """Return why the request being served may not call a service, or None when it may.
 
     Only a token limited by its scopes is filtered. Calling any service needs Entities
@@ -485,7 +531,11 @@ def service_refusal(domain: Any, service: Any) -> str | None:
     that reaches the system needs Diagnostics at Full as well.
     """
     grant = current_grant()
-    if grant is None or grant.allows(DIAGNOSTICS, FULL) or not is_system_service(domain, service):
+    if (
+        grant is None
+        or grant.allows(DIAGNOSTICS, FULL)
+        or not is_system_service(hass, domain, service)
+    ):
         return None
     return not_granted(
         f"the system service {domain}.{service}, which reaches past devices",

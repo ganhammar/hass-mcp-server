@@ -50,13 +50,20 @@ The [tool reference](tools.md) gives the area of every tool, resource and prompt
 
 ### Actions that reach the system
 
-Performing actions needs Entities and their states at Full. An action that reaches Home Assistant itself rather than a device needs Diagnostics at Full as well, the area that holds restart: every action of the `homeassistant` domain except `turn_on`, `turn_off`, `toggle` and `update_entity`, and every action of `hassio`, `shell_command`, `python_script`, `pyscript`, `recorder`, `backup`, `update`, `cloud`, `system_log`, `logger`, `profiler` and `debugpy`. Below that, the assistant is told which access the action needs.
+Performing actions needs Entities and their states at Full. Two kinds of action need Diagnostics at Full as well, the area that holds restart:
+
+- **Actions Home Assistant lets only administrators perform**, such as `zha.permit`, `file.read_file` or `downloader.download_file`. Home Assistant's own check does not help here, since the user who connected the application is an administrator, so the server looks at how each action was registered.
+- **System actions**, which reach Home Assistant itself or a whole bus rather than a device: every action of the `homeassistant` domain except `turn_on`, `turn_off`, `toggle` and `update_entity`; every action of `hassio`, `shell_command`, `python_script`, `pyscript`, `recorder`, `backup`, `update`, `cloud`, `system_log`, `logger`, `profiler`, `debugpy`, `mqtt` and `synology_dsm`; `homematic.set_install_mode`; and the `reload` action of every domain. Some of these Home Assistant does not reserve for administrators at all, and some only from a later version than the oldest this server supports.
+
+Below that, the assistant is told which access the action needs. Every other action an integration offers is allowed at Entities and their states at Full, and what it does is not looked into: `modbus.write_register` writes any register, for example.
 
 ### What the choice does not cover
 
 Be clear about these before you rely on a lower level:
 
 - **A script or automation does whatever is written in it.** The filter checks the action the application performs, not what a script does once it runs. An application that may perform actions can run your existing scripts, and one that may change automations and scripts can write one that performs any action, restarting Home Assistant included, whatever the other areas say.
+- **Other actions are not looked into.** Below Diagnostics at Full the filter holds back the actions Home Assistant reserves for administrators and the system actions listed above. Any other action an integration offers is allowed with Entities and their states at Full, whatever it does.
+- **A camera snapshot can be made public.** An application that may perform actions can have `camera.snapshot` write an image under `www/` in your configuration folder, and Home Assistant serves everything there at `/local/` without sign-in.
 - **None hides an area's tools, not the things in it.** With Cameras and images at None, your cameras still show up as entities, and with Entities and their states at Full an action can still take a snapshot. Keeping an application away from particular entities is not part of this.
 - **Templates can read every state**, whatever Entities and their states is set to.
 - **Config files and AppDaemon apps reach past the other areas.** With Config files at Full an application can change any YAML file, such as a dashboard kept in YAML. AppDaemon apps are code, and a changed app can do anything AppDaemon can do.
@@ -70,7 +77,7 @@ When you update, a connection made before keeps what it could do, which is Admin
 ### What an application sees when it is refused
 
 - **A tool, resource or prompt outside its access** is left out of the lists it gets. Called anyway, it is refused with a message saying that the access granted to the application does not include it, which access it needs, and how to change it. The refused call is logged and fires the audit event, as a call to a disabled tool does.
-- **An action that reaches the system** without Diagnostics at Full comes back as a failed `call_service` with the same kind of message.
+- **A system action, or one Home Assistant reserves for administrators,** without Diagnostics at Full comes back as a failed `call_service` with the same kind of message.
 - **A token that grants nothing here**, because every area was set to None or the connection predates the choice, is answered with `401` and `error="invalid_token"`. The application renews its token; a connection from before gets Administer that way, and one that still has nothing goes back to the consent screen. This does not count as a failed login for Home Assistant's IP ban.
 
 ## Who made a change

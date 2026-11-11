@@ -1108,3 +1108,51 @@ class TestFlowProgressContract:
                 flows.async_get(options_id)
             with pytest.raises(UnknownFlow):
                 options.async_get(config_id)
+
+
+class TestAdminServiceContracts:
+    """Contracts for access.is_admin_service.
+
+    A token limited by its scopes calls a service Home Assistant reserves for
+    administrators only with Diagnostics at Full. Home Assistant offers no way to ask
+    whether a service is one; ``async_register_admin_service`` registers a partial of
+    the private ``_async_admin_handler`` as the service's job target, and the
+    detection looks for that in ``async_services_internal()``. If this breaks, the
+    detection answers False and only the fixed lists in access.py hold, so find the
+    new marker before releasing.
+    """
+
+    async def test_a_service_registered_for_administrators_is_told_apart(self, hass: HomeAssistant):
+        from homeassistant.helpers.service import async_register_admin_service
+
+        from custom_components.mcp_server_http_transport.access import is_admin_service
+
+        async_register_admin_service(hass, "mcp_contract", "Locked", AsyncMock())
+        hass.services.async_register("mcp_contract", "Open", AsyncMock())
+
+        registered = hass.services.async_services_internal()["mcp_contract"]
+        assert set(registered) == {"locked", "open"}
+        assert is_admin_service(hass, "mcp_contract", "locked")
+        assert not is_admin_service(hass, "mcp_contract", "open")
+        assert not is_admin_service(hass, "mcp_contract", "missing")
+        assert not is_admin_service(hass, "absent", "locked")
+
+    async def test_core_restart_is_detected(self, hass: HomeAssistant):
+        from custom_components.mcp_server_http_transport.access import is_admin_service
+
+        assert await async_setup_component(hass, "homeassistant", {})
+
+        assert is_admin_service(hass, "homeassistant", "restart")
+        assert not is_admin_service(hass, "homeassistant", "turn_on")
+
+    async def test_the_detection_runs_on_names_as_call_service_passes_them(
+        self, hass: HomeAssistant
+    ):
+        """call_service lower-cases the names before the lookup, as core does."""
+        from homeassistant.helpers.service import async_register_admin_service
+
+        from custom_components.mcp_server_http_transport.access import is_system_service
+
+        async_register_admin_service(hass, "mcp_contract", "locked", AsyncMock())
+
+        assert is_system_service(hass, "MCP_Contract", "LOCKED")

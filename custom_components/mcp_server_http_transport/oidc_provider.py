@@ -95,7 +95,8 @@ _OPTION_TEXT: dict[str, dict[str, str]] = {
         READ: ("{app} can see system health, repairs, the list of backups and the error log."),
         FULL: (
             "{app} can also restart Home Assistant, fire events, correct or clear "
-            "statistics, and perform system actions such as making a backup."
+            "statistics, and perform system actions and the actions Home Assistant lets "
+            "only administrators perform, such as making a backup."
         ),
     },
     INTEGRATIONS: {
@@ -142,13 +143,18 @@ _OPTION_NOTES: dict[tuple[str, str], list[dict[str, Any]]] = {
     (ENTITIES, FULL): [
         {
             "text": (
-                "Actions reach further than devices. An action can also run a script or "
-                "turn an automation off, whatever the other areas say."
+                "Actions reach further than devices. An action can also run a script, which "
+                "does whatever is written in it, or turn an automation off, whatever the "
+                "other areas say."
             ),
             "when": [{"some_group": "below_highest"}],
         },
         {
-            "text": "System actions, such as restarting Home Assistant, need Diagnostics at Full.",
+            "text": (
+                "Actions Home Assistant lets only administrators perform, and system actions "
+                "such as restarting Home Assistant, need Diagnostics at Full. What other "
+                "actions an integration offers do is not looked into."
+            ),
             "when": [_when(DIAGNOSTICS, *_BELOW_FULL)],
         },
     ],
@@ -270,9 +276,11 @@ _PRESET_TEXT: dict[str, dict[str, Any]] = {
         "notes": [
             {
                 "text": (
-                    f"{_ACTIONS_REACH} An action can also run one of your scripts or turn an "
-                    "automation off. System actions, such as restarting Home Assistant, need "
-                    "Administer."
+                    f"{_ACTIONS_REACH} An action can also run one of your scripts, which does "
+                    "whatever is written in it, or turn an automation off. Actions Home "
+                    "Assistant lets only administrators perform, and system actions such as "
+                    "restarting Home Assistant, need Administer. What other actions an "
+                    "integration offers do is not looked into."
                 )
             }
         ],

@@ -422,6 +422,12 @@ class TestCompletionLimits:
 class TestServiceFilter:
     """With a limited token, a service that reaches the system needs Diagnostics at Full."""
 
+    @staticmethod
+    def _hass(registered: dict | None = None) -> Mock:
+        hass = Mock()
+        hass.services.async_services_internal = Mock(return_value=registered or {})
+        return hass
+
     @pytest.mark.parametrize(
         ("domain", "service"),
         [
@@ -442,10 +448,16 @@ class TestServiceFilter:
             ("logger", "set_level"),
             ("profiler", "start"),
             ("debugpy", "start"),
+            ("mqtt", "publish"),
+            ("MQTT", "Dump"),
+            ("synology_dsm", "reboot"),
+            ("homematic", "set_install_mode"),
+            ("script", "reload"),
+            ("group", "RELOAD"),
         ],
     )
     def test_system_services(self, domain, service):
-        assert is_system_service(domain, service)
+        assert is_system_service(self._hass(), domain, service)
 
     @pytest.mark.parametrize(
         ("domain", "service"),
@@ -458,17 +470,42 @@ class TestServiceFilter:
             ("light", "turn_on"),
             ("script", "turn_on"),
             ("automation", "turn_off"),
+            ("homematic", "virtualkey"),
+            ("modbus", "write_register"),
             (None, "restart"),
             ("homeassistant", 7),
         ],
     )
     def test_services_that_act_on_entities(self, domain, service):
-        assert not is_system_service(domain, service)
+        assert not is_system_service(self._hass(), domain, service)
+
+    def test_a_service_registered_for_administrators_is_a_system_service(self):
+        from functools import partial
+
+        from homeassistant.helpers import service as service_helper
+
+        admin = Mock()
+        admin.job.target = partial(service_helper._async_admin_handler, Mock(), Mock())
+        plain = Mock()
+        plain.job.target = lambda call: None
+        hass = self._hass({"zha": {"permit": admin, "squawk": plain}})
+
+        assert is_system_service(hass, "zha", "permit")
+        assert is_system_service(hass, "ZHA", "Permit")
+        assert not is_system_service(hass, "zha", "squawk")
+        assert not is_system_service(hass, "zha", "unknown")
+
+    def test_a_registry_that_cannot_be_read_leaves_the_fixed_lists_in_charge(self):
+        hass = Mock()
+        hass.services.async_services_internal = Mock(side_effect=AttributeError("gone"))
+
+        assert not is_system_service(hass, "zha", "permit")
+        assert is_system_service(hass, "homeassistant", "restart")
 
     def test_a_limited_caller_without_diagnostics_at_full_is_refused(self):
         with acting_as(_caller("mcp:configure")):
-            refusal = service_refusal("homeassistant", "restart")
-            allowed = service_refusal("light", "turn_on")
+            refusal = service_refusal(Mock(), "homeassistant", "restart")
+            allowed = service_refusal(self._hass(), "light", "turn_on")
 
         assert "homeassistant.restart" in refusal
         assert "Diagnostics at Full" in refusal
@@ -485,7 +522,7 @@ class TestServiceFilter:
     )
     def test_who_the_filter_lets_through(self, caller):
         with acting_as(caller):
-            assert service_refusal("homeassistant", "restart") is None
+            assert service_refusal(Mock(), "homeassistant", "restart") is None
 
     async def test_call_service_answers_a_refusal_as_an_error(self, every_tool_hass):
         every_tool_hass.services.async_call = Mock()

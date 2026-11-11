@@ -664,8 +664,11 @@ class TestChosenAccess:
         hass_client: ClientSessionGenerator,
         hass_client_no_auth: ClientSessionGenerator,
     ) -> None:
+        from homeassistant.helpers.service import async_register_admin_service
+
         calls = []
         hass.services.async_register("test", "ping", lambda call: calls.append(call))
+        async_register_admin_service(hass, "test", "locked", lambda call: calls.append(call))
         provider = await hass_client()
         mcp = await hass_client_no_auth()
         registration = await _register(provider)
@@ -681,10 +684,13 @@ class TestChosenAccess:
             return (await resp.json())["result"]
 
         refused = await call("homeassistant", "restart")
+        admin_only = await call("test", "locked")
         allowed = await call("test", "ping")
 
         assert refused["isError"] is True
         assert "Diagnostics at Full" in refused["content"][0]["text"]
+        assert admin_only["isError"] is True
+        assert "Diagnostics at Full" in admin_only["content"][0]["text"]
         assert allowed.get("isError") is not True
         assert len(calls) == 1
 

@@ -117,15 +117,16 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
     """Call a Home Assistant service, returning its response data when it has any.
 
     A caller limited by its token's scopes calls a service that reaches the system,
-    such as homeassistant.restart, only when its access includes Diagnostics at
-    Full. A script or automation it runs is not looked into.
+    such as homeassistant.restart or one Home Assistant reserves for administrators,
+    only when its access includes Diagnostics at Full. What another service an
+    integration offers does, or a script or automation it runs, is not looked into.
     """
     domain = arguments["domain"]
     service = arguments["service"]
     entity_id = arguments.get("entity_id")
     data = arguments.get("data", {})
 
-    if refusal := service_refusal(domain, service):
+    if refusal := service_refusal(hass, domain, service):
         return error_result(refusal)
 
     service_data = {**data}

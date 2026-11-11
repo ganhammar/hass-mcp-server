@@ -1,6 +1,7 @@
 """Entity, area, device, and service tools."""
 
 import logging
+import re
 from typing import Any
 
 from homeassistant.core import HomeAssistant, SupportsResponse
@@ -185,8 +186,9 @@ async def call_service(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[s
 @register_tool(
     name="list_entities",
     description=(
-        "List every entity with its state, which is long on most homes. For a question "
-        "about particular things or a room, use search_entities instead"
+        "List every entity with its state, or every entity of one domain, which is long "
+        "on most homes. For a question about particular things or a room, use "
+        "search_entities instead"
     ),
     input_schema={
         "type": "object",
@@ -265,8 +267,8 @@ async def list_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[
 @register_tool(
     name="list_areas",
     description=(
-        "List all areas with their floor and aliases. Not needed before search_entities, "
-        "which takes room names"
+        "List all areas with their floor and aliases. search_entities takes room names "
+        "directly, so this is for seeing what the rooms are called"
     ),
     input_schema={
         "type": "object",
@@ -494,24 +496,56 @@ async def describe_service(hass: HomeAssistant, arguments: dict[str, Any]) -> di
 
 
 SEARCH_LIMIT = 100
+# How many room names a reply lists when the query named nothing in the home.
+SEARCH_ROOMS_LISTED = 40
+
+_WORD_BREAK = re.compile(r"[\W_]+")
+
+# How well a query word matches a word of an entity's text, best first.
+_WHOLE, _INFLECTED, _INSIDE, _STEM_INSIDE = range(4)
 
 
-def _word_forms(word: str) -> tuple[str, ...]:
-    """Return a query word and, for a plural-looking one, the forms without its ending.
+def _words(*texts: str | None) -> frozenset[str]:
+    """Return the words of some text, casefolded and split on anything but letters and digits."""
+    return frozenset(
+        word for text in texts if text for word in _WORD_BREAK.split(text.casefold()) if word
+    )
 
-    'lights' also matches 'light' and 'switches' also 'switch', so a plural finds
-    an entity named in the singular and the domain in its entity ID. Words of three
-    letters or fewer are taken as they are.
+
+def _word_match(word: str, token: str) -> int | None:
+    """Return how well a query word matches one word of an entity's text, or None.
+
+    A whole word is best. Next comes the same word with another ending, in either
+    direction: 'lights' and 'light', 'kontoret' and 'kontor', 'lampor' and 'lampa',
+    or 'temp' for 'temperature'. Then a word inside a longer one, as 'lampa' in
+    'taklampa', and last a word inside a longer one once up to two letters of its
+    ending are dropped. Numbers and words of one or two letters match whole words
+    only, and no rule matches on fewer than four shared letters, which keeps
+    'ljus' from finding 'ljud'.
     """
-    if len(word) <= 3 or not word.endswith("s"):
-        return (word,)
-    if word.endswith("es"):
-        return (word, word[:-1], word[:-2])
-    return (word, word[:-1])
+    if word == token:
+        return _WHOLE
+    if word.isdigit() or len(word) < 3:
+        return None
+    if token.startswith(word):
+        return _INFLECTED
+    shared = 0
+    for ours, theirs in zip(word, token, strict=False):
+        if ours != theirs:
+            break
+        shared += 1
+    if shared >= 4 and len(word) - shared <= 3 and len(token) - shared <= 3:
+        return _INFLECTED
+    if len(word) >= 4 and word in token:
+        return _INSIDE
+    for cut in (1, 2):
+        if len(word) - cut >= 4 and word[:-cut] in token:
+            return _STEM_INSIDE
+    return None
 
 
 def _area_ids_for(registry: ar.AreaRegistry, value: str) -> set[str]:
-    """Return the IDs of the areas an ID, a name or an alias refers to."""
+    """Return the IDs of the areas a value refers to: an ID, else a name, else an alias."""
     area = registry.async_get_area(value) or registry.async_get_area_by_name(value)
     if area is not None:
         return {area.id}
@@ -519,38 +553,39 @@ def _area_ids_for(registry: ar.AreaRegistry, value: str) -> set[str]:
 
 
 class _Places:
-    """The area, floor and device text an entity can be found by, looked up once each."""
+    """The area, floor and device words an entity can be found by, looked up once each."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         self._areas = ar.async_get(hass)
         self._floors = fr.async_get(hass)
         self._devices = dr.async_get(hass)
-        self._area_text: dict[str, str] = {}
-        self._device: dict[str, tuple[str | None, str]] = {}
+        self._area_words: dict[str, frozenset[str]] = {}
+        self._device: dict[str, tuple[str | None, frozenset[str]]] = {}
 
-    def device(self, device_id: str | None) -> tuple[str | None, str]:
-        """Return a device's area ID and its names as searchable text."""
+    def device(self, device_id: str | None) -> tuple[str | None, frozenset[str]]:
+        """Return a device's area ID and the words of its names."""
         if not device_id:
-            return None, ""
+            return None, frozenset()
         if device_id not in self._device:
             device = self._devices.async_get(device_id)
             if device is None:
-                self._device[device_id] = (None, "")
+                self._device[device_id] = (None, frozenset())
             else:
-                names = (device.name_by_user, device.name)
-                text = "\n".join(name.casefold() for name in names if name)
-                self._device[device_id] = (device.area_id, text)
+                self._device[device_id] = (
+                    device.area_id,
+                    _words(device.name_by_user, device.name),
+                )
         return self._device[device_id]
 
     def area_name(self, area_id: str | None) -> str | None:
         area = self._areas.async_get_area(area_id) if area_id else None
         return area.name if area else None
 
-    def area_text(self, area_id: str | None) -> str:
-        """Return an area's name and aliases, and its floor's, as searchable text."""
+    def area_words(self, area_id: str | None) -> frozenset[str]:
+        """Return the words of an area's name and aliases, and of its floor's."""
         if not area_id:
-            return ""
-        if area_id not in self._area_text:
+            return frozenset()
+        if area_id not in self._area_words:
             area = self._areas.async_get_area(area_id)
             names: list[str] = []
             if area is not None:
@@ -558,8 +593,11 @@ class _Places:
                 floor = self._floors.async_get_floor(area.floor_id) if area.floor_id else None
                 if floor is not None:
                     names += [floor.name, *floor.aliases]
-            self._area_text[area_id] = "\n".join(name.casefold() for name in names)
-        return self._area_text[area_id]
+            self._area_words[area_id] = _words(*names)
+        return self._area_words[area_id]
+
+    def room_names(self) -> list[str]:
+        return sorted(area.name for area in self._areas.async_list_areas())
 
 
 @register_tool(
@@ -567,10 +605,10 @@ class _Places:
     description=(
         "Find entities by plain words and get their current states in one call. Start "
         "here for questions like 'are the office lights on?': pass query 'office lights' "
-        "without looking up areas or entity IDs first. Every word must appear, in any "
-        "order, in the entity ID, name or aliases, or in the name or an alias of its area, "
-        "floor or device; a trailing 's' is optional. Best matches come first, and config, "
-        "diagnostic and hidden entities last"
+        "without looking up areas or entity IDs first. Every word must match, in any "
+        "order, the entity ID, name, aliases or device class, or the name or an alias of "
+        "its area, floor or device; endings may differ ('lights' finds 'light'). A word "
+        "nothing in the home matches is left out, and the reply says so and lists the rooms"
     ),
     input_schema={
         "type": "object",
@@ -579,7 +617,7 @@ class _Places:
                 "type": "string",
                 "description": (
                     "Words naming the thing and the room, e.g. 'office light' or 'kitchen "
-                    "temperature'. Leave out words such as 'is' or 'on', which must match too"
+                    "temperature', in the home's own language where you know its names"
                 ),
             },
             "device_class": {
@@ -592,7 +630,7 @@ class _Places:
             },
             "area_id": {
                 "type": "string",
-                "description": "Filter by area, given by its ID, name or an alias",
+                "description": "Filter by area: its ID, else its name, else an alias",
             },
             "limit": {
                 "type": "integer",
@@ -611,14 +649,16 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
     device_class_filter = arguments.get("device_class")
     domain_filter = arguments.get("domain")
     area_argument = arguments.get("area_id")
-    limit = arguments.get("limit", SEARCH_LIMIT)
+    limit = arguments.get("limit")
+    if limit is None:
+        limit = SEARCH_LIMIT
 
     if not isinstance(query, str):
         return error_result("Error: query must be a string")
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
         return error_result("Error: limit must be a positive integer")
-    words = query.casefold().split()
-    if not any([words, device_class_filter, domain_filter, area_argument]):
+    asked = list(dict.fromkeys(word for word in _WORD_BREAK.split(query.casefold()) if word))
+    if not any([asked, device_class_filter, domain_filter, area_argument]):
         return error_result(
             "Error: at least one search parameter "
             "(query, device_class, domain, area_id) must be provided"
@@ -634,20 +674,32 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
 
     entity_registry = er.async_get(hass)
     places = _Places(hass)
-    phrase = " ".join(words)
-    word_forms = [_word_forms(word) for word in words]
+    known: dict[tuple[str, str], int | None] = {}
 
-    matches: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    def best(word: str, tokens: frozenset[str]) -> int | None:
+        """Return the best match of a query word among some words, or None."""
+        found: int | None = None
+        for token in tokens:
+            if (word, token) not in known:
+                known[(word, token)] = _word_match(word, token)
+            quality = known[(word, token)]
+            if quality is not None and (found is None or quality < found):
+                found = quality
+        return found
+
+    # Every entity the filters leave, with how well each query word matches it.
+    candidates: list[tuple[list[int | None], bool, tuple[Any, ...], dict[str, Any]]] = []
     for state in hass.states.async_all():
         domain = state.domain
         if domain_filter and domain != domain_filter:
             continue
-        if device_class_filter and state.attributes.get("device_class") != device_class_filter:
+        device_class = state.attributes.get("device_class")
+        if device_class_filter and device_class != device_class_filter:
             continue
 
         entry = entity_registry.async_get(state.entity_id)
         aliases = _get_aliases(hass, entry) if entry else []
-        device_area, device_text = places.device(entry.device_id if entry else None)
+        device_area, device_words = places.device(entry.device_id if entry else None)
         # An entity's own area wins over its device's.
         area_id = (entry.area_id if entry else None) or device_area
 
@@ -655,30 +707,32 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
             continue
 
         friendly_name = str(state.attributes.get("friendly_name", state.entity_id))
-        own_names = [state.entity_id, friendly_name.casefold(), *(a.casefold() for a in aliases)]
-        if words:
-            text = "\n".join([*own_names, places.area_text(area_id), device_text])
-            if not all(any(form in text for form in forms) for forms in word_forms):
-                continue
+        tokens = (
+            _words(state.entity_id, friendly_name, *aliases, str(device_class or ""))
+            | places.area_words(area_id)
+            | device_words
+        )
+        quality = [best(word, tokens) for word in asked]
 
         # Entities a person looks at come before configuration, diagnostics and
-        # hidden ones; then a name or alias the query spells out in full; then
-        # entities of a domain the query names, so 'office lights' puts the lights
-        # before the office light sensor.
+        # hidden ones.
         secondary = entry is not None and (
             entry.entity_category is not None
             or entry.hidden_by is not None
             or entry.disabled_by is not None
         )
-        exact = bool(words) and phrase in own_names
-        names_domain = any(domain in forms for forms in word_forms)
-        rank = (secondary, not exact, not names_domain, state.entity_id)
+        domain_words = _words(domain) | {domain}
+        names_domain = [
+            (match := best(word, domain_words)) is not None and match <= _INFLECTED
+            for word in asked
+        ]
+        own_names = {state.entity_id, friendly_name.casefold(), *(a.casefold() for a in aliases)}
 
         result: dict[str, Any] = {
             "entity_id": state.entity_id,
             "state": state.state,
             "friendly_name": friendly_name,
-            "device_class": state.attributes.get("device_class"),
+            "device_class": device_class,
             "area_id": area_id,
             "area": places.area_name(area_id),
             # Newer cores list the entity's own name among its aliases by default.
@@ -686,20 +740,69 @@ async def search_entities(hass: HomeAssistant, arguments: dict[str, Any]) -> dic
         }
         if (unit := state.attributes.get("unit_of_measurement")) is not None:
             result["unit_of_measurement"] = unit
-        matches.append((rank, result))
+        candidates.append((quality, secondary, (names_domain, own_names), result))
+
+    # A word that matches nothing at all is one the home does not use, such as
+    # 'the' or a room named in another language, so the search goes on without it.
+    used = [
+        index
+        for index in range(len(asked))
+        if any(quality[index] is not None for quality, *_ in candidates)
+    ]
+    unknown = [word for index, word in enumerate(asked) if index not in used]
+    phrase = " ".join(asked[index] for index in used)
+
+    # With no word left to search by, the filters alone decide, and without a
+    # filter either there is nothing to list.
+    filtered = bool(device_class_filter or domain_filter or area_filter is not None)
+    matches: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    if used or filtered:
+        for quality, secondary, (names_domain, own_names), result in candidates:
+            if any(quality[index] is None for index in used):
+                continue
+            # After the entities a person looks at: a name or alias the query
+            # spells out in full, then the closest words, then entities of a
+            # domain the query names, so 'office lights' puts the lights before
+            # the office light sensor.
+            rank = (
+                secondary,
+                phrase not in own_names,
+                sum(quality[index] or 0 for index in used),
+                not any(names_domain[index] for index in used),
+                result["entity_id"],
+            )
+            matches.append((rank, result))
 
     matches.sort(key=lambda match: match[0])
     content = [{"type": "text", "text": dumps([result for _, result in matches[:limit]])}]
-    if len(matches) > limit:
-        content.append(
-            {
-                "type": "text",
-                "text": (
-                    f"Showing the best {limit} of {len(matches)} matches. Add words or "
-                    "filters to narrow the search, or raise limit."
-                ),
-            }
+    notes: list[str] = []
+    if unknown:
+        named = ", ".join(f"'{word}'" for word in unknown)
+        rooms = places.room_names()
+        listed = ", ".join(rooms[:SEARCH_ROOMS_LISTED]) or "none"
+        more = (
+            f" and {len(rooms) - SEARCH_ROOMS_LISTED} more"
+            if len(rooms) > SEARCH_ROOMS_LISTED
+            else ""
         )
+        notes.append(
+            f"Nothing in this home matches {named}, so the search left "
+            f"{'it' if len(unknown) == 1 else 'them'} out. Names may be in another "
+            f"language. Rooms: {listed}{more}."
+        )
+    if not matches and used:
+        named = ", ".join(f"'{asked[index]}'" for index in used)
+        notes.append(
+            f"No entity matches {named} together. Try fewer words, or the domain, "
+            "device_class or area filter."
+        )
+    if len(matches) > limit:
+        notes.append(
+            f"Showing the best {limit} of {len(matches)} matches. Add words or "
+            "filters to narrow the search, or raise limit."
+        )
+    if notes:
+        content.append({"type": "text", "text": " ".join(notes)})
     return {"content": content}
 
 

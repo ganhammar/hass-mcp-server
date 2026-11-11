@@ -1700,7 +1700,9 @@ class TestSearchEntities:
     async def test_area_and_entity_aliases_match(self, hass, home):
         ids = _ids(await entities_mod.search_entities(hass, {"query": "kontor lampa"}))
 
-        assert ids == ["light.desk"]
+        # The lamp's alias is the whole word; its device's other entities only
+        # share the word 'lamp' with it, so they follow.
+        assert ids == ["light.desk", "switch.desk_lamp_plug", "sensor.desk_lamp_signal"]
 
     async def test_floor_name_and_alias_match(self, hass, home):
         by_name = await entities_mod.search_entities(hass, {"query": "upstairs temperature"})
@@ -1835,15 +1837,114 @@ class TestSearchEntities:
         assert message in result["content"][0]["text"]
 
 
-class TestWordForms:
+class TestWordMatch:
     @pytest.mark.parametrize(
-        ("word", "forms"),
+        ("word", "token", "quality"),
         [
-            ("lights", ("lights", "light")),
-            ("switches", ("switches", "switche", "switch")),
-            ("gas", ("gas",)),
-            ("lampa", ("lampa",)),
+            ("light", "light", entities_mod._WHOLE),
+            # The same word with another ending, in either direction
+            ("lights", "light", entities_mod._INFLECTED),
+            ("switches", "switch", entities_mod._INFLECTED),
+            ("kontoret", "kontor", entities_mod._INFLECTED),
+            ("taklampan", "taklampa", entities_mod._INFLECTED),
+            ("lampor", "lampa", entities_mod._INFLECTED),
+            ("temperature", "temperatur", entities_mod._INFLECTED),
+            ("temp", "temperature", entities_mod._INFLECTED),
+            # A word inside a longer one ranks below
+            ("lampa", "taklampa", entities_mod._INSIDE),
+            ("door", "outdoor", entities_mod._INSIDE),
+            ("lampor", "taklampa", entities_mod._STEM_INSIDE),
+            # Fewer than four shared letters is not a match
+            ("ljus", "ljud", None),
+            ("gas", "glass", None),
+            # Numbers and very short words match whole words only
+            ("7", "17", None),
+            ("7", "7", entities_mod._WHOLE),
+            ("on", "kontor", None),
+            ("tv", "tv", entities_mod._WHOLE),
         ],
     )
-    def test_a_plural_also_matches_without_its_ending(self, word, forms):
-        assert entities_mod._word_forms(word) == forms
+    def test_how_well_a_query_word_matches(self, word, token, quality):
+        assert entities_mod._word_match(word, token) == quality
+
+
+class TestSearchEntitiesForgiving:
+    """Queries a model sends that do not match the home word for word."""
+
+    @pytest.mark.parametrize(
+        "query", ["is the office temperature ok?", "office, temperature!", "office-temperature"]
+    )
+    async def test_punctuation_and_words_the_home_does_not_use_are_left_out(
+        self, hass, home, query
+    ):
+        result = await entities_mod.search_entities(hass, {"query": query})
+
+        assert _ids(result) == ["sensor.office_temperature"]
+
+    async def test_a_word_left_out_is_named_with_the_rooms(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "arbetsrum lights"})
+
+        # Every light in the home, since nothing is called 'arbetsrum'
+        assert _ids(result) == [
+            "light.desk",
+            "light.kitchen",
+            "light.office_ceiling",
+            "sensor.office_light_level",
+        ]
+        assert result["content"][1]["text"] == (
+            "Nothing in this home matches 'arbetsrum', so the search left it out. "
+            "Names may be in another language. Rooms: Kitchen, Office."
+        )
+
+    async def test_words_that_match_nothing_at_all_find_nothing_and_say_so(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "vardagsrum taklampa"})
+
+        assert _search_payload(result) == []
+        assert "isError" not in result
+        assert result["content"][1]["text"].startswith(
+            "Nothing in this home matches 'vardagsrum', 'taklampa', so the search left them out."
+        )
+
+    async def test_words_found_apart_but_not_together_say_so(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "kitchen temperature"})
+
+        assert _search_payload(result) == []
+        assert result["content"][1]["text"] == (
+            "No entity matches 'kitchen', 'temperature' together. Try fewer words, or the "
+            "domain, device_class or area filter."
+        )
+
+    async def test_a_word_left_out_keeps_the_filters(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "the", "area_id": "Kitchen"})
+
+        assert _ids(result) == ["light.kitchen"]
+
+    async def test_the_device_class_is_searched(self, hass, home):
+        # The sensor is named 'Office Light Level'; 'illuminance' is only its class.
+        result = await entities_mod.search_entities(hass, {"query": "kontor illuminance"})
+
+        assert _ids(result) == ["sensor.office_light_level"]
+
+    async def test_another_ending_still_matches(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "kontoret temperatur"})
+
+        assert _ids(result) == ["sensor.office_temperature"]
+
+    async def test_a_whole_word_comes_before_a_word_inside_another(self, hass, home):
+        registry = er.async_get(hass)
+        for entity_id, name in (
+            ("sensor.outdoor_temperature", "Outdoor Temperature"),
+            ("binary_sensor.front_door", "Front Door"),
+        ):
+            domain, object_id = entity_id.split(".")
+            registry.async_get_or_create(domain, "test", object_id, suggested_object_id=object_id)
+            hass.states.async_set(entity_id, "on", {"friendly_name": name})
+
+        result = await entities_mod.search_entities(hass, {"query": "door sensor"})
+
+        assert _ids(result) == ["binary_sensor.front_door", "sensor.outdoor_temperature"]
+
+    async def test_a_missing_limit_is_the_default(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "office", "limit": None})
+
+        assert len(_ids(result)) == 7

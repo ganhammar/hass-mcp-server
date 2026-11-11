@@ -24,6 +24,7 @@ from .const import (
     OIDC_PROVIDER_MIN_AUDIENCE_VERSION,
     OIDC_PROVIDER_RELEASES_URL,
     RESOURCE_METADATA_PREFIX,
+    SERVER_INSTRUCTIONS,
     VERSION,
 )
 from .json_utils import dumps
@@ -792,6 +793,7 @@ class MCPEndpointView(HomeAssistantView):
                         "name": self.server_name,
                         "version": VERSION,
                     },
+                    "instructions": SERVER_INSTRUCTIONS,
                 },
                 "id": msg_id,
             }

@@ -4,6 +4,7 @@ Let an AI assistant such as Claude work with your Home Assistant: read what is g
 
 Things you can ask once it is connected:
 
+- "Are any lights still on upstairs?"
 - "Why didn't the hallway automation run last night?"
 - "Which automations and dashboards still use `light.kitchen`? I want to rename it."
 - "Add a card for the new heat pump to the energy view."

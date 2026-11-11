@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, create_autospec, patch
@@ -18,6 +19,7 @@ from custom_components.mcp_server_http_transport.const import (
     OIDC_PROVIDER_MIN_AUDIENCE_VERSION,
     OIDC_PROVIDER_RELEASES_URL,
     RESOURCE_METADATA_PREFIX,
+    SERVER_INSTRUCTIONS,
 )
 from custom_components.mcp_server_http_transport.http import (
     ARGUMENTS_PREVIEW_CHARS,
@@ -44,10 +46,12 @@ from custom_components.mcp_server_http_transport.http import (
 from custom_components.mcp_server_http_transport.json_utils import dumps
 from custom_components.mcp_server_http_transport.tools import (
     TOOLS,
+    _is_usable,
     call_tool,
     caller_context,
     current_caller,
     error_result,
+    tool_is_read_only,
 )
 
 # What a validated bearer token resolves to; the view then looks its user up.
@@ -86,6 +90,28 @@ async def test_appdaemon_tool_is_callable_through_production_registry():
     result = await call_tool(hass, "list_appdaemon_files", {})
     assert result["isError"] is True
     assert "disabled" in result["content"][0]["text"]
+
+
+def test_instructions_name_only_tools_every_setup_offers():
+    """A tool the instructions name exists, is read-only and is not behind an option.
+
+    Read-only mode and the opt-in groups then leave every one of them listed, so the
+    instructions never send the model to a tool it was not given on account of how
+    the server is set up. Any snake_case word is taken for a tool name.
+    """
+    named = set(re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", SERVER_INSTRUCTIONS))
+    assert "search_entities" in named
+    hass = Mock()
+    hass.data = {DOMAIN: {"read_only": True}}
+    for name in sorted(named):
+        assert name in TOOLS, f"{name} is not a tool"
+        assert tool_is_read_only(name), f"{name} is not read-only"
+        assert _is_usable(hass, name), f"{name} is behind an option"
+
+
+def test_instructions_stay_short():
+    """They are sent to the model with every conversation."""
+    assert len(SERVER_INSTRUCTIONS.split()) < 200
 
 
 def test_get_base_url_with_forwarded_headers():
@@ -367,6 +393,19 @@ class TestMCPEndpointView:
         assert "tools" in capabilities
         assert "resources" in capabilities
         assert "prompts" in capabilities
+
+    async def test_post_initialize_sends_instructions(self, view):
+        """The instructions are what point the model at the right tool to start with."""
+        request = Mock(path=MCP_PATH)
+        request.headers = {"Authorization": "Bearer valid_token"}
+        request.json = AsyncMock(return_value={"jsonrpc": "2.0", "method": "initialize", "id": 22})
+
+        with patch.object(view, "_validate_token", return_value=TOKEN):
+            response = await view.post(request)
+
+        body = json.loads(response.body)
+        assert body["result"]["instructions"] == SERVER_INSTRUCTIONS
+        assert body["result"]["protocolVersion"] == "2024-11-05"
 
     async def test_post_tools_list_request(self, view, list_every_tool):
         """Test POST with tools/list request."""

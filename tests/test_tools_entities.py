@@ -2,10 +2,17 @@
 
 import json
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.const import EntityCategory
 from homeassistant.core import SupportsResponse
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import floor_registry as fr
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
 from custom_components.mcp_server_http_transport.tools import entities as entities_mod
@@ -1080,367 +1087,6 @@ class TestToolsEntities:
         assert body["result"]["isError"] is True
         assert "not found" in body["result"]["content"][0]["text"]
 
-    async def test_post_tools_call_search_entities_by_query(self, view, mock_hass):
-        """Test search_entities matches by friendly name."""
-        mock_state1 = Mock()
-        mock_state1.entity_id = "light.living_room"
-        mock_state1.state = "on"
-        mock_state1.attributes = {"friendly_name": "Living Room Light"}
-
-        mock_state2 = Mock()
-        mock_state2.entity_id = "sensor.temperature"
-        mock_state2.state = "22.5"
-        mock_state2.attributes = {"friendly_name": "Temperature Sensor"}
-
-        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
-
-        mock_entry = Mock()
-        mock_entry.aliases = []
-        mock_entry.area_id = None
-        mock_entry.device_id = None
-        mock_er = Mock()
-        mock_er.async_get.return_value = mock_entry
-
-        request = Mock()
-        request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(
-            return_value={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "search_entities",
-                    "arguments": {"query": "living"},
-                },
-                "id": 82,
-            }
-        )
-
-        with (
-            patch.object(view, "_authenticate", return_value=CALLER),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_er,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            response = await view.post(request)
-
-        assert response.status == 200
-        body = json.loads(response.body)
-        assert "isError" not in body["result"]
-        data = json.loads(body["result"]["content"][0]["text"])
-        assert len(data) == 1
-        assert data[0]["entity_id"] == "light.living_room"
-
-    async def test_post_tools_call_search_entities_no_params(self, view, mock_hass):
-        """Test search_entities requires at least one parameter."""
-        request = Mock()
-        request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(
-            return_value={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {"name": "search_entities", "arguments": {}},
-                "id": 83,
-            }
-        )
-
-        with patch.object(view, "_authenticate", return_value=CALLER):
-            response = await view.post(request)
-
-        assert response.status == 200
-        body = json.loads(response.body)
-        assert body["result"]["isError"] is True
-        assert "Error" in body["result"]["content"][0]["text"]
-
-    async def test_post_tools_call_search_entities_by_device_class(self, view, mock_hass):
-        """Test search_entities filters by device_class."""
-        mock_state1 = Mock()
-        mock_state1.entity_id = "sensor.temp"
-        mock_state1.state = "22"
-        mock_state1.attributes = {
-            "friendly_name": "Temp",
-            "device_class": "temperature",
-        }
-
-        mock_state2 = Mock()
-        mock_state2.entity_id = "sensor.humidity"
-        mock_state2.state = "45"
-        mock_state2.attributes = {
-            "friendly_name": "Humidity",
-            "device_class": "humidity",
-        }
-
-        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
-
-        mock_entry = Mock()
-        mock_entry.aliases = []
-        mock_entry.area_id = None
-        mock_entry.device_id = None
-        mock_er = Mock()
-        mock_er.async_get.return_value = mock_entry
-
-        request = Mock()
-        request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(
-            return_value={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "search_entities",
-                    "arguments": {"device_class": "temperature"},
-                },
-                "id": 84,
-            }
-        )
-
-        with (
-            patch.object(view, "_authenticate", return_value=CALLER),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_er,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            response = await view.post(request)
-
-        assert response.status == 200
-        body = json.loads(response.body)
-        assert "isError" not in body["result"]
-        data = json.loads(body["result"]["content"][0]["text"])
-        assert len(data) == 1
-        assert data[0]["entity_id"] == "sensor.temp"
-
-    async def test_post_tools_call_search_entities_by_area(self, view, mock_hass):
-        """Test search_entities filters by area_id."""
-        mock_state1 = Mock()
-        mock_state1.entity_id = "light.living"
-        mock_state1.state = "on"
-        mock_state1.attributes = {"friendly_name": "Living Light"}
-
-        mock_state2 = Mock()
-        mock_state2.entity_id = "light.bedroom"
-        mock_state2.state = "off"
-        mock_state2.attributes = {"friendly_name": "Bedroom Light"}
-
-        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
-
-        entry1 = Mock()
-        entry1.aliases = []
-        entry1.area_id = "living_room"
-        entry1.device_id = None
-
-        entry2 = Mock()
-        entry2.aliases = []
-        entry2.area_id = "bedroom"
-        entry2.device_id = None
-
-        entries = {"light.living": entry1, "light.bedroom": entry2}
-        mock_er = Mock()
-        mock_er.async_get = Mock(side_effect=lambda eid: entries.get(eid))
-
-        request = Mock()
-        request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(
-            return_value={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "search_entities",
-                    "arguments": {"area_id": "living_room"},
-                },
-                "id": 98,
-            }
-        )
-
-        with (
-            patch.object(view, "_authenticate", return_value=CALLER),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_er,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            response = await view.post(request)
-
-        assert response.status == 200
-        body = json.loads(response.body)
-        assert "isError" not in body["result"]
-        data = json.loads(body["result"]["content"][0]["text"])
-        assert len(data) == 1
-        assert data[0]["entity_id"] == "light.living"
-
-    async def test_post_tools_call_search_entities_area_via_device(self, view, mock_hass):
-        """Test search_entities resolves area via device registry."""
-        mock_state = Mock()
-        mock_state.entity_id = "sensor.temp"
-        mock_state.state = "22"
-        mock_state.attributes = {"friendly_name": "Temp"}
-
-        mock_hass.states.async_all.return_value = [mock_state]
-
-        entry = Mock()
-        entry.aliases = []
-        entry.area_id = None
-        entry.device_id = "device_1"
-        mock_er = Mock()
-        mock_er.async_get.return_value = entry
-
-        mock_device = Mock()
-        mock_device.area_id = "kitchen"
-        mock_dr = Mock()
-        mock_dr.async_get.return_value = mock_device
-
-        request = Mock()
-        request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(
-            return_value={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "search_entities",
-                    "arguments": {"area_id": "kitchen"},
-                },
-                "id": 99,
-            }
-        )
-
-        with (
-            patch.object(view, "_authenticate", return_value=CALLER),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_er,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=mock_dr,
-            ),
-        ):
-            response = await view.post(request)
-
-        assert response.status == 200
-        body = json.loads(response.body)
-        assert "isError" not in body["result"]
-        data = json.loads(body["result"]["content"][0]["text"])
-        assert len(data) == 1
-        assert data[0]["entity_id"] == "sensor.temp"
-        assert data[0]["area_id"] == "kitchen"
-
-    async def test_post_tools_call_search_entities_limit(self, view, mock_hass):
-        """Test search_entities respects the limit parameter."""
-        states = []
-        for i in range(10):
-            s = Mock()
-            s.entity_id = f"light.light_{i}"
-            s.state = "on"
-            s.attributes = {"friendly_name": f"Light {i}"}
-            states.append(s)
-        mock_hass.states.async_all.return_value = states
-
-        mock_entry = Mock()
-        mock_entry.aliases = []
-        mock_entry.area_id = None
-        mock_entry.device_id = None
-        mock_er = Mock()
-        mock_er.async_get.return_value = mock_entry
-
-        request = Mock()
-        request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(
-            return_value={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "search_entities",
-                    "arguments": {"domain": "light", "limit": 3},
-                },
-                "id": 101,
-            }
-        )
-
-        with (
-            patch.object(view, "_authenticate", return_value=CALLER),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_er,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            response = await view.post(request)
-
-        assert response.status == 200
-        body = json.loads(response.body)
-        assert "isError" not in body["result"]
-        data = json.loads(body["result"]["content"][0]["text"])
-        assert len(data) == 3
-
-    async def test_post_tools_call_search_entities_domain_filter(self, view, mock_hass):
-        """Test search_entities with domain filter skips non-matching entities."""
-        mock_state1 = Mock()
-        mock_state1.entity_id = "light.living"
-        mock_state1.state = "on"
-        mock_state1.attributes = {"friendly_name": "Living Light"}
-
-        mock_state2 = Mock()
-        mock_state2.entity_id = "sensor.temp"
-        mock_state2.state = "22"
-        mock_state2.attributes = {"friendly_name": "Temp"}
-
-        mock_hass.states.async_all.return_value = [mock_state1, mock_state2]
-
-        mock_entry = Mock()
-        mock_entry.aliases = []
-        mock_entry.area_id = None
-        mock_entry.device_id = None
-        mock_er = Mock()
-        mock_er.async_get.return_value = mock_entry
-
-        request = Mock()
-        request.headers = {"Authorization": "Bearer valid_token"}
-        request.json = AsyncMock(
-            return_value={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "search_entities",
-                    "arguments": {"domain": "sensor"},
-                },
-                "id": 100,
-            }
-        )
-
-        with (
-            patch.object(view, "_authenticate", return_value=CALLER),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.er.async_get",
-                return_value=mock_er,
-            ),
-            patch(
-                "custom_components.mcp_server_http_transport.tools.entities.dr.async_get",
-                return_value=Mock(),
-            ),
-        ):
-            response = await view.post(request)
-
-        assert response.status == 200
-        body = json.loads(response.body)
-        assert "isError" not in body["result"]
-        data = json.loads(body["result"]["content"][0]["text"])
-        assert len(data) == 1
-        assert data[0]["entity_id"] == "sensor.temp"
-
     async def test_post_tools_call_list_labels(self, view, mock_hass):
         """Test POST with tools/call for list_labels."""
         mock_label1 = Mock()
@@ -1944,3 +1590,361 @@ class TestToolsEntities:
         assert "state" in data[0]
         assert "attributes" not in data[0]
         assert "last_changed" not in data[0]
+
+
+def _search_payload(result: dict) -> list[dict]:
+    assert "isError" not in result
+    return json.loads(result["content"][0]["text"])
+
+
+def _ids(result: dict) -> list[str]:
+    return [entity["entity_id"] for entity in _search_payload(result)]
+
+
+def _entity_aliases(*aliases: str):
+    """Aliases in the type this core's entity registry stores them as."""
+    return list(aliases) if entities_mod._HAS_GET_ENTITY_ALIASES else set(aliases)
+
+
+@pytest.fixture
+def home(hass):
+    """A small home: an office upstairs and a kitchen, with lights, sensors and a lamp.
+
+    The desk lamp has no area of its own and is found in the office through its
+    device. The office is also called 'Kontor', the lamp 'Lampa'.
+    """
+    floors = fr.async_get(hass)
+    upstairs = floors.async_create("Upstairs", aliases={"Övervåning"}, level=1)
+    ground = floors.async_create("Ground", level=0)
+    areas = ar.async_get(hass)
+    office = areas.async_create("Office", floor_id=upstairs.floor_id, aliases={"Kontor"})
+    kitchen = areas.async_create("Kitchen", floor_id=ground.floor_id)
+
+    config_entry = MockConfigEntry(domain="demo")
+    config_entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=config_entry.entry_id,
+        identifiers={("demo", "desk")},
+        name="Desk Lamp",
+    )
+    dr.async_get(hass).async_update_device(device.id, area_id=office.id)
+
+    registry = er.async_get(hass)
+
+    def add(entity_id, state, name, *, area=None, device_id=None, attributes=None, **entry):
+        domain, object_id = entity_id.split(".")
+        created = registry.async_get_or_create(
+            domain,
+            "demo",
+            object_id,
+            suggested_object_id=object_id,
+            config_entry=config_entry,
+            device_id=device_id,
+            original_name=name,
+            **entry,
+        )
+        assert created.entity_id == entity_id
+        if area is not None:
+            registry.async_update_entity(entity_id, area_id=area)
+        hass.states.async_set(entity_id, state, {"friendly_name": name, **(attributes or {})})
+
+    add("light.office_ceiling", "on", "Ceiling Light", area=office.id)
+    add("light.desk", "off", "Desk Lamp", device_id=device.id)
+    registry.async_update_entity("light.desk", aliases=_entity_aliases("Lampa"))
+    add("switch.desk_lamp_plug", "on", "Desk Lamp Plug", device_id=device.id)
+    add(
+        "sensor.desk_lamp_signal",
+        "-60",
+        "Desk Lamp Signal",
+        device_id=device.id,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    )
+    add(
+        "sensor.office_light_level",
+        "320",
+        "Office Light Level",
+        area=office.id,
+        attributes={"device_class": "illuminance", "unit_of_measurement": "lx"},
+    )
+    add(
+        "sensor.office_temperature",
+        "21.5",
+        "Office Temperature",
+        area=office.id,
+        attributes={"device_class": "temperature", "unit_of_measurement": "°C"},
+    )
+    add(
+        "switch.office_fan",
+        "off",
+        "Office Fan",
+        area=office.id,
+        hidden_by=er.RegistryEntryHider.USER,
+    )
+    add("light.kitchen", "on", "Kitchen Light", area=kitchen.id)
+    # An entity Home Assistant knows only from its state, with no registry entry.
+    hass.states.async_set("sun.sun", "above_horizon", {"friendly_name": "Sun"})
+    return SimpleNamespace(office=office.id, kitchen=kitchen.id)
+
+
+class TestSearchEntities:
+    """search_entities against real registries, as one plain-words call answers a question."""
+
+    @pytest.mark.parametrize("query", ["office light", "lights office", "OFFICE LIGHTS"])
+    async def test_words_match_in_any_order_across_area_and_domain(self, hass, home, query):
+        ids = _ids(await entities_mod.search_entities(hass, {"query": query}))
+
+        # The lights the query names come first; the lamp is in the office only
+        # through its device.
+        assert ids == ["light.desk", "light.office_ceiling", "sensor.office_light_level"]
+
+    async def test_area_and_entity_aliases_match(self, hass, home):
+        ids = _ids(await entities_mod.search_entities(hass, {"query": "kontor lampa"}))
+
+        # The lamp's alias is the whole word; its device's other entities only
+        # share the word 'lamp' with it, so they follow.
+        assert ids == ["light.desk", "switch.desk_lamp_plug", "sensor.desk_lamp_signal"]
+
+    async def test_floor_name_and_alias_match(self, hass, home):
+        by_name = await entities_mod.search_entities(hass, {"query": "upstairs temperature"})
+        by_alias = await entities_mod.search_entities(hass, {"query": "övervåning temperature"})
+
+        assert _ids(by_name) == _ids(by_alias) == ["sensor.office_temperature"]
+
+    async def test_device_name_matches(self, hass, home):
+        ids = _ids(await entities_mod.search_entities(hass, {"query": "desk lamp signal"}))
+
+        assert ids == ["sensor.desk_lamp_signal"]
+
+    async def test_every_word_must_match(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "kitchen temperature"})
+
+        # Nothing matching is a listing that found nothing, not an error.
+        assert _search_payload(result) == []
+
+    async def test_an_exact_name_comes_first_and_diagnostics_last(self, hass, home):
+        ids = _ids(await entities_mod.search_entities(hass, {"query": "desk lamp"}))
+
+        assert ids == ["light.desk", "switch.desk_lamp_plug", "sensor.desk_lamp_signal"]
+
+    async def test_hidden_and_diagnostic_entities_come_after_the_rest(self, hass, home):
+        ids = _ids(await entities_mod.search_entities(hass, {"area_id": home.office}))
+
+        assert ids[-2:] == ["sensor.desk_lamp_signal", "switch.office_fan"]
+        assert set(ids[:-2]) == {
+            "light.desk",
+            "light.office_ceiling",
+            "sensor.office_light_level",
+            "sensor.office_temperature",
+            "switch.desk_lamp_plug",
+        }
+
+    async def test_result_carries_state_area_name_and_unit(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "office temperature"})
+
+        assert _search_payload(result) == [
+            {
+                "entity_id": "sensor.office_temperature",
+                "state": "21.5",
+                "friendly_name": "Office Temperature",
+                "device_class": "temperature",
+                "area_id": home.office,
+                "area": "Office",
+                "aliases": [],
+                "unit_of_measurement": "°C",
+            }
+        ]
+
+    async def test_an_entity_without_a_registry_entry_is_found(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "sun"})
+
+        assert _search_payload(result) == [
+            {
+                "entity_id": "sun.sun",
+                "state": "above_horizon",
+                "friendly_name": "Sun",
+                "device_class": None,
+                "area_id": None,
+                "area": None,
+                "aliases": [],
+            }
+        ]
+
+    @pytest.mark.parametrize("area", ["office", "Office", "kontor", "KONTOR"])
+    async def test_area_filter_takes_a_name_or_alias(self, hass, home, area):
+        by_id = _ids(await entities_mod.search_entities(hass, {"area_id": home.office}))
+        by_name = _ids(await entities_mod.search_entities(hass, {"area_id": area}))
+
+        assert by_name == by_id
+        assert "light.desk" in by_id
+        assert "light.kitchen" not in by_id
+
+    async def test_area_filter_with_a_query(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "light", "area_id": "Kitchen"})
+
+        assert _ids(result) == ["light.kitchen"]
+
+    async def test_unknown_area_is_an_error(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"area_id": "Attic"})
+
+        assert result["isError"] is True
+        assert "Attic" in result["content"][0]["text"]
+        assert "list_areas" in result["content"][0]["text"]
+
+    async def test_domain_and_device_class_filters(self, hass, home):
+        lights = _ids(await entities_mod.search_entities(hass, {"domain": "light"}))
+        temperature = await entities_mod.search_entities(hass, {"device_class": "temperature"})
+
+        assert lights == ["light.desk", "light.kitchen", "light.office_ceiling"]
+        assert _ids(temperature) == ["sensor.office_temperature"]
+
+    async def test_a_cut_list_says_so(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "office", "limit": 2})
+
+        assert _ids(result) == ["light.desk", "light.office_ceiling"]
+        assert result["content"][1]["text"] == (
+            "Showing the best 2 of 7 matches. Add words or filters to narrow the search, "
+            "or raise limit."
+        )
+
+    async def test_a_whole_list_says_nothing_more(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "office", "limit": 7})
+
+        assert len(_ids(result)) == 7
+        assert len(result["content"]) == 1
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [{}, {"query": "   "}, {"query": None}],
+    )
+    async def test_something_to_search_by_is_required(self, hass, home, arguments):
+        result = await entities_mod.search_entities(hass, arguments)
+
+        assert result["isError"] is True
+        assert "at least one search parameter" in result["content"][0]["text"]
+
+    @pytest.mark.parametrize(
+        ("arguments", "message"),
+        [
+            ({"query": ["office"]}, "query must be a string"),
+            ({"query": "office", "limit": 0}, "limit must be a positive integer"),
+            ({"query": "office", "limit": "5"}, "limit must be a positive integer"),
+        ],
+    )
+    async def test_malformed_arguments_are_refused(self, hass, home, arguments, message):
+        result = await entities_mod.search_entities(hass, arguments)
+
+        assert result["isError"] is True
+        assert message in result["content"][0]["text"]
+
+
+class TestWordMatch:
+    @pytest.mark.parametrize(
+        ("word", "token", "quality"),
+        [
+            ("light", "light", entities_mod._WHOLE),
+            # The same word with another ending, in either direction
+            ("lights", "light", entities_mod._INFLECTED),
+            ("switches", "switch", entities_mod._INFLECTED),
+            ("kontoret", "kontor", entities_mod._INFLECTED),
+            ("taklampan", "taklampa", entities_mod._INFLECTED),
+            ("lampor", "lampa", entities_mod._INFLECTED),
+            ("temperature", "temperatur", entities_mod._INFLECTED),
+            ("temp", "temperature", entities_mod._INFLECTED),
+            # A word inside a longer one ranks below
+            ("lampa", "taklampa", entities_mod._INSIDE),
+            ("door", "outdoor", entities_mod._INSIDE),
+            ("lampor", "taklampa", entities_mod._STEM_INSIDE),
+            # Fewer than four shared letters is not a match
+            ("ljus", "ljud", None),
+            ("gas", "glass", None),
+            # Numbers and very short words match whole words only
+            ("7", "17", None),
+            ("7", "7", entities_mod._WHOLE),
+            ("on", "kontor", None),
+            ("tv", "tv", entities_mod._WHOLE),
+        ],
+    )
+    def test_how_well_a_query_word_matches(self, word, token, quality):
+        assert entities_mod._word_match(word, token) == quality
+
+
+class TestSearchEntitiesForgiving:
+    """Queries a model sends that do not match the home word for word."""
+
+    @pytest.mark.parametrize(
+        "query", ["is the office temperature ok?", "office, temperature!", "office-temperature"]
+    )
+    async def test_punctuation_and_words_the_home_does_not_use_are_left_out(
+        self, hass, home, query
+    ):
+        result = await entities_mod.search_entities(hass, {"query": query})
+
+        assert _ids(result) == ["sensor.office_temperature"]
+
+    async def test_a_word_left_out_is_named_with_the_rooms(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "arbetsrum lights"})
+
+        # Every light in the home, since nothing is called 'arbetsrum'
+        assert _ids(result) == [
+            "light.desk",
+            "light.kitchen",
+            "light.office_ceiling",
+            "sensor.office_light_level",
+        ]
+        assert result["content"][1]["text"] == (
+            "Nothing in this home matches 'arbetsrum', so the search left it out. "
+            "Names may be in another language. Rooms: Kitchen, Office."
+        )
+
+    async def test_words_that_match_nothing_at_all_find_nothing_and_say_so(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "vardagsrum taklampa"})
+
+        assert _search_payload(result) == []
+        assert "isError" not in result
+        assert result["content"][1]["text"].startswith(
+            "Nothing in this home matches 'vardagsrum', 'taklampa', so the search left them out."
+        )
+
+    async def test_words_found_apart_but_not_together_say_so(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "kitchen temperature"})
+
+        assert _search_payload(result) == []
+        assert result["content"][1]["text"] == (
+            "No entity matches 'kitchen', 'temperature' together. Try fewer words, or the "
+            "domain, device_class or area filter."
+        )
+
+    async def test_a_word_left_out_keeps_the_filters(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "the", "area_id": "Kitchen"})
+
+        assert _ids(result) == ["light.kitchen"]
+
+    async def test_the_device_class_is_searched(self, hass, home):
+        # The sensor is named 'Office Light Level'; 'illuminance' is only its class.
+        result = await entities_mod.search_entities(hass, {"query": "kontor illuminance"})
+
+        assert _ids(result) == ["sensor.office_light_level"]
+
+    async def test_another_ending_still_matches(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "kontoret temperatur"})
+
+        assert _ids(result) == ["sensor.office_temperature"]
+
+    async def test_a_whole_word_comes_before_a_word_inside_another(self, hass, home):
+        registry = er.async_get(hass)
+        for entity_id, name in (
+            ("sensor.outdoor_temperature", "Outdoor Temperature"),
+            ("binary_sensor.front_door", "Front Door"),
+        ):
+            domain, object_id = entity_id.split(".")
+            registry.async_get_or_create(domain, "test", object_id, suggested_object_id=object_id)
+            hass.states.async_set(entity_id, "on", {"friendly_name": name})
+
+        result = await entities_mod.search_entities(hass, {"query": "door sensor"})
+
+        assert _ids(result) == ["binary_sensor.front_door", "sensor.outdoor_temperature"]
+
+    async def test_a_missing_limit_is_the_default(self, hass, home):
+        result = await entities_mod.search_entities(hass, {"query": "office", "limit": None})
+
+        assert len(_ids(result)) == 7

@@ -12,7 +12,7 @@ To let non-admin users in, turn off **Require administrator account** (Settings 
 
 ## Choosing what an application may do
 
-When an application such as Claude connects through the [OIDC Provider](https://github.com/ganhammar/hass-oidc-server), the consent screen asks what it may do here. Pick one of four levels, or **Choose in detail** to set each of thirteen areas to None, Read or Full. The server then offers the application only what you chose, and refuses the rest. This needs the OIDC Provider release after 1.8.0. With an older provider the consent screen only asks whether to approve, and a connection can use every tool the options allow, as before.
+When an application such as Claude connects through the [OIDC Provider](https://github.com/ganhammar/hass-oidc-server), the consent screen asks what it may do here. Pick one of four levels, or **Choose in detail** to set each of thirteen areas to None, Read or Full. The server then offers the application only what you chose, and refuses the rest. This needs OIDC Provider 1.9.0 or newer. With an older provider the consent screen only asks whether to approve, and a connection can use every tool the options allow, as before.
 
 | Level | What it allows |
 |---|---|

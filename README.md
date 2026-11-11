@@ -26,7 +26,7 @@ Things you can ask once it is connected:
 
 1. **Install.** In HACS, download "MCP Server" and "OIDC Provider", then restart Home Assistant. The OIDC Provider handles the sign-in for Claude; skip it if you will only use long-lived access tokens.
 2. **Add the integrations.** Under Settings > Devices & Services > Add Integration, add "OIDC Provider" first, then "MCP Server (HTTP Transport)".
-3. **Connect Claude.** In Claude, open Settings > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`. Claude sends you to Home Assistant to sign in, choose what Claude may do, and approve.
+3. **Connect Claude.** In Claude, open Customize > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`. Claude sends you to Home Assistant to sign in, choose what Claude may do, and approve.
 
 Choose Look only, or start in read-only mode, if you want to see what it does before letting it change anything. [Connecting a client](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/connecting.md) covers other clients and long-lived access tokens.
 
@@ -50,7 +50,7 @@ The [full reference](https://github.com/ganhammar/hass-mcp-server/blob/main/docs
 
 ## Staying in control
 
-- **Access per app.** The consent screen asks what each app may do: Look only, Control devices, Edit the setup or Administer, or None, Read or Full per area. It needs the OIDC Provider release after 1.8.0. A connection from before keeps Administer until you change it with Change access under Connected applications, and in read-only mode it is held at Read.
+- **Access per app.** The consent screen asks what each app may do: Look only, Control devices, Edit the setup or Administer, or None, Read or Full per area. It needs OIDC Provider 1.9.0 or newer. A connection from before keeps Administer until you change it with Change access under Connected applications, and in read-only mode it is held at Read.
 - **Read-only mode** offers only the tools that read, to every connection. Nothing can be changed.
 - **Disabled tools** switches off individual tools, such as `restart_ha`.
 - **Opt-in groups** stay off until you enable them: config files, cameras and images, templates, AppDaemon apps and integration management.

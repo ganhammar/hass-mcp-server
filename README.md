@@ -24,7 +24,7 @@ Things you can ask once it is connected:
 
 1. **Install.** In HACS, download "MCP Server" and "OIDC Provider", then restart Home Assistant. The OIDC Provider handles the sign-in for Claude; skip it if you will only use long-lived access tokens.
 2. **Add the integrations.** Under Settings > Devices & Services > Add Integration, add "OIDC Provider" first, then "MCP Server (HTTP Transport)".
-3. **Connect Claude.** In Claude, open Settings > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`. Claude sends you to Home Assistant to sign in, choose what Claude may do, and approve.
+3. **Connect Claude.** In Claude, open Customize > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`. Claude sends you to Home Assistant to sign in, choose what Claude may do, and approve.
 
 Choose Look only, or start in read-only mode, if you want to see what it does before letting it change anything. [Connecting a client](https://github.com/ganhammar/hass-mcp-server/blob/main/docs/connecting.md) covers other clients and long-lived access tokens.
 

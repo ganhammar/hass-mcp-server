@@ -11,7 +11,7 @@ The server answers on `https://your-home-assistant/api/mcp_http`. Clients sign i
 
 Claude connects from its own servers, not from your browser, so Home Assistant has to be reachable from the internet over HTTPS.
 
-1. In Claude, open Settings > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`.
+1. In Claude, open Customize > Connectors > Add custom connector and enter `https://your-home-assistant/api/mcp_http`.
 2. Claude sends you to Home Assistant. Sign in, check what is asking for access, choose what it may do, and approve.
 
 The consent screen offers four levels: Look only, Control devices, Edit the setup and Administer. Look only is preselected the first time, and your last choice for the same application after that. **Choose in detail** sets each area on its own instead, for example everything except cameras. What each level and area allows, and what it does not cover, is in [Choosing what an application may do](security.md#choosing-what-an-application-may-do). This needs OIDC Provider 1.9.0 or newer; an older one only asks whether to approve.

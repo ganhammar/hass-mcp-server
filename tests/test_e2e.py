@@ -19,6 +19,7 @@ path under test.
 """
 
 import json
+import sys
 from ipaddress import ip_address
 from socket import herror
 from unittest.mock import AsyncMock, patch
@@ -1441,6 +1442,94 @@ async def test_a_batch_is_answered_without_the_header(
     assert (status, body) == (200, [{"jsonrpc": "2.0", "id": 1, "result": {}}])
     status, body = await _rpc(client, batch, {"MCP-Protocol-Version": "2025-11-25"})
     assert (status, body["error"]["code"]) == (400, -32600)
+
+
+async def _stateless_turn(client, headers=None) -> dict[str, dict]:
+    """Send what a client sends once server/discover finds 2026-07-28: no initialize.
+
+    Returns each answer by method. Every request is stateless, with its headers.
+    """
+    requests = [
+        stateless("server/discover", msg_id=1),
+        stateless("tools/list", msg_id=2),
+        stateless("prompts/list", msg_id=3),
+        stateless("resources/list", msg_id=4),
+        stateless("tools/call", msg_id=5, name="get_state", arguments={"entity_id": "sun.sun"}),
+        stateless("resources/read", msg_id=6, uri="hass://entity/sun.sun"),
+        stateless("prompts/get", msg_id=7, name="naming_conventions", arguments={}),
+    ]
+    answers = {}
+    for message in requests:
+        status, body = await _rpc(
+            client, message, {**stateless_headers(message), **(headers or {})}
+        )
+        assert (status, body["id"]) == (200, message["id"]), body
+        assert body["result"]["resultType"] == "complete"
+        answers[message["method"]] = body["result"]
+    return answers
+
+
+def _check_turn(answers: dict[str, dict]) -> None:
+    assert answers["server/discover"]["supportedVersions"] == ["2026-07-28"]
+    call = answers["tools/call"]
+    assert "isError" not in call
+    assert "above_horizon" in call["content"][0]["text"]
+    assert "above_horizon" in answers["resources/read"]["contents"][0]["text"]
+    assert answers["prompts/get"]["messages"]
+
+
+async def test_a_client_that_found_the_newest_revision_never_initializes(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    answers = await _stateless_turn(await hass_client())
+
+    _check_turn(answers)
+    tools = {tool["name"] for tool in answers["tools/list"]["tools"]}
+    assert {"get_state", "call_service"} <= tools
+    assert "hass://config" in {r["uri"] for r in answers["resources/list"]["resources"]}
+    assert "automation_review" in {p["name"] for p in answers["prompts/list"]["prompts"]}
+
+
+async def test_a_client_limited_by_scopes_gets_only_what_it_was_granted_statelessly(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_admin_user: MockUser,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """The same turn for an OAuth token that grants Read on entities and nothing more."""
+    hass.states.async_set("sun.sun", "above_horizon")
+
+    def validate_access_token(hass, token, issuer, expected_audience=None):
+        return {"sub": hass_admin_user.id, "client_id": "app", "scope": "openid mcp:entities:read"}
+
+    client = await hass_client_no_auth()
+    bearer = {"Authorization": "Bearer oauth-token"}
+    validator = sys.modules["custom_components.oidc_provider.token_validator"]
+    with patch.object(validator, "validate_access_token", validate_access_token):
+        answers = await _stateless_turn(client, bearer)
+
+        _check_turn(answers)
+        tools = {tool["name"] for tool in answers["tools/list"]["tools"]}
+        assert "get_state" in tools
+        assert "call_service" not in tools
+        resources = {r["uri"] for r in answers["resources/list"]["resources"]}
+        assert "hass://entities" in resources
+        assert "hass://config" not in resources
+        prompts = {p["name"] for p in answers["prompts/list"]["prompts"]}
+        assert "naming_conventions" in prompts
+        assert "automation_review" not in prompts
+
+        for message in (
+            stateless("tools/call", name="call_service", arguments={"domain": "x", "service": "y"}),
+            stateless("resources/read", uri="hass://config"),
+            stateless("prompts/get", name="automation_review", arguments={}),
+        ):
+            status, body = await _rpc(client, message, {**stateless_headers(message), **bearer})
+            assert (status, body["error"]["code"]) == (200, -32602), message["method"]
 
 
 async def test_the_newest_revision_can_be_turned_off_without_a_restart(

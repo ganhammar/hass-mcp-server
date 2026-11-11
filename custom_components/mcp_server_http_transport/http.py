@@ -508,6 +508,7 @@ class MCPEndpointView(HomeAssistantView):
         paths: list[str] | None = None,
         server_name: str = DEFAULT_SERVER_NAME,
         require_admin: bool = True,
+        stateless_protocol: bool = True,
     ) -> None:
         """Initialize the MCP endpoint, optionally narrowing the paths served.
 
@@ -519,6 +520,7 @@ class MCPEndpointView(HomeAssistantView):
         self.native_auth_enabled = native_auth_enabled
         self.server_name = server_name
         self.require_admin = require_admin
+        self.stateless_protocol = stateless_protocol
         # (user id, reason) pairs already warned about, so a client that keeps
         # retrying with a refused account leaves one warning rather than one per call.
         self._reported_refusals: set[tuple[str, str]] = set()
@@ -866,7 +868,7 @@ class MCPEndpointView(HomeAssistantView):
             if isinstance(message, dict) and "id" in message and _is_response(message):
                 return None
             raise ProtocolError(INVALID_REQUEST, "Invalid Request: not a JSON-RPC request")
-        revision = classify(message, headers or {})
+        revision = classify(message, headers or {}, stateless=self.stateless_protocol)
         if "id" not in message:
             return None
         try:
@@ -1083,6 +1085,7 @@ def register_mcp_views(
     native_auth_enabled: bool,
     server_name: str = DEFAULT_SERVER_NAME,
     require_admin: bool = True,
+    stateless_protocol: bool = True,
 ) -> None:
     """Register the HTTP views this integration serves.
 
@@ -1095,12 +1098,14 @@ def register_mcp_views(
 
     A reload updates the view the router already holds instead of registering a
     second one, which would sit behind the first and never be reached. The name a
-    client sees and the administrator requirement are refreshed the same way.
+    client sees, the administrator requirement and whether the stateless revisions
+    are served are refreshed the same way.
     """
     if (endpoint := hass.data.get(REGISTERED_ENDPOINT)) is not None:
         endpoint.native_auth_enabled = native_auth_enabled
         endpoint.server_name = server_name
         endpoint.require_admin = require_admin
+        endpoint.stateless_protocol = stateless_protocol
         return
 
     contested = mcp_path_is_contested(hass)
@@ -1111,6 +1116,7 @@ def register_mcp_views(
         paths=endpoint_paths,
         server_name=server_name,
         require_admin=require_admin,
+        stateless_protocol=stateless_protocol,
     )
     metadata_paths = [f"{RESOURCE_METADATA_PREFIX}{path}" for path in endpoint_paths]
 

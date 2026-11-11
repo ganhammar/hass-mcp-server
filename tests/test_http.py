@@ -1509,6 +1509,20 @@ class TestAdminGate:
         assert routing_hass.data[REGISTERED_ENDPOINT] is endpoint
         assert endpoint.require_admin is False
 
+    def test_the_stateless_protocol_is_served_unless_configured_off(self, routing_hass):
+        register_mcp_views(routing_hass, False)
+
+        assert routing_hass.data[REGISTERED_ENDPOINT].stateless_protocol is True
+
+    def test_a_reload_refreshes_the_stateless_protocol_on_the_registered_view(self, routing_hass):
+        register_mcp_views(routing_hass, False)
+        endpoint = routing_hass.data[REGISTERED_ENDPOINT]
+
+        register_mcp_views(routing_hass, False, stateless_protocol=False)
+
+        assert routing_hass.data[REGISTERED_ENDPOINT] is endpoint
+        assert endpoint.stateless_protocol is False
+
 
 _PROCESS_WRONG_LOGIN = f"{_HTTP_LOGGER}.process_wrong_login"
 _PROCESS_SUCCESS_LOGIN = f"{_HTTP_LOGGER}.process_success_login"

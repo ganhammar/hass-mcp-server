@@ -15,6 +15,11 @@ the stateless era for 2026-07-28 and anything later, the handshake era for
 anything earlier. A request without a claim is in the handshake era. That is how
 the TypeScript SDK classifies them.
 
+The stateless era can be turned off, for a client that implements it
+incompletely. A request claiming a stateless revision is then answered as a server
+that has never heard of the method answers it, and the client falls back to
+``initialize``.
+
 Nothing is remembered between requests: the server keeps no sessions, so a
 handshake-era request is served in the revision its header names.
 
@@ -93,7 +98,8 @@ class CacheHint:
 # server could send. For up to five minutes a client may therefore show a list that
 # no longer matches what the caller may do; every call is checked regardless. A
 # read returns live state and is stale at once. What server/discover returns is the
-# same for every caller and changes only with an upgrade or a new server name.
+# same for every caller and changes only with an upgrade, a new server name, or the
+# option that turns the stateless era off.
 _LIST_HINT = CacheHint(ttl_ms=300_000, scope="private")
 _STATELESS_CACHE_HINTS = MappingProxyType(
     {
@@ -144,6 +150,11 @@ HANDSHAKE_VERSIONS = tuple(r.version for r in REVISIONS if not r.stateless)
 # it is in the stateless era, known or not, and one that sorts before it is in the
 # handshake era.
 _FIRST_STATELESS = STATELESS_VERSIONS[-1]
+
+# The revision a request claiming a stateless one is in while that era is off. It
+# has no methods, so a request gets the -32601 with 200 that a handshake-era server
+# gives a method it does not know, and a notification is accepted.
+_STATELESS_OFF = Revision("stateless era off", methods=frozenset())
 
 # The revision of a handshake-era request without the MCP-Protocol-Version header,
 # as the transport specification says to assume from 2025-06-18 on.
@@ -234,13 +245,16 @@ def routing_headers(pairs: Iterable[tuple[str, str]]) -> dict[str, list[str]]:
     return headers
 
 
-def classify(message: Mapping[str, Any], headers: Mapping[str, list[str]]) -> Revision:
+def classify(
+    message: Mapping[str, Any], headers: Mapping[str, list[str]], *, stateless: bool = True
+) -> Revision:
     """Return the revision a single JSON-RPC message is in, or raise ProtocolError.
 
     A message whose params._meta claims a revision is in the era of the revision it
     names. A stateless-era message is checked as that era requires: the envelope,
     then the headers against the body, then whether the revision is one this server
-    has.
+    has. With ``stateless`` False it is checked for nothing and is in a revision
+    with no methods instead.
 
     Any other message is in the handshake era. Initialize negotiates its revision
     from its params and ignores the header, which names the revision negotiated
@@ -256,6 +270,8 @@ def classify(message: Mapping[str, Any], headers: Mapping[str, list[str]]) -> Re
         if not isinstance(claimed, str):
             raise ProtocolError(INVALID_PARAMS, f"{META_PROTOCOL_VERSION} must be a string")
     claims_stateless = claimed is not None and claimed >= _FIRST_STATELESS
+    if claims_stateless and not stateless:
+        return _STATELESS_OFF
 
     for name in _ROUTING_HEADERS:
         if len(headers.get(name, ())) > 1:
@@ -275,7 +291,7 @@ def classify(message: Mapping[str, Any], headers: Mapping[str, list[str]]) -> Re
     if header_version is None:
         return HEADERLESS
     revision = _BY_VERSION.get(header_version)
-    if revision is None:
+    if revision is None or (revision.stateless and not stateless):
         raise _unsupported(header_version, HANDSHAKE_VERSIONS)
     if revision.stateless:
         raise ProtocolError(

@@ -16,7 +16,8 @@
           "integration_management_enabled": "Enable integration management",
           "appdaemon_file_access_enabled": "Enable AppDaemon app file access",
           "appdaemon_apps_root": "AppDaemon apps root",
-          "server_name": "MCP server name"
+          "server_name": "MCP server name",
+          "stateless_protocol_enabled": "Use the newest MCP protocol revision"
         },
         "data_description": {
           "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required.",
@@ -30,7 +31,8 @@
           "integration_management_enabled": "Allow AI assistants to add, reload and remove integrations: **`start_config_flow`**, **`continue_config_flow`** and **`abort_config_flow`** run the same config flows as the *Add integration* dialog, and **`reload_integration`** and **`delete_integration`** act on existing config entries. Removing an entry also removes its devices and entities. Whatever a flow asks for, passwords and API keys included, is typed by the AI and so passes through the conversation and the client's transcript. Flows that need a browser (OAuth) cannot be completed this way.",
           "appdaemon_file_access_enabled": "Allow AI assistants to manage AppDaemon application files under the separately configured, bounded AppDaemon apps root. Enabling write access allows an AI/MCP client to modify executable AppDaemon Python code, granting code-execution-equivalent capability inside the AppDaemon environment and access available to AppDaemon. Paths outside the approved `/share/`, `/media/`, or legacy `/addon_configs/a0d7b954_appdaemon/apps` roots, `..` traversal, and symlink escapes are rejected. Only `.py`, `.yaml`, `.yml`, and `.json` files can be created, written, or deleted. Every save/delete snapshots the app tree first in `.mcp_appdaemon_backups/`; restore takes a pre-restore snapshot. There is no direct MCP shell or AppDaemon process-control tool, but writing AppDaemon Python files remains code-execution-equivalent within the AppDaemon environment and its available Home Assistant API permissions. App files may contain credentials: keep sensitive values out of readable files before enabling.",
           "appdaemon_apps_root": "Absolute AppDaemon apps root. Defaults to `/addon_configs/a0d7b954_appdaemon/apps`, which only exists where that add-on folder is mounted into Home Assistant Core (not on Home Assistant OS); otherwise use a folder under `/share/` or `/media/` and point AppDaemon's `app_dir` at the same folder.",
-          "server_name": "Name this server reports to MCP clients (`serverInfo.name`). Give each Home Assistant instance a different name when one client connects to more than one: some clients derive the namespace they show for a server's tools from this name, and then keep only one of the servers. Such clients may shorten the name first (VS Code keeps the first 13 characters), so keep names distinct early."
+          "server_name": "Name this server reports to MCP clients (`serverInfo.name`). Give each Home Assistant instance a different name when one client connects to more than one: some clients derive the namespace they show for a server's tools from this name, and then keep only one of the servers. Such clients may shorten the name first (VS Code keeps the first 13 characters), so keep names distinct early.",
+          "stateless_protocol_enabled": "Serve MCP 2026-07-28, in which a client sends each request on its own with no handshake first. Turn this off if a client that worked before connects but then lists no tools, or fails on every call: the client then falls back to the older revision with a handshake, which is always served. Reconnect the client after changing this."
         }
       }
     },
@@ -58,7 +60,8 @@
           "integration_management_enabled": "Enable integration management",
           "appdaemon_file_access_enabled": "Enable AppDaemon app file access",
           "appdaemon_apps_root": "AppDaemon apps root",
-          "server_name": "MCP server name"
+          "server_name": "MCP server name",
+          "stateless_protocol_enabled": "Use the newest MCP protocol revision"
         },
         "data_description": {
           "native_auth_enabled": "Allow Long-Lived Access Tokens for authentication. When disabled, the OIDC Provider integration is required.",
@@ -72,7 +75,8 @@
           "integration_management_enabled": "Allow AI assistants to add, reload and remove integrations: **`start_config_flow`**, **`continue_config_flow`** and **`abort_config_flow`** run the same config flows as the *Add integration* dialog, and **`reload_integration`** and **`delete_integration`** act on existing config entries. Removing an entry also removes its devices and entities. Whatever a flow asks for, passwords and API keys included, is typed by the AI and so passes through the conversation and the client's transcript. Flows that need a browser (OAuth) cannot be completed this way.",
           "appdaemon_file_access_enabled": "Allow AI assistants to manage AppDaemon application files under the separately configured, bounded AppDaemon apps root. Enabling write access allows an AI/MCP client to modify executable AppDaemon Python code, granting code-execution-equivalent capability inside the AppDaemon environment and access available to AppDaemon. Paths outside the approved `/share/`, `/media/`, or legacy `/addon_configs/a0d7b954_appdaemon/apps` roots, `..` traversal, and symlink escapes are rejected. Only `.py`, `.yaml`, `.yml`, and `.json` files can be created, written, or deleted. Every save/delete snapshots the app tree first in `.mcp_appdaemon_backups/`; restore takes a pre-restore snapshot. This does not provide shell or AppDaemon process control. App files may contain credentials: keep sensitive values out of readable files before enabling.",
           "appdaemon_apps_root": "Absolute AppDaemon apps root. Defaults to `/addon_configs/a0d7b954_appdaemon/apps`, which only exists where that add-on folder is mounted into Home Assistant Core (not on Home Assistant OS); otherwise use a folder under `/share/` or `/media/` and point AppDaemon's `app_dir` at the same folder.",
-          "server_name": "Name this server reports to MCP clients (`serverInfo.name`). Give each Home Assistant instance a different name when one client connects to more than one: some clients derive the namespace they show for a server's tools from this name, and then keep only one of the servers. Such clients may shorten the name first (VS Code keeps the first 13 characters), so keep names distinct early."
+          "server_name": "Name this server reports to MCP clients (`serverInfo.name`). Give each Home Assistant instance a different name when one client connects to more than one: some clients derive the namespace they show for a server's tools from this name, and then keep only one of the servers. Such clients may shorten the name first (VS Code keeps the first 13 characters), so keep names distinct early.",
+          "stateless_protocol_enabled": "Serve MCP 2026-07-28, in which a client sends each request on its own with no handshake first. Turn this off if a client that worked before connects but then lists no tools, or fails on every call: the client then falls back to the older revision with a handshake, which is always served. Reconnect the client after changing this."
         }
       }
     },

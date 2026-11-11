@@ -63,6 +63,7 @@ from custom_components.mcp_server_http_transport.const import (
     CONF_NATIVE_AUTH,
     CONF_READ_ONLY,
     CONF_REQUIRE_ADMIN,
+    CONF_STATELESS_PROTOCOL,
     DOMAIN,
     EVENT_TOOL_CALLED,
     ISSUE_ENDPOINT_CONFLICT,
@@ -1440,3 +1441,67 @@ async def test_a_batch_is_answered_without_the_header(
     assert (status, body) == (200, [{"jsonrpc": "2.0", "id": 1, "result": {}}])
     status, body = await _rpc(client, batch, {"MCP-Protocol-Version": "2025-11-25"})
     assert (status, body["error"]["code"]) == (400, -32600)
+
+
+async def test_the_newest_revision_can_be_turned_off_without_a_restart(
+    loaded_entry: MockConfigEntry,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """With it off a client's probe finds nothing, and the handshake it falls back to works."""
+    hass.states.async_set("sun.sun", "above_horizon")
+    client = await hass_client()
+
+    async def set_option(value: bool) -> None:
+        flow = await hass.config_entries.options.async_init(loaded_entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            flow["flow_id"], {CONF_NATIVE_AUTH: True, CONF_STATELESS_PROTOCOL: value}
+        )
+        assert result["type"] == "create_entry"
+        await hass.async_block_till_done()
+
+    await set_option(False)
+
+    for discover in (CLAUDE_AI_DISCOVER, CLAUDE_CODE_DISCOVER):
+        status, body = await _stateless_rpc(client, discover)
+        assert (status, body) == (
+            200,
+            {
+                "jsonrpc": "2.0",
+                "error": {"code": -32601, "message": "Method not found: server/discover"},
+                "id": discover["id"],
+            },
+        )
+    status, body = await _stateless_rpc(client, stateless("tools/list"))
+    assert (status, body["error"]["code"]) == (200, -32601)
+
+    status, body = await _rpc(client, CLAUDE_AI_INITIALIZE)
+    assert (status, body["result"]["protocolVersion"]) == (200, "2025-11-25")
+    negotiated = {"MCP-Protocol-Version": "2025-11-25"}
+    assert await _rpc(client, INITIALIZED, negotiated) == (202, None)
+    requests = [
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "prompts/list"},
+        {"jsonrpc": "2.0", "id": 4, "method": "resources/list"},
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {"name": "get_state", "arguments": {"entity_id": "sun.sun"}},
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "resources/read",
+            "params": {"uri": "hass://entity/sun.sun"},
+        },
+    ]
+    for message in requests:
+        status, body = await _rpc(client, message, negotiated)
+        assert status == 200 and "resultType" not in body["result"], body
+    assert "above_horizon" in body["result"]["contents"][0]["text"]
+
+    await set_option(True)
+
+    status, body = await _stateless_rpc(client, CLAUDE_AI_DISCOVER)
+    assert (status, body["result"]["supportedVersions"]) == (200, ["2026-07-28"])

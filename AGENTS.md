@@ -62,6 +62,11 @@ is in the handshake era, in the revision its `MCP-Protocol-Version` header
 names, or 2025-03-26 without one. Handlers return the same payload whatever the
 revision, and the transport never branches on a version string.
 
+The stateless era can be switched off with an option, as a way back for a client
+that implements it incompletely. A request claiming it is then answered as an
+unknown method with 200, which is what a server from before 2026-07-28 says, so
+the client falls back to `initialize`.
+
 The endpoint does not validate `Origin`, although the Streamable HTTP transport
 says a server MUST, against DNS rebinding. It accepts only a bearer token in the
 `Authorization` header, which a browser never attaches by itself, so a page that

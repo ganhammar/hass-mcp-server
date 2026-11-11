@@ -52,6 +52,7 @@ class TestAsyncSetupEntry:
             False,
             server_name=DEFAULT_SERVER_NAME,
             require_admin=True,
+            stateless_protocol=True,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
@@ -71,6 +72,7 @@ class TestAsyncSetupEntry:
             False,
             server_name=DEFAULT_SERVER_NAME,
             require_admin=True,
+            stateless_protocol=True,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
@@ -90,6 +92,7 @@ class TestAsyncSetupEntry:
             True,
             server_name=DEFAULT_SERVER_NAME,
             require_admin=True,
+            stateless_protocol=True,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
@@ -109,6 +112,7 @@ class TestAsyncSetupEntry:
             False,
             server_name="ha-mcp-secundair",
             require_admin=True,
+            stateless_protocol=True,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")
@@ -128,6 +132,27 @@ class TestAsyncSetupEntry:
             False,
             server_name=DEFAULT_SERVER_NAME,
             require_admin=False,
+            stateless_protocol=True,
+        )
+
+    @patch("custom_components.mcp_server_http_transport.register_mcp_views")
+    async def test_async_setup_entry_passes_the_stateless_protocol_off(
+        self,
+        mock_register_views,
+        mock_hass,
+        mock_config_entry,
+    ):
+        """An entry that turned the newest revision off has it passed on."""
+        mock_config_entry.data = {"stateless_protocol_enabled": False}
+
+        await async_setup_entry(mock_hass, mock_config_entry)
+
+        mock_register_views.assert_called_once_with(
+            mock_hass,
+            False,
+            server_name=DEFAULT_SERVER_NAME,
+            require_admin=True,
+            stateless_protocol=False,
         )
 
     @patch("custom_components.mcp_server_http_transport.register_mcp_views")

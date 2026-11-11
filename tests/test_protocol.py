@@ -358,6 +358,9 @@ class TestClassifyHandshakeClaim:
         message = self._claiming("2025-11-25", "initialize", protocolVersion="2025-03-26")
         assert classify(message, {}).version == "2025-03-26"
 
+    def test_the_claim_is_honoured_while_the_stateless_era_is_off(self):
+        assert classify(self._claiming("2025-06-18"), {}, stateless=False).version == "2025-06-18"
+
 
 class TestClassifyStatelessNotification:
     """The revision defines no header rules for a notification; present headers must match."""
@@ -389,6 +392,34 @@ class TestClassifyStatelessNotification:
         with pytest.raises(ProtocolError) as err:
             classify(self._notification(), headers_of(pairs))
         assert (_code(err), err.value.status) == (HEADER_MISMATCH, 400)
+
+
+class TestClassifyStatelessOff:
+    def test_a_stateless_claim_is_in_a_revision_with_no_methods(self):
+        message = stateless("server/discover")
+        revision = classify(message, headers_of(stateless_headers(message)), stateless=False)
+        assert not revision.stateless
+        assert not revision.methods
+
+    def test_its_headers_and_envelope_are_not_checked(self):
+        message = stateless("tools/call", name="get_state")
+        del message["params"]["_meta"]["io.modelcontextprotocol/clientCapabilities"]
+        headers = routing_headers([("Mcp-Method", "x"), ("Mcp-Method", "y")])
+        assert not classify(message, headers, stateless=False).methods
+
+    def test_a_stateless_header_without_the_envelope_is_unsupported(self):
+        headers = headers_of({"MCP-Protocol-Version": STATELESS})
+        with pytest.raises(ProtocolError) as err:
+            classify({"method": "tools/list", "id": 1}, headers, stateless=False)
+        assert (_code(err), err.value.status) == (UNSUPPORTED_PROTOCOL_VERSION, 400)
+        assert err.value.data == {"supported": list(HANDSHAKE_VERSIONS), "requested": STATELESS}
+
+    @pytest.mark.parametrize("version", HANDSHAKE_VERSIONS)
+    def test_the_handshake_revisions_are_unchanged(self, version):
+        headers = headers_of({"MCP-Protocol-Version": version})
+        assert classify({"method": "tools/list", "id": 1}, headers, stateless=False).version == (
+            version
+        )
 
 
 class TestCheckBatch:
@@ -885,6 +916,73 @@ class TestStateless:
             await view._dispatch({"method": "x/y"}, revision, Mock(), Mock())
 
         assert (err.value.code, err.value.status) == (METHOD_NOT_FOUND, 404)
+
+
+class TestStatelessOff:
+    """With the option off, a 2026-07-28 request is an unknown method, as before it existed."""
+
+    @pytest.fixture
+    def view(self, hass):
+        return MCPEndpointView(hass, stateless_protocol=False)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            CLAUDE_AI_DISCOVER,
+            CLAUDE_CODE_DISCOVER,
+            stateless("tools/list"),
+            stateless("tools/call", name="get_state", arguments={"entity_id": "sun.sun"}),
+            stateless("initialize"),
+        ],
+        ids=["claude.ai", "claude-code", "tools/list", "tools/call", "initialize"],
+    )
+    async def test_a_stateless_request_is_an_unknown_method_with_200(self, view, message):
+        status, body = await post_stateless(view, message)
+
+        assert (status, body) == (
+            200,
+            {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": METHOD_NOT_FOUND,
+                    "message": f"Method not found: {message['method']}",
+                },
+                "id": message["id"],
+            },
+        )
+
+    async def test_a_stateless_notification_is_accepted(self, view):
+        message = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}
+        message["params"]["_meta"] = envelope()
+
+        assert await post(view, message, stateless_headers(message)) == (202, None)
+
+    async def test_the_captured_clients_fall_back_and_are_served(self, view, get_state):
+        status, body = await post_stateless(view, CLAUDE_AI_DISCOVER)
+        assert (status, body["error"]["code"]) == (200, METHOD_NOT_FOUND)
+
+        status, body = await post(view, CLAUDE_AI_INITIALIZE)
+        assert (status, body["result"]["protocolVersion"]) == (200, "2025-11-25")
+        negotiated = {"MCP-Protocol-Version": "2025-11-25"}
+        assert await post(view, INITIALIZED, negotiated) == (202, None)
+        _, body = await post(view, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, negotiated)
+        assert len(body["result"]["tools"]) == len(TOOLS)
+        call = {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "get_state", "arguments": {"entity_id": "sun.sun"}},
+        }
+        _, body = await post(view, call, negotiated)
+        assert body["result"] == {"content": [{"type": "text", "text": "above_horizon"}]}
+
+    async def test_a_stateless_header_without_the_envelope_is_unsupported(self, view):
+        message = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+
+        status, body = await post(view, message, {"MCP-Protocol-Version": STATELESS})
+
+        assert (status, body["error"]["code"]) == (400, UNSUPPORTED_PROTOCOL_VERSION)
+        assert body["error"]["data"]["supported"] == list(HANDSHAKE_VERSIONS)
 
 
 class TestMessageShape:

@@ -27,7 +27,7 @@ from .const import (
     VERSION,
 )
 from .json_utils import dumps
-from .prompts import InvalidPromptRequest, get_prompt, get_prompts
+from .prompts import InvalidPromptRequest, PromptNotAvailable, get_prompt, get_prompts
 from .resources import ResourceNotAvailable, get_resources, read_resource
 from .secret_keys import SECRET_MASK, is_secret_key
 from .tools import (
@@ -283,6 +283,18 @@ def _accepts_expected_audience(validate_access_token: Any) -> bool:
         parameter.name == "expected_audience" or parameter.kind is inspect.Parameter.VAR_KEYWORD
         for parameter in parameters
     )
+
+
+def _logged_client(caller: Caller) -> tuple[str | None, str]:
+    """Return the caller's client ID cut for the audit trail, and how the log names it.
+
+    The client ID is the caller's text, so it is always logged as a JSON string. A
+    Long-Lived Access Token has no client.
+    """
+    if caller.client_id is None:
+        return None, ""
+    client_id = caller.client_id[:CLIENT_ID_PREVIEW_CHARS]
+    return client_id, f", client {dumps(client_id)}"
 
 
 def _forbidden(description: str) -> web.Response:
@@ -843,6 +855,7 @@ class MCPEndpointView(HomeAssistantView):
             try:
                 contents = await read_resource(self.hass, uri)
             except ResourceNotAvailable as err:
+                self._audit_refused_read(caller, method, uri)
                 return _jsonrpc_error(-32602, str(err), msg_id)
             return {
                 "jsonrpc": "2.0",
@@ -867,6 +880,8 @@ class MCPEndpointView(HomeAssistantView):
             try:
                 result = await get_prompt(self.hass, name, arguments)
             except InvalidPromptRequest as err:
+                if isinstance(err, PromptNotAvailable):
+                    self._audit_refused_read(caller, method, name)
                 return _jsonrpc_error(-32602, str(err), msg_id)
 
             return {
@@ -900,6 +915,25 @@ class MCPEndpointView(HomeAssistantView):
         """Call a tool by name."""
         return await call_tool(self.hass, name, arguments)
 
+    def _audit_refused_read(self, caller: Caller, method: str, name: Any) -> None:
+        """Log a resources/read or prompts/get the caller's access does not include.
+
+        It is logged at INFO with the outcome invalid, as a call to a withheld tool
+        is, but fires no event: reading changes nothing, and the client was told
+        which access it needs. The URI or prompt name is the caller's text, so it is
+        logged as a JSON string and cut like a tool name.
+        """
+        _client_id, via = _logged_client(caller)
+        _LOGGER.info(
+            "MCP %s by user %s (%s auth%s): %s -> %s, not granted",
+            method,
+            caller.user_id,
+            caller.auth_method,
+            via,
+            dumps(str(name)[:TOOL_NAME_PREVIEW_CHARS]),
+            OUTCOME_INVALID,
+        )
+
     def _audit_tool_call(
         self,
         caller: Caller,
@@ -931,12 +965,7 @@ class MCPEndpointView(HomeAssistantView):
         # text and is logged as a JSON string so a newline in it cannot forge a
         # log line.
         logged_tool = tool if tool in TOOLS else dumps(tool)
-        # The client ID is the caller's text as well, so it is always logged as
-        # a JSON string. A Long-Lived Access Token has no client.
-        client_id = (
-            caller.client_id[:CLIENT_ID_PREVIEW_CHARS] if caller.client_id is not None else None
-        )
-        via = f", client {dumps(client_id)}" if client_id is not None else ""
+        client_id, via = _logged_client(caller)
         summary = truncate_arguments(mask_tool_arguments(name, arguments))
         _LOGGER.log(
             level,

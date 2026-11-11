@@ -2498,19 +2498,25 @@ class TestScopeLimits:
         assert audit.call_args.kwargs["withheld"] is True
         scope_hass.bus.async_fire.assert_not_called()
 
-    async def test_a_resource_outside_the_scopes_is_refused(self, scope_hass):
+    async def test_a_resource_outside_the_scopes_is_refused_and_logged(self, scope_hass, caplog):
         view = MCPEndpointView(scope_hass)
 
-        response, _, _ = await self._post(
-            view,
-            self._oidc("openid", "mcp:entities:read"),
-            "resources/read",
-            {"uri": "hass://areas"},
-        )
+        with caplog.at_level(logging.INFO, logger="custom_components.mcp_server_http_transport"):
+            response, _, _ = await self._post(
+                view,
+                self._oidc("openid", "mcp:entities:read"),
+                "resources/read",
+                {"uri": "hass://areas"},
+            )
 
         body = json.loads(response.body)
         assert body["error"]["code"] == -32602
         assert "resource hass://areas" in body["error"]["message"]
+        assert (
+            'MCP resources/read by user user123 (oidc auth, client "app"): "hass://areas" '
+            "-> invalid, not granted" in caplog.text
+        )
+        scope_hass.bus.async_fire.assert_not_called()
 
     async def test_resources_and_prompts_are_listed_by_the_scopes(self, scope_hass):
         view = MCPEndpointView(scope_hass)
@@ -2524,19 +2530,32 @@ class TestScopeLimits:
             "automation_review"
         ]
 
-    async def test_a_prompt_outside_the_scopes_is_refused(self, scope_hass):
+    async def test_a_prompt_outside_the_scopes_is_refused_and_logged(self, scope_hass, caplog):
         view = MCPEndpointView(scope_hass)
 
-        response, _, _ = await self._post(
-            view,
-            self._oidc("openid", "mcp:dashboards:read"),
-            "prompts/get",
-            {"name": "setup_guide"},
-        )
+        with caplog.at_level(logging.INFO, logger="custom_components.mcp_server_http_transport"):
+            response, _, _ = await self._post(
+                view,
+                self._oidc("openid", "mcp:dashboards:read"),
+                "prompts/get",
+                {"name": "setup_guide"},
+            )
 
         body = json.loads(response.body)
         assert body["error"]["code"] == -32602
         assert "prompt 'setup_guide'" in body["error"]["message"]
+        assert 'MCP prompts/get by user user123 (oidc auth, client "app"): "setup_guide"' in (
+            caplog.text
+        )
+        scope_hass.bus.async_fire.assert_not_called()
+
+    async def test_an_unknown_prompt_is_not_logged_as_refused(self, scope_hass, caplog):
+        view = MCPEndpointView(scope_hass)
+
+        with caplog.at_level(logging.INFO, logger="custom_components.mcp_server_http_transport"):
+            await self._post(view, self._oidc("openid", "mcp:admin"), "prompts/get", {"name": "x"})
+
+        assert "not granted" not in caplog.text
 
 
 class TestProviderDescribes:

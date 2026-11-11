@@ -724,6 +724,33 @@ class TestChosenAccess:
         await hass.async_block_till_done()
         assert len(events) == 1
 
+    async def test_resources_and_prompts_outside_the_choice_are_refused(
+        self,
+        both: None,
+        hass_client: ClientSessionGenerator,
+        hass_client_no_auth: ClientSessionGenerator,
+    ) -> None:
+        provider = await hass_client()
+        mcp = await hass_client_no_auth()
+        registration = await _register(provider)
+        choice = {**dict.fromkeys(_levels("admin"), "none"), "entities": "read"}
+        tokens = await _sign_in(provider, registration, {"options": choice})
+        token = tokens["access_token"]
+
+        allowed = await _rpc(mcp, token, "resources/read", {"uri": "hass://entities"})
+        resource = await _rpc(mcp, token, "resources/read", {"uri": "hass://areas"})
+        prompt = await _rpc(
+            mcp, token, "prompts/get", {"name": "automation_review", "arguments": {}}
+        )
+
+        assert "result" in await allowed.json()
+        error = (await resource.json())["error"]
+        assert error["code"] == -32602
+        assert "resource hass://areas" in error["message"]
+        error = (await prompt.json())["error"]
+        assert error["code"] == -32602
+        assert "Automations, scripts and scenes at Read" in error["message"]
+
     async def test_a_token_granting_nothing_gets_401_and_its_refresh_still_does(
         self,
         both: None,

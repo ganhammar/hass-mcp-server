@@ -68,6 +68,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.mcp_server_http_transport.const import MCP_PATH
 from custom_components.mcp_server_http_transport.tools.labels import THEME_COLORS
 from custom_components.mcp_server_http_transport.tools.registries import device_entries
+from custom_components.mcp_server_http_transport.tools.system import CORE_EVENT_TYPES
 
 
 def _core_streamable_api() -> str | None:
@@ -622,6 +623,37 @@ class TestDiagnosticsContracts:
             "translation_key",
             "translation_placeholders",
         } <= {f.name for f in dataclasses.fields(ir.IssueEntry)}
+
+
+class TestCoreEventContracts:
+    """Contracts for the events fire_event refuses (CORE_EVENT_TYPES in tools/system.py).
+
+    Most of the set comes from constants core exports on every supported version.
+    Three are literals, and the tests here pin them to the constants they stand for.
+    The refusal is an exact match, which holds only while the bus looks listeners up
+    by the exact event type; if it starts folding case, fold it in fire_event too.
+    """
+
+    def test_literal_event_types_match_core_constants(self):
+        from homeassistant import const as ha_const
+        from homeassistant.components.automation import EVENT_AUTOMATION_TRIGGERED
+        from homeassistant.components.script.const import EVENT_SCRIPT_STARTED
+
+        assert EVENT_AUTOMATION_TRIGGERED in CORE_EVENT_TYPES
+        assert EVENT_SCRIPT_STARTED in CORE_EVENT_TYPES
+        # Home Assistant 2025.6 has no labs integration and no constant for its event.
+        assert getattr(ha_const, "EVENT_LABS_UPDATED", "labs_updated") in CORE_EVENT_TYPES
+
+    async def test_the_bus_matches_event_types_exactly(self, hass: HomeAssistant):
+        received = []
+        hass.bus.async_listen("user_removed", lambda event: received.append(event.event_type))
+
+        hass.bus.async_fire("User_Removed")
+        hass.bus.async_fire("user_removed ")
+        hass.bus.async_fire("user_removed")
+        await hass.async_block_till_done()
+
+        assert received == ["user_removed"]
 
 
 class TestLovelaceContracts:

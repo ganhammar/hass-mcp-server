@@ -4,8 +4,30 @@ import logging
 from datetime import datetime as dt
 from typing import Any
 
+from homeassistant.auth import EVENT_USER_REMOVED
+from homeassistant.const import (
+    EVENT_CALL_SERVICE,
+    EVENT_COMPONENT_LOADED,
+    EVENT_CORE_CONFIG_UPDATE,
+    EVENT_HOMEASSISTANT_CLOSE,
+    EVENT_HOMEASSISTANT_FINAL_WRITE,
+    EVENT_HOMEASSISTANT_START,
+    EVENT_HOMEASSISTANT_STARTED,
+    EVENT_HOMEASSISTANT_STOP,
+    EVENT_LOGBOOK_ENTRY,
+    EVENT_SERVICE_REGISTERED,
+    EVENT_SERVICE_REMOVED,
+    EVENT_STATE_CHANGED,
+    EVENT_STATE_REPORTED,
+)
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import category_registry as cr
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import floor_registry as fr
+from homeassistant.helpers import label_registry as lr
 from homeassistant.util import dt as dt_util
 
 from ..const import DOMAIN
@@ -161,17 +183,38 @@ async def get_history(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[st
         return error_result(f"Error getting history: {str(e)}")
 
 
-_BLOCKED_EVENT_TYPES = frozenset(
+# Events Home Assistant fires itself that core or a built-in integration acts on as
+# fact. A forged one deletes entities or config entries, strips labels, renames
+# history, stops the recorder or writes the logbook. The bus looks listeners up by
+# the exact event type, so an exact match is what keeps a forged one from them.
+# Each literal is the value of a constant pinned in tests/test_ha_api_contracts.py.
+CORE_EVENT_TYPES = frozenset(
     {
-        "homeassistant_stop",
-        "homeassistant_close",
-        "homeassistant_final_write",
-        "core_config_updated",
-        "component_loaded",
-        "service_registered",
-        "service_removed",
-        "state_changed",
-        "call_service",
+        EVENT_HOMEASSISTANT_START,
+        EVENT_HOMEASSISTANT_STARTED,
+        EVENT_HOMEASSISTANT_STOP,
+        EVENT_HOMEASSISTANT_FINAL_WRITE,
+        EVENT_HOMEASSISTANT_CLOSE,
+        EVENT_CORE_CONFIG_UPDATE,
+        EVENT_COMPONENT_LOADED,
+        EVENT_CALL_SERVICE,
+        EVENT_SERVICE_REGISTERED,
+        EVENT_SERVICE_REMOVED,
+        EVENT_STATE_CHANGED,
+        EVENT_STATE_REPORTED,
+        EVENT_LOGBOOK_ENTRY,
+        EVENT_USER_REMOVED,
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        dr.EVENT_DEVICE_REGISTRY_UPDATED,
+        ar.EVENT_AREA_REGISTRY_UPDATED,
+        fr.EVENT_FLOOR_REGISTRY_UPDATED,
+        lr.EVENT_LABEL_REGISTRY_UPDATED,
+        cr.EVENT_CATEGORY_REGISTRY_UPDATED,
+        # homeassistant.const.EVENT_LABS_UPDATED, which 2025.6 does not have.
+        "labs_updated",
+        # automation.EVENT_AUTOMATION_TRIGGERED and script.const.EVENT_SCRIPT_STARTED.
+        "automation_triggered",
+        "script_started",
     }
 )
 
@@ -180,8 +223,8 @@ _BLOCKED_EVENT_TYPES = frozenset(
     name="fire_event",
     description=(
         "Fire a custom event on the Home Assistant event bus. "
-        "Cannot fire system-level events (e.g., homeassistant_stop). "
-        "Use with care as events can trigger automations"
+        "Refuses events Home Assistant fires itself (e.g., homeassistant_stop, "
+        "state_changed, *_registry_updated). Use with care as events can trigger automations"
     ),
     input_schema={
         "type": "object",
@@ -204,8 +247,14 @@ async def fire_event(hass: HomeAssistant, arguments: dict[str, Any]) -> dict[str
     event_type = arguments["event_type"]
     event_data = arguments.get("event_data", {})
 
-    if event_type in _BLOCKED_EVENT_TYPES:
-        return error_result(f"Error: firing system event '{event_type}' is not allowed")
+    if not isinstance(event_type, str) or not event_type:
+        return error_result("Error: event_type must be a non-empty string")
+
+    if event_type in CORE_EVENT_TYPES:
+        return error_result(
+            f"Error: firing '{event_type}' is not allowed: it is an event Home Assistant "
+            "fires itself, and its own listeners act on it as fact"
+        )
 
     # The integration's own events are its audit trail, so this tool does not fire
     # them. This closes the direct route only: an automation with an event action

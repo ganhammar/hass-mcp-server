@@ -8,11 +8,41 @@ import pytest
 
 from custom_components.mcp_server_http_transport.const import DOMAIN, EVENT_TOOL_CALLED
 from custom_components.mcp_server_http_transport.http import Caller, MCPEndpointView
-from custom_components.mcp_server_http_transport.tools.system import render_template
+from custom_components.mcp_server_http_transport.tools.system import (
+    CORE_EVENT_TYPES,
+    render_template,
+)
 
 # The view resolves every request to an authorized caller before dispatch; these
 # tests start from one so they exercise the tool rather than the auth path.
 CALLER = Caller(user_id="user123", auth_method="native", user=Mock(is_admin=True))
+
+
+_CORE_EVENTS = [
+    "homeassistant_start",
+    "homeassistant_started",
+    "homeassistant_stop",
+    "homeassistant_final_write",
+    "homeassistant_close",
+    "core_config_updated",
+    "component_loaded",
+    "call_service",
+    "service_registered",
+    "service_removed",
+    "state_changed",
+    "state_reported",
+    "logbook_entry",
+    "user_removed",
+    "entity_registry_updated",
+    "device_registry_updated",
+    "area_registry_updated",
+    "floor_registry_updated",
+    "label_registry_updated",
+    "category_registry_updated",
+    "labs_updated",
+    "automation_triggered",
+    "script_started",
+]
 
 
 def _fired_by_tool(async_fire: Mock) -> list:
@@ -371,8 +401,8 @@ class TestToolsSystem:
         assert response.status == 200
         assert _fired_by_tool(mock_hass.bus.async_fire) == [call("simple_event", {}, context=ANY)]
 
-    async def test_post_tools_call_fire_event_blocked_type(self, view, mock_hass):
-        """Test fire_event rejects system event types."""
+    async def _fire(self, view, mock_hass, event_type):
+        """Call fire_event for event_type and return the JSON-RPC result."""
         mock_hass.bus = Mock()
         mock_hass.bus.async_fire = Mock()
 
@@ -382,10 +412,7 @@ class TestToolsSystem:
             return_value={
                 "jsonrpc": "2.0",
                 "method": "tools/call",
-                "params": {
-                    "name": "fire_event",
-                    "arguments": {"event_type": "homeassistant_stop"},
-                },
+                "params": {"name": "fire_event", "arguments": {"event_type": event_type}},
                 "id": 81,
             }
         )
@@ -394,10 +421,60 @@ class TestToolsSystem:
             response = await view.post(request)
 
         assert response.status == 200
-        body = json.loads(response.body)
-        assert body["result"]["isError"] is True
-        assert "not allowed" in body["result"]["content"][0]["text"]
+        return json.loads(response.body)["result"]
+
+    @pytest.mark.parametrize("event_type", [["user_removed"], {"a": 1}, 5, ""])
+    async def test_post_tools_call_fire_event_wants_a_string(self, view, mock_hass, event_type):
+        result = await self._fire(view, mock_hass, event_type)
+
+        assert result["isError"] is True
+        assert result["content"][0]["text"] == "Error: event_type must be a non-empty string"
         assert _fired_by_tool(mock_hass.bus.async_fire) == []
+
+    def test_every_core_event_is_covered_below(self):
+        assert CORE_EVENT_TYPES == set(_CORE_EVENTS)
+
+    @pytest.mark.parametrize("event_type", _CORE_EVENTS)
+    async def test_post_tools_call_fire_event_refuses_core_events(
+        self, view, mock_hass, event_type
+    ):
+        """An event Home Assistant fires itself is refused and audited as an error."""
+        result = await self._fire(view, mock_hass, event_type)
+
+        assert result["isError"] is True
+        text = result["content"][0]["text"]
+        assert f"'{event_type}' is not allowed" in text
+        assert "Home Assistant fires itself" in text
+        assert _fired_by_tool(mock_hass.bus.async_fire) == []
+        (audit,) = [
+            c for c in mock_hass.bus.async_fire.call_args_list if c.args[0] == EVENT_TOOL_CALLED
+        ]
+        assert audit.args[1]["tool"] == "fire_event"
+        assert audit.args[1]["outcome"] == "error"
+
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            "custom_event",
+            "zha_event",
+            "mobile_app_notification_action",
+            "ios.action_fired",
+            "tag_scanned",
+            "device_tracker_new_device",
+            "user_added",
+            "lovelace_updated",
+            # The bus matches event types exactly, so these reach no core listener.
+            "User_Removed",
+            "STATE_CHANGED",
+        ],
+    )
+    async def test_post_tools_call_fire_event_allows_other_events(
+        self, view, mock_hass, event_type
+    ):
+        result = await self._fire(view, mock_hass, event_type)
+
+        assert "isError" not in result
+        assert _fired_by_tool(mock_hass.bus.async_fire) == [call(event_type, {}, context=ANY)]
 
     async def test_post_tools_call_fire_event_cannot_forge_audit_event(self, view, mock_hass):
         """fire_event refuses the integration's own event namespace."""

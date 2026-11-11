@@ -80,6 +80,19 @@ When you update, a connection made before keeps what it could do, which is Admin
 - **A system action, or one Home Assistant reserves for administrators,** without Diagnostics at Full comes back as a failed `call_service` with the same kind of message.
 - **A token that grants nothing here**, because every area was set to None or the connection predates the choice, is answered with `401` and `error="invalid_token"`. The application renews its token; a connection from before gets Administer that way, and one that still has nothing goes back to the consent screen. This does not count as a failed login for Home Assistant's IP ban.
 
+## Events Home Assistant fires itself
+
+`fire_event` refuses the events Home Assistant fires for its own bookkeeping, because Home Assistant and its built-in integrations act on them as fact. A forged `user_removed` makes the Mobile App integration delete that user's phones and Person unlink them, a forged `entity_registry_updated` can take an entity out of Home Assistant or move its history to another entity, and a forged `homeassistant_stop` disconnects integrations while Home Assistant keeps running. The refused events are:
+
+- `homeassistant_start`, `homeassistant_started`, `homeassistant_stop`, `homeassistant_final_write` and `homeassistant_close`
+- `core_config_updated`, `component_loaded`, `call_service`, `service_registered`, `service_removed`, `state_changed` and `state_reported`
+- `user_removed`
+- `entity_registry_updated`, `device_registry_updated`, `area_registry_updated`, `floor_registry_updated`, `label_registry_updated` and `category_registry_updated`
+- `logbook_entry`, `automation_triggered` and `script_started`, which write a logbook entry saying something happened or ran, with any name and cause
+- `labs_updated`, which turns a preview feature on or off
+
+The tool also refuses this integration's own `mcp_server_http_transport_` events, so a call cannot forge the audit event. This holds for every caller, administrators included, which makes the tool stricter than Home Assistant's own API on purpose. Every other event fires, your own and those integrations fire for devices, such as `zha_event`, `tag_scanned` or `mobile_app_notification_action`. An automation that triggers on one of those can therefore be set off by anyone who may fire events, so keep that in mind before giving an application Diagnostics at Full.
+
 ## Who made a change
 
 `call_service`, `fire_event` and `restart_ha` call the action or fire the event as the user who called the tool, the way Home Assistant's own app does. Home Assistant records that user as the one behind the change, so the logbook can say who it was, and an automation can read the user ID from the new state's context (`trigger.to_state.context.user_id`).
